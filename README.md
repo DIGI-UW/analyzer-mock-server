@@ -1,5 +1,7 @@
 # ASTM LIS2-A2 Mock Server
 
+> **For AI Agents:** See [AGENTS.md](AGENTS.md) for context and instructions.
+
 A simple mock server that simulates an ASTM-compatible laboratory analyzer for
 testing the OpenELIS analyzer field mapping feature.
 

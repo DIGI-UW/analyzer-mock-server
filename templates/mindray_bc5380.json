@@ -1,0 +1,23 @@
+{
+  "analyzer": {
+    "name": "Mindray BC-5380",
+    "model": "BC-5380",
+    "manufacturer": "Mindray"
+  },
+  "protocol": {
+    "type": "HL7",
+    "version": "2.5",
+    "transport": "TCP"
+  },
+  "identification": {
+    "msh_sender": "MINDRAY",
+    "ip_pattern": "192.168.1.*"
+  },
+  "fields": [
+    { "name": "WBC", "code": "6690-2", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.5-11.0" },
+    { "name": "RBC", "code": "789-8", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.5-5.5" },
+    { "name": "HGB", "code": "718-7", "type": "NUMERIC", "unit": "g/dL", "normalRange": "13.5-17.5" },
+    { "name": "HCT", "code": "4544-3", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
+    { "name": "PLT", "code": "777-3", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" }
+  ]
+}

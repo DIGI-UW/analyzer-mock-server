@@ -1,0 +1,28 @@
+{
+  "analyzer": {
+    "name": "Stago STart 4",
+    "model": "STart 4",
+    "manufacturer": "Stago"
+  },
+  "protocol": {
+    "type": "ASTM",
+    "version": "LIS2-A2",
+    "transport": "SERIAL"
+  },
+  "identification": {
+    "astm_header": "STAGO",
+    "msh_sender": "STAGO"
+  },
+  "serial_config": {
+    "baud_rate": 9600,
+    "data_bits": 8,
+    "parity": "NONE",
+    "stop_bits": 1
+  },
+  "fields": [
+    { "name": "PT", "code": "PT", "type": "NUMERIC", "unit": "s", "normalRange": "9.5-13.5" },
+    { "name": "INR", "code": "INR", "type": "NUMERIC", "unit": "", "normalRange": "0.9-1.2" },
+    { "name": "APTT", "code": "APTT", "type": "NUMERIC", "unit": "s", "normalRange": "25-35" },
+    { "name": "Fibrinogen", "code": "FIB", "type": "NUMERIC", "unit": "g/L", "normalRange": "2.0-4.0" }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "analyzer": {
+    "name": "Mindray BA-88A",
+    "model": "BA-88A",
+    "manufacturer": "Mindray"
+  },
+  "protocol": {
+    "type": "ASTM",
+    "version": "LIS2-A2",
+    "transport": "SERIAL"
+  },
+  "identification": {
+    "astm_header": "MINDRAY"
+  },
+  "serial_config": {
+    "baud_rate": 9600,
+    "data_bits": 8,
+    "parity": "NONE",
+    "stop_bits": 1
+  },
+  "fields": [
+    { "name": "WBC", "code": "WBC", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.5-11.0" },
+    { "name": "RBC", "code": "RBC", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.5-5.5" },
+    { "name": "HGB", "code": "HGB", "type": "NUMERIC", "unit": "g/dL", "normalRange": "13.5-17.5" },
+    { "name": "HCT", "code": "HCT", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
+    { "name": "PLT", "code": "PLT", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" }
+  ]
+}

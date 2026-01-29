@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openelis-global.org/astm-mock-server/template-schema",
   "title": "Analyzer Message Template",
-  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Reference: specs/011-madagascar-analyzer-integration/research.md",
+  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports deterministic seed values for reproducible testing. Reference: specs/011-madagascar-analyzer-integration/research.md",
   "type": "object",
   "required": ["analyzer", "protocol", "identification", "fields"],
   "properties": {
@@ -10,9 +11,23 @@
       "description": "Analyzer identification metadata",
       "required": ["name", "model", "manufacturer"],
       "properties": {
-        "name": { "type": "string", "description": "Display name" },
-        "model": { "type": "string", "description": "Model number" },
-        "manufacturer": { "type": "string" }
+        "name": {
+          "type": "string",
+          "description": "Full analyzer name as registered in OpenELIS"
+        },
+        "model": {
+          "type": "string",
+          "description": "Analyzer model number"
+        },
+        "manufacturer": {
+          "type": "string",
+          "description": "Analyzer manufacturer"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["HEMATOLOGY", "CHEMISTRY", "IMMUNOLOGY", "MICROBIOLOGY", "MOLECULAR", "COAGULATION"],
+          "description": "Analyzer category for classification"
+        }
       }
     },
     "protocol": {
@@ -20,34 +35,95 @@
       "description": "Communication protocol configuration",
       "required": ["type", "version", "transport"],
       "properties": {
-        "type": { "enum": ["ASTM", "HL7", "RS232", "FILE"] },
-        "version": { "type": "string" },
-        "transport": { "enum": ["TCP", "HTTP", "SERIAL", "FILE"] }
+        "type": {
+          "type": "string",
+          "enum": ["ASTM", "HL7", "RS232", "FILE"],
+          "description": "Protocol type"
+        },
+        "version": {
+          "type": "string",
+          "description": "Protocol version (e.g., 'LIS2-A2' for ASTM)"
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["TCP", "HTTP", "SERIAL", "FILE"],
+          "description": "Transport mechanism"
+        }
       }
     },
     "identification": {
       "type": "object",
-      "description": "How OpenELIS identifies this analyzer",
+      "description": "Protocol-specific identification strings and patterns",
       "properties": {
-        "msh_sender": { "type": "string", "description": "HL7 MSH-3 field" },
-        "astm_header": { "type": "string", "description": "ASTM H-segment pattern" },
-        "ip_pattern": { "type": "string", "description": "IP address/range" },
-        "file_pattern": { "type": "string", "description": "Glob pattern for files" }
+        "astm_header": {
+          "type": "string",
+          "description": "ASTM H-segment sender identification (field 5)"
+        },
+        "msh_sender": {
+          "type": "string",
+          "description": "HL7 MSH-3 field"
+        },
+        "hl7_sending_app": {
+          "type": "string",
+          "description": "HL7 MSH-3 sending application"
+        },
+        "hl7_sending_facility": {
+          "type": "string",
+          "description": "HL7 MSH-4 sending facility"
+        },
+        "ip_pattern": {
+          "type": "string",
+          "description": "IP address/range"
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "Glob pattern for files"
+        }
       }
     },
     "fields": {
       "type": "array",
-      "description": "Test fields supported by this analyzer",
+      "description": "Test/result field definitions",
+      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "code", "type"],
+        "required": ["code", "name", "unit"],
         "properties": {
-          "name": { "type": "string" },
-          "code": { "type": "string", "description": "LOINC or analyzer code" },
-          "type": { "enum": ["NUMERIC", "QUALITATIVE", "TEXT"] },
-          "unit": { "type": ["string", "null"] },
-          "normalRange": { "type": "string" },
-          "possibleValues": { "type": "array", "items": { "type": "string" } }
+          "code": {
+            "type": "string",
+            "description": "Analyzer test code (e.g., 'WBC', 'HGB')"
+          },
+          "name": {
+            "type": "string",
+            "description": "Full test name"
+          },
+          "loinc": {
+            "type": "string",
+            "description": "LOINC code (optional for tests without standard LOINC)"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["NUMERIC", "QUALITATIVE", "TEXT"],
+            "default": "NUMERIC",
+            "description": "Result type for value generation"
+          },
+          "unit": {
+            "type": "string",
+            "description": "Unit of measure (e.g., '10^3/uL', 'g/dL')"
+          },
+          "normalRange": {
+            "type": "string",
+            "description": "Normal reference range (e.g., '4.0-10.0')"
+          },
+          "seedValue": {
+            "type": "number",
+            "description": "Deterministic value for reproducible testing"
+          },
+          "possibleValues": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Allowed values for QUALITATIVE type"
+          }
         }
       }
     },
@@ -69,6 +145,44 @@
         "delimiter": { "type": "string", "default": "," },
         "has_header": { "type": "boolean", "default": true },
         "column_mapping": { "type": "object" }
+      }
+    },
+    "testPatient": {
+      "type": "object",
+      "description": "Test patient demographics for deterministic mode",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Patient ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Patient name in ASTM format (Last^First^Middle)"
+        },
+        "sex": {
+          "type": "string",
+          "enum": ["M", "F", "U"],
+          "description": "Patient sex"
+        },
+        "dob": {
+          "type": "string",
+          "pattern": "^[0-9]{8}$",
+          "description": "Date of birth (YYYYMMDD)"
+        }
+      }
+    },
+    "testSample": {
+      "type": "object",
+      "description": "Test sample defaults for deterministic mode",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Sample/Accession ID"
+        },
+        "type": {
+          "type": "string",
+          "description": "Sample type (e.g., 'CBC^Complete Blood Count')"
+        }
       }
     }
   }

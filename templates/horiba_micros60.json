@@ -1,8 +1,9 @@
 {
   "analyzer": {
-    "name": "Horiba Micros 60",
+    "name": "Horiba ABX Micros 60",
     "model": "Micros 60",
-    "manufacturer": "Horiba ABX"
+    "manufacturer": "Horiba ABX",
+    "category": "HEMATOLOGY"
   },
   "protocol": {
     "type": "ASTM",
@@ -10,7 +11,7 @@
     "transport": "SERIAL"
   },
   "identification": {
-    "astm_header": "MICROS"
+    "astm_header": "ABX^MICROS60^V1.5"
   },
   "serial_config": {
     "baud_rate": 9600,
@@ -19,10 +20,159 @@
     "stop_bits": 1
   },
   "fields": [
-    { "name": "WBC", "code": "WBC", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.0-10.0" },
-    { "name": "RBC", "code": "RBC", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.0-5.5" },
-    { "name": "HGB", "code": "HGB", "type": "NUMERIC", "unit": "g/dL", "normalRange": "12.0-17.5" },
-    { "name": "HCT", "code": "HCT", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
-    { "name": "PLT", "code": "PLT", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" }
-  ]
+    {
+      "code": "WBC",
+      "name": "White Blood Cells",
+      "loinc": "6690-2",
+      "unit": "10^3/uL",
+      "normalRange": "4.0-10.0",
+      "seedValue": 6.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "RBC",
+      "name": "Red Blood Cells",
+      "loinc": "789-8",
+      "unit": "10^6/uL",
+      "normalRange": "4.0-5.5",
+      "seedValue": 4.35,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HGB",
+      "name": "Hemoglobin",
+      "loinc": "718-7",
+      "unit": "g/dL",
+      "normalRange": "12.0-17.5",
+      "seedValue": 12.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HCT",
+      "name": "Hematocrit",
+      "loinc": "4544-3",
+      "unit": "%",
+      "normalRange": "36-54",
+      "seedValue": 38.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCV",
+      "name": "Mean Corpuscular Volume",
+      "loinc": "787-2",
+      "unit": "fL",
+      "normalRange": "80-100",
+      "seedValue": 88.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCH",
+      "name": "Mean Corpuscular Hemoglobin",
+      "loinc": "785-6",
+      "unit": "pg",
+      "normalRange": "27-33",
+      "seedValue": 29.4,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCHC",
+      "name": "Mean Corpuscular Hemoglobin Concentration",
+      "loinc": "786-4",
+      "unit": "g/dL",
+      "normalRange": "32-36",
+      "seedValue": 33.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "PLT",
+      "name": "Platelets",
+      "loinc": "777-3",
+      "unit": "10^3/uL",
+      "normalRange": "150-400",
+      "seedValue": 198,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "RDW",
+      "name": "Red Cell Distribution Width",
+      "loinc": "788-0",
+      "unit": "%",
+      "normalRange": "11.5-14.5",
+      "seedValue": 12.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MPV",
+      "name": "Mean Platelet Volume",
+      "loinc": "32623-1",
+      "unit": "fL",
+      "normalRange": "7.5-11.5",
+      "seedValue": 8.9,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "LYM%",
+      "name": "Lymphocytes Percent",
+      "loinc": "736-9",
+      "unit": "%",
+      "normalRange": "20-40",
+      "seedValue": 35.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "LYM#",
+      "name": "Lymphocytes Absolute",
+      "loinc": "731-0",
+      "unit": "10^3/uL",
+      "normalRange": "1.0-4.0",
+      "seedValue": 2.18,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MXD%",
+      "name": "Mixed Cells Percent",
+      "loinc": "",
+      "unit": "%",
+      "normalRange": "5-15",
+      "seedValue": 8.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MXD#",
+      "name": "Mixed Cells Absolute",
+      "loinc": "",
+      "unit": "10^3/uL",
+      "normalRange": "0.2-1.5",
+      "seedValue": 0.53,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "NEU%",
+      "name": "Neutrophils Percent",
+      "loinc": "770-8",
+      "unit": "%",
+      "normalRange": "40-70",
+      "seedValue": 56.3,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "NEU#",
+      "name": "Neutrophils Absolute",
+      "loinc": "751-8",
+      "unit": "10^3/uL",
+      "normalRange": "2.0-7.0",
+      "seedValue": 3.49,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT-2026-002",
+    "name": "Rabe^Marie^B",
+    "sex": "F",
+    "dob": "19900620"
+  },
+  "testSample": {
+    "id": "SAMPLE-2026-0002",
+    "type": "CBC^Complete Blood Count"
+  }
 }

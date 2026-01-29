@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openelis-global.org/astm-mock-server/template-schema",
+  "title": "Analyzer Template Schema",
+  "description": "JSON schema for defining ASTM mock server analyzer templates with field definitions and deterministic seed values",
+  "type": "object",
+  "required": ["analyzer", "protocol", "identification", "fields"],
+  "properties": {
+    "analyzer": {
+      "type": "object",
+      "description": "Analyzer identification metadata",
+      "required": ["name", "manufacturer"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full analyzer name as registered in OpenELIS"
+        },
+        "model": {
+          "type": "string",
+          "description": "Analyzer model number"
+        },
+        "manufacturer": {
+          "type": "string",
+          "description": "Analyzer manufacturer"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["HEMATOLOGY", "CHEMISTRY", "IMMUNOLOGY", "MICROBIOLOGY", "MOLECULAR", "COAGULATION"],
+          "description": "Analyzer category for classification"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "description": "Communication protocol details",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ASTM", "HL7", "RS232", "FILE"],
+          "description": "Protocol type"
+        },
+        "version": {
+          "type": "string",
+          "description": "Protocol version (e.g., 'LIS2-A2' for ASTM)"
+        }
+      }
+    },
+    "identification": {
+      "type": "object",
+      "description": "Protocol-specific identification strings",
+      "properties": {
+        "astm_header": {
+          "type": "string",
+          "description": "ASTM H-segment sender identification (field 5)"
+        },
+        "hl7_sending_app": {
+          "type": "string",
+          "description": "HL7 MSH-3 sending application"
+        },
+        "hl7_sending_facility": {
+          "type": "string",
+          "description": "HL7 MSH-4 sending facility"
+        }
+      }
+    },
+    "fields": {
+      "type": "array",
+      "description": "Test/result field definitions",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "unit"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Analyzer test code (e.g., 'WBC', 'HGB')"
+          },
+          "name": {
+            "type": "string",
+            "description": "Full test name"
+          },
+          "loinc": {
+            "type": "string",
+            "description": "LOINC code (optional for tests without standard LOINC)"
+          },
+          "unit": {
+            "type": "string",
+            "description": "Unit of measure (e.g., '10^3/uL', 'g/dL')"
+          },
+          "normalRange": {
+            "type": "string",
+            "description": "Normal reference range (e.g., '4.0-10.0')"
+          },
+          "seedValue": {
+            "type": "number",
+            "description": "Deterministic value for reproducible testing"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["NUMERIC", "QUALITATIVE", "TEXT"],
+            "default": "NUMERIC",
+            "description": "Result type for value generation"
+          }
+        }
+      }
+    },
+    "testPatient": {
+      "type": "object",
+      "description": "Test patient demographics for deterministic mode",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Patient ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Patient name in ASTM format (Last^First^Middle)"
+        },
+        "sex": {
+          "type": "string",
+          "enum": ["M", "F", "U"],
+          "description": "Patient sex"
+        },
+        "dob": {
+          "type": "string",
+          "pattern": "^[0-9]{8}$",
+          "description": "Date of birth (YYYYMMDD)"
+        }
+      }
+    },
+    "testSample": {
+      "type": "object",
+      "description": "Test sample defaults for deterministic mode",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Sample/Accession ID"
+        },
+        "type": {
+          "type": "string",
+          "description": "Sample type (e.g., 'CBC^Complete Blood Count')"
+        }
+      }
+    }
+  }
+}

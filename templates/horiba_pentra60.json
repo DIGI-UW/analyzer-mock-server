@@ -1,0 +1,207 @@
+{
+  "analyzer": {
+    "name": "Horiba ABX Pentra 60",
+    "model": "Pentra 60 C+",
+    "manufacturer": "Horiba ABX",
+    "category": "HEMATOLOGY"
+  },
+  "protocol": {
+    "type": "ASTM",
+    "version": "LIS2-A2"
+  },
+  "identification": {
+    "astm_header": "ABX^PENTRA60^V2.0"
+  },
+  "fields": [
+    {
+      "code": "WBC",
+      "name": "White Blood Cells",
+      "loinc": "6690-2",
+      "unit": "10^3/uL",
+      "normalRange": "4.0-10.0",
+      "seedValue": 5.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "RBC",
+      "name": "Red Blood Cells",
+      "loinc": "789-8",
+      "unit": "10^6/uL",
+      "normalRange": "4.0-5.5",
+      "seedValue": 4.92,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HGB",
+      "name": "Hemoglobin",
+      "loinc": "718-7",
+      "unit": "g/dL",
+      "normalRange": "12.0-17.5",
+      "seedValue": 14.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HCT",
+      "name": "Hematocrit",
+      "loinc": "4544-3",
+      "unit": "%",
+      "normalRange": "36-54",
+      "seedValue": 43.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCV",
+      "name": "Mean Corpuscular Volume",
+      "loinc": "787-2",
+      "unit": "fL",
+      "normalRange": "80-100",
+      "seedValue": 87.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCH",
+      "name": "Mean Corpuscular Hemoglobin",
+      "loinc": "785-6",
+      "unit": "pg",
+      "normalRange": "27-33",
+      "seedValue": 30.1,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MCHC",
+      "name": "Mean Corpuscular Hemoglobin Concentration",
+      "loinc": "786-4",
+      "unit": "g/dL",
+      "normalRange": "32-36",
+      "seedValue": 34.3,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "PLT",
+      "name": "Platelets",
+      "loinc": "777-3",
+      "unit": "10^3/uL",
+      "normalRange": "150-400",
+      "seedValue": 245,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "RDW",
+      "name": "Red Cell Distribution Width",
+      "loinc": "788-0",
+      "unit": "%",
+      "normalRange": "11.5-14.5",
+      "seedValue": 13.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MPV",
+      "name": "Mean Platelet Volume",
+      "loinc": "32623-1",
+      "unit": "fL",
+      "normalRange": "7.5-11.5",
+      "seedValue": 9.1,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "LYM%",
+      "name": "Lymphocytes Percent",
+      "loinc": "736-9",
+      "unit": "%",
+      "normalRange": "20-40",
+      "seedValue": 32.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "LYM#",
+      "name": "Lymphocytes Absolute",
+      "loinc": "731-0",
+      "unit": "10^3/uL",
+      "normalRange": "1.0-4.0",
+      "seedValue": 1.89,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MON%",
+      "name": "Monocytes Percent",
+      "loinc": "5905-5",
+      "unit": "%",
+      "normalRange": "2-8",
+      "seedValue": 6.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "MON#",
+      "name": "Monocytes Absolute",
+      "loinc": "742-7",
+      "unit": "10^3/uL",
+      "normalRange": "0.2-0.8",
+      "seedValue": 0.36,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "NEU%",
+      "name": "Neutrophils Percent",
+      "loinc": "770-8",
+      "unit": "%",
+      "normalRange": "40-70",
+      "seedValue": 58.1,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "NEU#",
+      "name": "Neutrophils Absolute",
+      "loinc": "751-8",
+      "unit": "10^3/uL",
+      "normalRange": "2.0-7.0",
+      "seedValue": 3.37,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "EOS%",
+      "name": "Eosinophils Percent",
+      "loinc": "713-8",
+      "unit": "%",
+      "normalRange": "1-4",
+      "seedValue": 2.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "EOS#",
+      "name": "Eosinophils Absolute",
+      "loinc": "711-2",
+      "unit": "10^3/uL",
+      "normalRange": "0.05-0.5",
+      "seedValue": 0.15,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "BAS%",
+      "name": "Basophils Percent",
+      "loinc": "706-2",
+      "unit": "%",
+      "normalRange": "0-1",
+      "seedValue": 0.7,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "BAS#",
+      "name": "Basophils Absolute",
+      "loinc": "704-7",
+      "unit": "10^3/uL",
+      "normalRange": "0-0.1",
+      "seedValue": 0.04,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT-2026-001",
+    "name": "Rakoto^Jean^A",
+    "sex": "M",
+    "dob": "19850315"
+  },
+  "testSample": {
+    "id": "SAMPLE-2026-0001",
+    "type": "CBC^Complete Blood Count"
+  }
+}

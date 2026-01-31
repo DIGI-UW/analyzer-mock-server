@@ -1,0 +1,29 @@
+{
+  "analyzer": {
+    "name": "QuantStudio 7 Flex",
+    "model": "7 Flex",
+    "manufacturer": "Thermo Fisher"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "QS7_*.csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": "\t",
+    "has_header": true,
+    "column_mapping": {
+      "sample_id": "Sample Name",
+      "test_code": "Target",
+      "result": "Ct"
+    }
+  },
+  "fields": [
+    { "name": "SARS-CoV-2", "code": "SARS2", "type": "NUMERIC", "unit": "Ct" },
+    { "name": "Internal Control", "code": "IC", "type": "NUMERIC", "unit": "Ct" }
+  ]
+}

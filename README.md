@@ -293,10 +293,94 @@ tools/astm-mock-server/
 └── ACCESS.md                    # Access guide for OpenELIS integration
 ```
 
+## Multi-Protocol Simulator (M4)
+
+**New in M4**: The simulator now supports HL7 v2.x, RS232 serial, and file-based protocols in addition to ASTM.
+
+### HL7 v2.x Simulation
+
+Generate HL7 ORU^R01 result messages via HTTP API:
+
+```bash
+# Start simulate API server
+python server.py --simulate-api-port 8081
+
+# Generate HL7 message (GET)
+curl "http://localhost:8081/simulate/hl7/mindray_bc5380?patientId=P001&sampleId=S001"
+
+# Generate HL7 message (POST with JSON)
+curl -X POST http://localhost:8081/simulate/hl7/sysmex_xn \
+  -H "Content-Type: application/json" \
+  -d '{"patientId":"P001","sampleId":"S001","tests":["WBC","RBC"]}'
+```
+
+**Available HL7 Templates**: `mindray_bc5380`, `sysmex_xn`, `abbott_architect_hl7`, `mindray_bs360e`, `genexpert`
+
+### RS232 Serial Simulation
+
+Send ASTM messages over virtual serial ports (via socat):
+
+```bash
+# Create virtual serial pair
+socat -d -d pty,raw,echo=0 pty,raw,echo=0
+# Output: /dev/pts/X and /dev/pts/Y
+
+# Send ASTM over serial (use one end)
+python server.py --serial-port /dev/pts/X --serial-analyzer horiba_pentra60
+```
+
+**Available Serial Templates**: `horiba_pentra60`, `horiba_micros60`, `mindray_ba88a`, `stago_start4`
+
+### File-Based Generation
+
+Generate CSV/TXT files for file import testing:
+
+```bash
+# Generate QuantStudio CSV
+python server.py --generate-files /tmp/import --generate-files-analyzer quantstudio7
+
+# Generate FluoroCycler CSV
+python server.py --generate-files /tmp/import --generate-files-analyzer hain_fluorocycler
+```
+
+**Available File Templates**: `quantstudio7`, `hain_fluorocycler`
+
+### Protocol Handlers
+
+The simulator uses a protocol abstraction layer:
+
+- **ASTMHandler**: ASTM LIS2-A2 message generation (backward compatible)
+- **HL7Handler**: HL7 v2.x ORU^R01 generation
+- **SerialHandler**: RS232 transport (uses ASTMHandler for message generation)
+- **FileHandler**: CSV/TXT file generation
+
+### Analyzer Templates
+
+Templates are JSON files in `templates/` following `templates/schema.json`. Each template defines:
+- Analyzer metadata (name, model, manufacturer)
+- Protocol configuration (type, version, transport)
+- Identification (MSH sender, ASTM header, file pattern)
+- Test fields (name, code, type, unit, normal range)
+
+**Template Inventory** (12 analyzers):
+- HL7: `mindray_bc5380`, `sysmex_xn`, `abbott_architect_hl7`, `mindray_bs360e`, `genexpert`
+- RS232: `horiba_pentra60`, `horiba_micros60`, `mindray_ba88a`, `stago_start4`
+- File: `quantstudio7`, `hain_fluorocycler`
+
+### Testing
+
+Run protocol handler unit tests:
+
+```bash
+python test_protocols.py
+```
+
 ## References
 
 - [specs/004-astm-analyzer-mapping/research.md](../../specs/004-astm-analyzer-mapping/research.md) -
   ASTM protocol details
 - [specs/004-astm-analyzer-mapping/spec.md](../../specs/004-astm-analyzer-mapping/spec.md) -
   Feature specification
+- [specs/011-madagascar-analyzer-integration/plan.md](../../specs/011-madagascar-analyzer-integration/plan.md) -
+  M4 multi-protocol simulator design
 - ASTM E1381 / LIS2-A2 Standard

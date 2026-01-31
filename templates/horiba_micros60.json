@@ -1,0 +1,28 @@
+{
+  "analyzer": {
+    "name": "Horiba Micros 60",
+    "model": "Micros 60",
+    "manufacturer": "Horiba ABX"
+  },
+  "protocol": {
+    "type": "ASTM",
+    "version": "LIS2-A2",
+    "transport": "SERIAL"
+  },
+  "identification": {
+    "astm_header": "MICROS"
+  },
+  "serial_config": {
+    "baud_rate": 9600,
+    "data_bits": 8,
+    "parity": "NONE",
+    "stop_bits": 1
+  },
+  "fields": [
+    { "name": "WBC", "code": "WBC", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.0-10.0" },
+    { "name": "RBC", "code": "RBC", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.0-5.5" },
+    { "name": "HGB", "code": "HGB", "type": "NUMERIC", "unit": "g/dL", "normalRange": "12.0-17.5" },
+    { "name": "HCT", "code": "HCT", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
+    { "name": "PLT", "code": "PLT", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" }
+  ]
+}

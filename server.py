@@ -37,10 +37,13 @@ import argparse
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, List, Any
-from datetime import datetime
-import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+from protocols.astm_handler import generate_astm_message
+from protocols.hl7_handler import HL7Handler
+from protocols.serial_handler import SerialHandler, send_astm_over_serial
+from protocols.file_handler import FileHandler
 
 # Configure logging
 logging.basicConfig(
@@ -645,139 +648,6 @@ class ASTMMockServer:
         logger.info("ASTM Mock Server stopped")
 
 
-def generate_astm_message(analyzer_type: str, fields_config: Dict, 
-                          patient_id: str = None, sample_id: str = None,
-                          patient_name: str = None, patient_dob: str = None,
-                          patient_sex: str = None) -> str:
-    """
-    Generate a complete ASTM LIS2-A2 message with H, P, O, R, L segments.
-    
-    Args:
-        analyzer_type: Type of analyzer (HEMATOLOGY, CHEMISTRY, etc.)
-        fields_config: Field configuration dictionary
-        patient_id: Patient ID (default: auto-generated)
-        sample_id: Sample/Order ID (default: auto-generated)
-        patient_name: Patient name in format "Last^First^Middle" (default: auto-generated)
-        patient_dob: Patient date of birth YYYYMMDD (default: auto-generated)
-        patient_sex: Patient sex M/F (default: random)
-    
-    Returns:
-        Complete ASTM message as string (newline-delimited segments)
-    """
-    # Get fields for this analyzer type
-    fields = fields_config.get(analyzer_type, [])
-    if not fields:
-        # Fallback to first available type
-        if fields_config:
-            analyzer_type = list(fields_config.keys())[0]
-            fields = fields_config[analyzer_type]
-            logger.warning(f"No fields for analyzer type, using {analyzer_type}")
-        else:
-            logger.error("No fields configuration available")
-            return ""
-    
-    # Generate timestamps
-    now = datetime.now()
-    timestamp = now.strftime("%Y%m%d%H%M%S")
-    order_timestamp = (now.replace(second=0, microsecond=0)).strftime("%Y%m%d%H%M%S")
-    result_timestamp = now.strftime("%Y%m%d%H%M%S")
-    
-    # Generate patient/sample IDs if not provided
-    if not patient_id:
-        patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
-    if not sample_id:
-        sample_id = f"SAMPLE-{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
-    if not patient_name:
-        first_names = ["John", "Mary", "James", "Sarah", "Robert", "Emily"]
-        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones"]
-        patient_name = f"{random.choice(last_names)}^{random.choice(first_names)}"
-    if not patient_dob:
-        # Generate random DOB between 1950 and 2000
-        year = random.randint(1950, 2000)
-        month = random.randint(1, 12)
-        day = random.randint(1, 28)
-        patient_dob = f"{year}{month:02d}{day:02d}"
-    if not patient_sex:
-        patient_sex = random.choice(["M", "F"])
-    
-    # Determine analyzer name from type
-    analyzer_names = {
-        "HEMATOLOGY": "Sysmex^XN-1000^V1.0",
-        "CHEMISTRY": "Beckman^AU5800^V2.1",
-        "IMMUNOLOGY": "Roche^Cobas^V1.5",
-        "MICROBIOLOGY": "BD^Phoenix^V2.0"
-    }
-    analyzer_name = analyzer_names.get(analyzer_type, f"MockAnalyzer^{analyzer_type}^1.0")
-    
-    # Build message segments
-    segments = []
-    
-    # H - Header Record
-    header = f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}"
-    segments.append(header)
-    
-    # P - Patient Record
-    patient = f"P|1||{patient_id}|{patient_name}||{patient_sex}|{patient_dob}"
-    segments.append(patient)
-    
-    # O - Order Record
-    panel_name = "CBC" if analyzer_type == "HEMATOLOGY" else "CHEM" if analyzer_type == "CHEMISTRY" else analyzer_type
-    order = f"O|1|{sample_id}^LAB|{panel_name}^{panel_name} Panel||{order_timestamp}"
-    segments.append(order)
-    
-    # R - Result Records
-    result_seq = 1
-    for field in fields:
-        field_name = field.get('name', 'Unknown')
-        display_name = field.get('displayName', field_name)
-        field_type = field.get('type', 'NUMERIC')
-        unit = field.get('unit', '')
-        normal_range = field.get('normalRange', '')
-        astm_ref = field.get('astmRef', f'R|{result_seq}|^^^{field_name}')
-        
-        # Generate realistic test value based on type
-        if field_type == 'NUMERIC':
-            # Generate value within normal range if available
-            if normal_range:
-                # Parse range like "4.5-11.0" or "<200" or ">40"
-                try:
-                    if '-' in normal_range:
-                        low, high = map(float, normal_range.split('-'))
-                        value = round(random.uniform(low, high), 2)
-                    elif normal_range.startswith('<'):
-                        max_val = float(normal_range[1:])
-                        value = round(random.uniform(0, max_val * 0.9), 2)
-                    elif normal_range.startswith('>'):
-                        min_val = float(normal_range[1:])
-                        value = round(random.uniform(min_val * 1.1, min_val * 2), 2)
-                    else:
-                        value = round(random.uniform(1, 100), 2)
-                except:
-                    value = round(random.uniform(1, 100), 2)
-            else:
-                value = round(random.uniform(1, 100), 2)
-            
-            result = f"R|{result_seq}|{astm_ref}^{display_name}|{value}|{unit}|{normal_range}|N||F|{result_timestamp}"
-        elif field_type == 'QUALITATIVE':
-            possible_values = field.get('possibleValues', ['POSITIVE', 'NEGATIVE'])
-            value = random.choice(possible_values)
-            result = f"R|{result_seq}|{astm_ref}^{display_name}|{value}|||N||F|{result_timestamp}"
-        else:  # TEXT
-            value = f"Sample result for {display_name}"
-            result = f"R|{result_seq}|{astm_ref}^{display_name}|{value}|||N||F|{result_timestamp}"
-        
-        segments.append(result)
-        result_seq += 1
-    
-    # L - Terminator Record
-    terminator = "L|1|N"
-    segments.append(terminator)
-    
-    # Join segments with newlines (ASTM format)
-    message = '\n'.join(segments) + '\n'
-    return message
-
-
 class PushAPIHandler(BaseHTTPRequestHandler):
     """HTTP API handler for triggering pushes."""
     
@@ -904,6 +774,109 @@ class PushAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         """Override to use our logger instead of default."""
         logger.info(f"{self.address_string()} - {format % args}")
+
+
+def _load_template(analyzer: str) -> Optional[Dict]:
+    """Load analyzer template from templates/<analyzer>.json."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base, "templates", f"{analyzer}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Failed to load template %s: %s", path, e)
+        return None
+
+
+class SimulateAPIHandler(BaseHTTPRequestHandler):
+    """HTTP API for /simulate/hl7/{analyzer} (M4 CI/CD)."""
+
+    def do_GET(self):
+        if self.path == "/health" or self.path == "/":
+            self._send_json(200, {
+                "status": "ok",
+                "service": "Multi-Protocol Analyzer Simulator",
+                "endpoints": {
+                    "GET /health": "Health check",
+                    "GET /simulate/hl7/{analyzer}": "Generate HL7 ORU^R01 (query params: patientId, sampleId)",
+                    "POST /simulate/hl7/{analyzer}": "Generate HL7 ORU^R01 (JSON body: patientId, sampleId, tests)",
+                },
+            })
+            return
+        if self.path.startswith("/simulate/hl7/"):
+            analyzer = self.path.split("/simulate/hl7/")[-1].split("?")[0].strip("/")
+            if not analyzer:
+                self._send_json(400, {"status": "error", "message": "Missing analyzer"})
+                return
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            params = {
+                "patient_id": (qs.get("patientId") or qs.get("patient_id") or [None])[0],
+                "sample_id": (qs.get("sampleId") or qs.get("sample_id") or [None])[0],
+            }
+            self._handle_simulate_hl7(analyzer, params)
+            return
+        self.send_error(404, "Not Found")
+
+    def do_POST(self):
+        if self.path.startswith("/simulate/hl7/"):
+            analyzer = self.path.split("/simulate/hl7/")[-1].split("?")[0].strip("/")
+            if not analyzer:
+                self._send_json(400, {"status": "error", "message": "Missing analyzer"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            params = {}
+            if length > 0:
+                try:
+                    params = json.loads(self.rfile.read(length).decode("utf-8"))
+                except json.JSONDecodeError:
+                    pass
+            kwargs = {
+                "patient_id": params.get("patientId") or params.get("patient_id"),
+                "sample_id": params.get("sampleId") or params.get("sample_id"),
+                "tests": params.get("tests"),
+            }
+            self._handle_simulate_hl7(analyzer, kwargs)
+            return
+        self.send_error(404, "Not Found")
+
+    def _handle_simulate_hl7(self, analyzer: str, kwargs: Dict):
+        template = _load_template(analyzer)
+        if not template:
+            self._send_json(404, {"status": "error", "message": f"Template not found: {analyzer}"})
+            return
+        try:
+            msg = HL7Handler().generate(template, **{k: v for k, v in kwargs.items() if v is not None})
+            msg_id = "MSG-" + msg.split("ORU^R01|")[-1].split("|")[0] if "ORU^R01|" in msg else "MSG-UNK"
+            self._send_json(200, {"status": "sent", "messageId": msg_id, "message": msg})
+        except Exception as e:
+            logger.exception("HL7 simulate failed for %s", analyzer)
+            self._send_json(500, {"status": "error", "message": str(e)})
+
+    def _send_json(self, code: int, obj: Dict):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(obj, indent=2).encode("utf-8"))
+
+    def log_message(self, format, *args):
+        logger.info("%s - %s", self.address_string(), format % args)
+
+
+def start_simulate_api_server(port: int):
+    """Start HTTP API for /simulate/hl7/{analyzer} (CI/CD)."""
+    server = HTTPServer(("0.0.0.0", port), SimulateAPIHandler)
+    logger.info("Simulate API server started on port %s", port)
+    logger.info("  GET  /simulate/hl7/{analyzer} - Generate HL7 ORU^R01")
+    logger.info("  POST /simulate/hl7/{analyzer} - Generate HL7 ORU^R01 (JSON body)")
+    logger.info("  GET  /health - Health check")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Simulate API stopped")
+        server.shutdown()
 
 
 def start_push_api_server(api_port: int, openelis_url: str, fields_config: Dict):
@@ -1057,11 +1030,93 @@ def main():
         metavar='PORT',
         help='Start HTTP API server on specified port for triggering pushes (e.g., 8080)'
     )
+    parser.add_argument(
+        '--simulate-api-port',
+        type=int,
+        metavar='PORT',
+        help='M4: Start simulate API (GET/POST /simulate/hl7/{analyzer}) for CI/CD (e.g., 8081)'
+    )
+    parser.add_argument(
+        '--serial-port',
+        type=str,
+        metavar='PATH',
+        help='M4: Serial simulation mode: send ASTM over port (e.g. /dev/pts/X via socat)'
+    )
+    parser.add_argument(
+        '--serial-analyzer',
+        type=str,
+        default='horiba_pentra60',
+        help='M4: Template name for --serial-port (default: horiba_pentra60)'
+    )
+    parser.add_argument(
+        '--generate-files',
+        type=str,
+        metavar='DIR',
+        help='M4: File generation mode: write CSV to DIR (use with --generate-files-analyzer)'
+    )
+    parser.add_argument(
+        '--generate-files-analyzer',
+        type=str,
+        default='quantstudio7',
+        help='M4: Template for --generate-files (default: quantstudio7)'
+    )
     
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+    
+    # M4: File generation mode
+    if getattr(args, 'generate_files', None):
+        out_dir = args.generate_files
+        analyzer = getattr(args, 'generate_files_analyzer', None) or 'quantstudio7'
+        template = _load_template(analyzer)
+        if not template:
+            logger.error("Template not found: %s", analyzer)
+            return 1
+        fcfg = template.get("file_config") or {}
+        pat = (template.get("identification") or {}).get("file_pattern", "sim_%s.csv")
+        import uuid
+        fname = (pat % uuid.uuid4().hex[:8]) if "%" in pat else f"sim_{analyzer}_{uuid.uuid4().hex[:8]}.csv"
+        path = os.path.join(out_dir, fname)
+        ok = FileHandler().write_to_file(template, path, sample_count=1)
+        if ok:
+            print("Wrote %s" % ok)
+            return 0
+        return 1
+
+    # M4: Serial simulation mode
+    if getattr(args, 'serial_port', None):
+        port_path = args.serial_port
+        analyzer = getattr(args, 'serial_analyzer', None) or 'horiba_pentra60'
+        template = _load_template(analyzer)
+        if not template:
+            logger.error("Template not found: %s", analyzer)
+            return 1
+        cfg = template.get("serial_config") or {}
+        baud = int(cfg.get("baud_rate", 9600))
+        msg = SerialHandler().generate(template)
+        print("=" * 60)
+        print("  Multi-Protocol Simulator - Serial Mode")
+        print("=" * 60)
+        print("  Port: %s  Analyzer: %s  Baud: %s" % (port_path, analyzer, baud))
+        print("=" * 60)
+        ok = send_astm_over_serial(port_path, msg, baud=baud)
+        return 0 if ok else 1
+
+    # M4: Simulate API (HL7 /simulate/hl7/{analyzer}) for CI/CD
+    if getattr(args, 'simulate_api_port', None):
+        port = args.simulate_api_port
+        print("=" * 60)
+        print("  Multi-Protocol Simulator - HL7 Simulate API")
+        print("=" * 60)
+        print(f"  Port: {port}")
+        print("  GET  /simulate/hl7/{{analyzer}}  POST /simulate/hl7/{{analyzer}}")
+        print("  GET  /health")
+        print("=" * 60)
+        print()
+        start_simulate_api_server(port)
+        return 0
     
     # Push mode: Send messages to OpenELIS
     if args.push:

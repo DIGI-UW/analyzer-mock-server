@@ -1,0 +1,27 @@
+{
+  "analyzer": {
+    "name": "Sysmex XN Series",
+    "model": "XN-1000",
+    "manufacturer": "Sysmex"
+  },
+  "protocol": {
+    "type": "HL7",
+    "version": "2.5",
+    "transport": "TCP"
+  },
+  "identification": {
+    "msh_sender": "SYSMEX",
+    "ip_pattern": "192.168.1.*"
+  },
+  "fields": [
+    { "name": "WBC", "code": "6690-2", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.5-11.0" },
+    { "name": "RBC", "code": "789-8", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.5-5.5" },
+    { "name": "HGB", "code": "718-7", "type": "NUMERIC", "unit": "g/dL", "normalRange": "13.5-17.5" },
+    { "name": "HCT", "code": "4544-3", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
+    { "name": "PLT", "code": "777-3", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" },
+    { "name": "MCV", "code": "787-2", "type": "NUMERIC", "unit": "fL", "normalRange": "80-100" },
+    { "name": "MCH", "code": "785-6", "type": "NUMERIC", "unit": "pg", "normalRange": "27-33" },
+    { "name": "MCHC", "code": "786-4", "type": "NUMERIC", "unit": "g/dL", "normalRange": "32-36" },
+    { "name": "RDW", "code": "788-0", "type": "NUMERIC", "unit": "%", "normalRange": "11.5-14.5" }
+  ]
+}

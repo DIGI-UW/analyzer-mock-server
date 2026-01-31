@@ -1,0 +1,21 @@
+{
+  "analyzer": {
+    "name": "Cepheid GeneXpert",
+    "model": "GeneXpert",
+    "manufacturer": "Cepheid"
+  },
+  "protocol": {
+    "type": "HL7",
+    "version": "2.5",
+    "transport": "TCP"
+  },
+  "identification": {
+    "msh_sender": "GENEXPERT",
+    "ip_pattern": "192.168.1.*"
+  },
+  "fields": [
+    { "name": "MTB", "code": "MTB", "type": "QUALITATIVE", "possibleValues": ["Detected", "Not Detected", "Invalid"] },
+    { "name": "RIF", "code": "RIF", "type": "QUALITATIVE", "possibleValues": ["Resistant", "Sensitive", "Indeterminate"] },
+    { "name": "Ct", "code": "CT", "type": "NUMERIC", "unit": "Ct" }
+  ]
+}

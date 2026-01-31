@@ -1,0 +1,23 @@
+{
+  "analyzer": {
+    "name": "Abbott Architect",
+    "model": "Architect",
+    "manufacturer": "Abbott"
+  },
+  "protocol": {
+    "type": "HL7",
+    "version": "2.5",
+    "transport": "TCP"
+  },
+  "identification": {
+    "msh_sender": "ARCHITECT",
+    "ip_pattern": "192.168.1.*"
+  },
+  "fields": [
+    { "name": "HIV", "code": "HIV1+2", "type": "QUALITATIVE", "possibleValues": ["NON-REACTIVE", "REACTIVE", "NEGATIVE", "POSITIVE"] },
+    { "name": "HBsAg", "code": "HBSAG", "type": "QUALITATIVE", "possibleValues": ["NON-REACTIVE", "REACTIVE", "NEGATIVE", "POSITIVE"] },
+    { "name": "HCV", "code": "HCVAB", "type": "QUALITATIVE", "possibleValues": ["NON-REACTIVE", "REACTIVE", "NEGATIVE", "POSITIVE"] },
+    { "name": "Glucose", "code": "2345-7", "type": "NUMERIC", "unit": "mg/dL", "normalRange": "70-100" },
+    { "name": "Creatinine", "code": "2160-0", "type": "NUMERIC", "unit": "mg/dL", "normalRange": "0.6-1.2" }
+  ]
+}

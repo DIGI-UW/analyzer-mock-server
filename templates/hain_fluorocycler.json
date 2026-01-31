@@ -1,0 +1,29 @@
+{
+  "analyzer": {
+    "name": "Hain FluoroCycler XT",
+    "model": "FluoroCycler XT",
+    "manufacturer": "Hain Lifescience"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "fluorocycler_*.csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": ",",
+    "has_header": true,
+    "column_mapping": {
+      "sample_id": "Sample ID",
+      "test_code": "Assay",
+      "result": "Result"
+    }
+  },
+  "fields": [
+    { "name": "MTB", "code": "MTB", "type": "QUALITATIVE", "possibleValues": ["Detected", "Not Detected", "Invalid"] },
+    { "name": "RIF", "code": "RIF", "type": "QUALITATIVE", "possibleValues": ["Resistant", "Sensitive", "Indeterminate"] }
+  ]
+}

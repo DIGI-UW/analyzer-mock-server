@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Analyzer Message Template",
+  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Reference: specs/011-madagascar-analyzer-integration/research.md",
+  "type": "object",
+  "required": ["analyzer", "protocol", "identification", "fields"],
+  "properties": {
+    "analyzer": {
+      "type": "object",
+      "description": "Analyzer identification metadata",
+      "required": ["name", "model", "manufacturer"],
+      "properties": {
+        "name": { "type": "string", "description": "Display name" },
+        "model": { "type": "string", "description": "Model number" },
+        "manufacturer": { "type": "string" }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "description": "Communication protocol configuration",
+      "required": ["type", "version", "transport"],
+      "properties": {
+        "type": { "enum": ["ASTM", "HL7", "RS232", "FILE"] },
+        "version": { "type": "string" },
+        "transport": { "enum": ["TCP", "HTTP", "SERIAL", "FILE"] }
+      }
+    },
+    "identification": {
+      "type": "object",
+      "description": "How OpenELIS identifies this analyzer",
+      "properties": {
+        "msh_sender": { "type": "string", "description": "HL7 MSH-3 field" },
+        "astm_header": { "type": "string", "description": "ASTM H-segment pattern" },
+        "ip_pattern": { "type": "string", "description": "IP address/range" },
+        "file_pattern": { "type": "string", "description": "Glob pattern for files" }
+      }
+    },
+    "fields": {
+      "type": "array",
+      "description": "Test fields supported by this analyzer",
+      "items": {
+        "type": "object",
+        "required": ["name", "code", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "code": { "type": "string", "description": "LOINC or analyzer code" },
+          "type": { "enum": ["NUMERIC", "QUALITATIVE", "TEXT"] },
+          "unit": { "type": ["string", "null"] },
+          "normalRange": { "type": "string" },
+          "possibleValues": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "serial_config": {
+      "type": "object",
+      "description": "RS232 configuration (if protocol.transport=SERIAL)",
+      "properties": {
+        "baud_rate": { "type": "integer", "default": 9600 },
+        "data_bits": { "type": "integer", "default": 8 },
+        "parity": { "enum": ["NONE", "EVEN", "ODD"], "default": "NONE" },
+        "stop_bits": { "type": "number", "default": 1 }
+      }
+    },
+    "file_config": {
+      "type": "object",
+      "description": "File format configuration (if protocol.transport=FILE)",
+      "properties": {
+        "format": { "enum": ["CSV", "TSV", "TXT", "XLS"] },
+        "delimiter": { "type": "string", "default": "," },
+        "has_header": { "type": "boolean", "default": true },
+        "column_mapping": { "type": "object" }
+      }
+    }
+  }
+}

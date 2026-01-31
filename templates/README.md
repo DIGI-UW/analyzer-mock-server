@@ -16,6 +16,7 @@ Templates enable the mock server to generate protocol-specific messages with **e
 |----------|----------|--------|----------|
 | `horiba_pentra60.json` | Horiba ABX Pentra 60 | 20 (5-part differential) | ASTM LIS2-A2 |
 | `horiba_micros60.json` | Horiba ABX Micros 60 | 16 (3-part differential) | ASTM LIS2-A2 |
+| `stago_start4.json` | Stago STart 4 | 5 (coagulation panel) | ASTM LIS2-A2 |
 
 ## Template Structure
 

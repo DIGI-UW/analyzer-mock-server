@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://openelis-global.org/astm-mock-server/template-schema",
   "title": "Analyzer Message Template",
-  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports deterministic seed values for reproducible testing. Reference: specs/011-madagascar-analyzer-integration/research.md",
+  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports deterministic seed values for reproducible testing.",
   "type": "object",
-  "required": ["analyzer", "protocol", "identification", "fields"],
+  "required": ["analyzer", "protocol", "fields"],
   "properties": {
     "analyzer": {
       "type": "object",
@@ -33,7 +33,7 @@
     "protocol": {
       "type": "object",
       "description": "Communication protocol configuration",
-      "required": ["type", "version", "transport"],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string",
@@ -61,7 +61,7 @@
         },
         "msh_sender": {
           "type": "string",
-          "description": "HL7 MSH-3 field"
+          "description": "HL7 MSH-3 field (legacy, use hl7_sending_app)"
         },
         "hl7_sending_app": {
           "type": "string",
@@ -87,7 +87,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["code", "name", "unit"],
+        "required": ["code", "name", "type"],
         "properties": {
           "code": {
             "type": "string",
@@ -108,7 +108,7 @@
             "description": "Result type for value generation"
           },
           "unit": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "Unit of measure (e.g., '10^3/uL', 'g/dL')"
           },
           "normalRange": {
@@ -122,7 +122,7 @@
           "possibleValues": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Allowed values for QUALITATIVE type"
+            "description": "Allowed values for QUALITATIVE type (e.g., NEGATIVE, POSITIVE)"
           }
         }
       }

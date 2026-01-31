@@ -41,9 +41,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from protocols.astm_handler import generate_astm_message
-from protocols.hl7_handler import HL7Handler
+from protocols.hl7_handler import HL7Handler, generate_oru_r01
 from protocols.serial_handler import SerialHandler, send_astm_over_serial
 from protocols.file_handler import FileHandler
+
+# Optional: template loader for HL7 --hl7 push and /simulate/hl7 API (Abbott, etc.)
+try:
+    from template_loader import TemplateLoader
+    HAS_HL7_SIM = True
+except ImportError:
+    TemplateLoader = None
+    HAS_HL7_SIM = False
 
 # Configure logging
 logging.basicConfig(
@@ -650,32 +658,41 @@ class ASTMMockServer:
 
 class PushAPIHandler(BaseHTTPRequestHandler):
     """HTTP API handler for triggering pushes."""
-    
+
     fields_config = {}
     openelis_url = None
-    
+    template_loader = None
+
     def do_POST(self):
         """Handle POST requests to trigger pushes."""
         if self.path == '/push' or self.path.startswith('/push?'):
             self.handle_push_request()
+        elif HAS_HL7_SIM and self.path.startswith('/simulate/hl7/'):
+            self.handle_simulate_hl7_post()
         else:
             self.send_error(404, "Not Found")
-    
+
     def do_GET(self):
         """Handle GET requests for health check and info."""
         if self.path == '/health' or self.path == '/':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
+            endpoints = {
+                "POST /push": "Trigger a push to OpenELIS",
+                "GET /health": "Health check"
+            }
+            if HAS_HL7_SIM:
+                endpoints["GET /simulate/hl7/<analyzer>"] = "Generate HL7 ORU^R01 (template name)"
+                endpoints["POST /simulate/hl7/<analyzer>"] = "Generate and optionally push HL7 (body: count, destination)"
             response = {
                 "status": "ok",
                 "service": "ASTM Mock Server Push API",
-                "endpoints": {
-                    "POST /push": "Trigger a push to OpenELIS",
-                    "GET /health": "Health check"
-                }
+                "endpoints": endpoints
             }
             self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
+        elif HAS_HL7_SIM and self.path.startswith('/simulate/hl7/'):
+            self.handle_simulate_hl7_get()
         else:
             self.send_error(404, "Not Found")
     
@@ -771,6 +788,93 @@ class PushAPIHandler(BaseHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(error_response, indent=2).encode('utf-8'))
     
+    def _get_hl7_analyzer_from_path(self) -> Optional[str]:
+        """Extract analyzer template name from path /simulate/hl7/<analyzer>."""
+        prefix = '/simulate/hl7/'
+        if not self.path.startswith(prefix):
+            return None
+        name = self.path[len(prefix):].split('?')[0].strip('/')
+        return name if name else None
+
+    def handle_simulate_hl7_get(self):
+        """GET /simulate/hl7/<analyzer>: generate one HL7 message and return as text/plain."""
+        analyzer = self._get_hl7_analyzer_from_path()
+        if not analyzer or not self.template_loader:
+            self.send_error(404, "Not Found")
+            return
+        try:
+            template = self.template_loader.load_template(analyzer)
+            if template.get('protocol', {}).get('type') != 'HL7':
+                self.send_error(400, "Template is not HL7 protocol")
+                return
+            message = generate_oru_r01(template, deterministic=True)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(message.encode('utf-8'))
+        except FileNotFoundError:
+            self.send_error(404, f"Template not found: {analyzer}")
+        except Exception as e:
+            logger.exception("HL7 simulate GET failed")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+    def handle_simulate_hl7_post(self):
+        """POST /simulate/hl7/<analyzer>: generate HL7 message(s), optionally push to destination."""
+        analyzer = self._get_hl7_analyzer_from_path()
+        if not analyzer or not self.template_loader:
+            self.send_error(404, "Not Found")
+            return
+        try:
+            template = self.template_loader.load_template(analyzer)
+            if template.get('protocol', {}).get('type') != 'HL7':
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Template is not HL7 protocol"}).encode('utf-8'))
+                return
+            count = 1
+            destination = None
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                count = int(body.get('count', 1))
+                destination = body.get('destination')
+            results = []
+            success_count = 0
+            for i in range(count):
+                message = generate_oru_r01(template, deterministic=True)
+                pushed = False
+                if destination:
+                    pushed = push_hl7_to_openelis(destination, message)
+                    if pushed:
+                        success_count += 1
+                results.append({
+                    "message_number": i + 1,
+                    "pushed": pushed,
+                    "preview": message.split('\r')[0][:80] + "..."
+                })
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "completed",
+                "analyzer": analyzer,
+                "count": count,
+                "pushed": success_count if destination else None,
+                "results": results
+            }, indent=2).encode('utf-8'))
+        except FileNotFoundError:
+            self.send_error(404, f"Template not found: {analyzer}")
+        except Exception as e:
+            logger.exception("HL7 simulate POST failed")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
     def log_message(self, format, *args):
         """Override to use our logger instead of default."""
         logger.info(f"{self.address_string()} - {format % args}")
@@ -883,7 +987,15 @@ def start_push_api_server(api_port: int, openelis_url: str, fields_config: Dict)
     """Start HTTP API server for triggering pushes."""
     PushAPIHandler.fields_config = fields_config
     PushAPIHandler.openelis_url = openelis_url
-    
+    if HAS_HL7_SIM:
+        try:
+            PushAPIHandler.template_loader = TemplateLoader()
+        except Exception as e:
+            logger.warning("HL7 simulation disabled: could not init TemplateLoader: %s", e)
+            PushAPIHandler.template_loader = None
+    else:
+        PushAPIHandler.template_loader = None
+
     server = HTTPServer(('0.0.0.0', api_port), PushAPIHandler)
     logger.info(f"Push API server started on port {api_port}")
     logger.info(f"  POST /push - Trigger push to OpenELIS")
@@ -970,6 +1082,46 @@ def push_to_openelis(openelis_url: str, astm_message: str, timeout: int = 30) ->
         return False
     except Exception as e:
         logger.error(f"[PUSH] ✗ Push failed with exception: {e}", exc_info=True)
+        return False
+
+
+def push_hl7_to_openelis(openelis_url: str, hl7_message: str, timeout: int = 30) -> bool:
+    """
+    Push an HL7 ORU^R01 message to OpenELIS.
+
+    Args:
+        openelis_url: Base URL for OpenELIS (e.g. https://localhost:8443) or full HL7 endpoint URL.
+        hl7_message: Complete HL7 message string (segment terminator \\r).
+        timeout: Request timeout in seconds.
+
+    Returns:
+        True if push succeeded, False otherwise.
+    """
+    if openelis_url.rstrip('/').endswith('/hl7') or '/analyzer/' in openelis_url:
+        endpoint = openelis_url if openelis_url.startswith('http') else f"https://{openelis_url}"
+    else:
+        endpoint = f"{openelis_url.rstrip('/')}/api/OpenELIS-Global/analyzer/hl7"
+
+    try:
+        logger.info(f"[PUSH-HL7] Pushing ORU^R01 to {endpoint}")
+        req = urllib.request.Request(
+            endpoint,
+            data=hl7_message.encode('utf-8'),
+            headers={'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'},
+            method='POST'
+        )
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
+            if response.getcode() == 200:
+                logger.info("[PUSH-HL7] Push successful")
+                return True
+            logger.error(f"[PUSH-HL7] Push failed: HTTP {response.getcode()}")
+            return False
+    except Exception as e:
+        logger.error(f"[PUSH-HL7] Push failed: {e}", exc_info=True)
         return False
 
 
@@ -1060,12 +1212,23 @@ def main():
         default='quantstudio7',
         help='M4: Template for --generate-files (default: quantstudio7)'
     )
-    
+    parser.add_argument(
+        '--hl7',
+        action='store_true',
+        help='HL7 mode: use HL7 template and push ORU^R01 to destination (use with --push)'
+    )
+    parser.add_argument(
+        '--hl7-template',
+        type=str,
+        metavar='NAME',
+        default=os.environ.get('HL7_TEMPLATE', 'abbott_architect_hl7'),
+        help='HL7 template name (default: abbott_architect_hl7 or HL7_TEMPLATE env)'
+    )
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     # M4: File generation mode
     if getattr(args, 'generate_files', None):
         out_dir = args.generate_files
@@ -1117,8 +1280,60 @@ def main():
         print()
         start_simulate_api_server(port)
         return 0
-    
-    # Push mode: Send messages to OpenELIS
+
+    # HL7 push mode: Send ORU^R01 to OpenELIS (template-driven, e.g. Abbott)
+    if args.hl7 and args.push:
+        if not HAS_HL7_SIM:
+            logger.error("HL7 simulation not available (template_loader or hl7_handler missing)")
+            return 1
+        try:
+            loader = TemplateLoader()
+            template = loader.load_template(args.hl7_template)
+        except FileNotFoundError as e:
+            logger.error("HL7 template not found: %s", e)
+            return 1
+        except Exception as e:
+            logger.error("Failed to load HL7 template: %s", e)
+            return 1
+        if template.get('protocol', {}).get('type') != 'HL7':
+            logger.error("Template %s is not an HL7 template", args.hl7_template)
+            return 1
+        print("=" * 60)
+        print("  ASTM Mock Server - HL7 Push Mode")
+        print("=" * 60)
+        print(f"  OpenELIS URL: {args.push}")
+        print(f"  HL7 Template: {args.hl7_template}")
+        print(f"  Message Count: {args.push_count}")
+        print(f"  Interval: {args.push_interval}s")
+        print("=" * 60)
+        print()
+        success_count = 0
+        total_sent = 0
+        try:
+            if args.push_continuous:
+                while True:
+                    total_sent += 1
+                    msg = generate_oru_r01(template, deterministic=True)
+                    if push_hl7_to_openelis(args.push, msg):
+                        success_count += 1
+                    time.sleep(args.push_interval)
+            else:
+                for i in range(args.push_count):
+                    msg = generate_oru_r01(template, deterministic=True)
+                    if push_hl7_to_openelis(args.push, msg):
+                        success_count += 1
+                    total_sent += 1
+                    if i < args.push_count - 1:
+                        time.sleep(args.push_interval)
+        except KeyboardInterrupt:
+            pass
+        print()
+        print("=" * 60)
+        print(f"  HL7 Push Complete: {success_count}/{total_sent} successful")
+        print("=" * 60)
+        return 0 if (not args.push_continuous and success_count == args.push_count) or (args.push_continuous and total_sent > 0) else 1
+
+    # Push mode: Send ASTM messages to OpenELIS
     if args.push:
         print("=" * 60)
         print("  ASTM Mock Server - Push Mode")

@@ -234,6 +234,45 @@ curl http://localhost:8080/health
 - Manual testing via HTTP client (Postman, etc.)
 - Triggering pushes from other services
 
+### HL7 ORU^R01 Simulation
+
+The server can generate HL7 v2.x ORU^R01 (Observation Report) messages from
+template definitions for OpenELIS analyzer plugins (e.g. Abbott Architect).
+Templates live in `templates/` and are selected by name.
+
+**Run locally (CLI):**
+
+```bash
+# Push one Abbott Architect ORU^R01 to OpenELIS
+python server.py --hl7 --push https://localhost:8443 --hl7-template abbott_architect_hl7
+
+# Push multiple messages
+python server.py --hl7 --push https://localhost:8443 --hl7-template abbott_architect_hl7 --push-count 3
+
+# Continuous HL7 push (Ctrl+C to stop)
+python server.py --hl7 --push https://localhost:8443 --push-continuous
+```
+
+**HTTP API (when running with `--api-port`):**
+
+- **GET `/simulate/hl7/<analyzer>`** – Generate one HL7 ORU^R01 for the template
+  (e.g. `abbott_architect_hl7`) and return it as `text/plain`.
+- **POST `/simulate/hl7/<analyzer>`** – Generate one or more messages; optionally
+  push to OpenELIS. Body (JSON): `{ "count": 1, "destination": "https://localhost:8443" }`.
+
+```bash
+# Generate one Abbott message (no push)
+curl http://localhost:8080/simulate/hl7/abbott_architect_hl7
+
+# Generate and push to OpenELIS
+curl -X POST http://localhost:8080/simulate/hl7/abbott_architect_hl7 \
+  -H "Content-Type: application/json" \
+  -d '{"count": 2, "destination": "https://localhost:8443"}'
+```
+
+HL7 messages use template `identification` (e.g. `hl7_sending_app` → MSH-3) so
+OpenELIS can route to the correct analyzer plugin.
+
 ## Testing
 
 ### Run Communication Test (Recommended)

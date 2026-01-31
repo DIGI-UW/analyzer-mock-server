@@ -2,28 +2,55 @@
   "analyzer": {
     "name": "Hain FluoroCycler XT",
     "model": "FluoroCycler XT",
-    "manufacturer": "Hain Lifescience"
+    "manufacturer": "Hain Lifescience",
+    "category": "MOLECULAR"
   },
   "protocol": {
     "type": "FILE",
-    "version": "1.0",
+    "version": "CSV-1.0",
     "transport": "FILE"
   },
   "identification": {
-    "file_pattern": "fluorocycler_*.csv"
+    "file_pattern": "fluorocycler*.csv"
+  },
+  "fileFormat": {
+    "delimiter": ";",
+    "hasHeader": true,
+    "encoding": "UTF-8",
+    "extension": ".csv"
   },
   "file_config": {
     "format": "CSV",
-    "delimiter": ",",
+    "delimiter": ";",
     "has_header": true,
     "column_mapping": {
       "sample_id": "Sample ID",
-      "test_code": "Assay",
-      "result": "Result"
+      "result": "Result",
+      "interpretation": "Interpretation"
     }
   },
+  "columns": [
+    {"index": 0, "name": "Position", "description": "Well position (e.g., A01)"},
+    {"index": 1, "name": "Sample ID", "description": "Sample/accession number"},
+    {"index": 2, "name": "Result", "description": "Detected/Not Detected"},
+    {"index": 3, "name": "Interpretation", "description": "Positive/Negative/Invalid"}
+  ],
   "fields": [
-    { "name": "MTB", "code": "MTB", "type": "QUALITATIVE", "possibleValues": ["Detected", "Not Detected", "Invalid"] },
-    { "name": "RIF", "code": "RIF", "type": "QUALITATIVE", "possibleValues": ["Resistant", "Sensitive", "Indeterminate"] }
+    {
+      "code": "RESULT",
+      "name": "FluoroCycler XT Result",
+      "type": "QUALITATIVE",
+      "possibleValues": ["Detected", "Not Detected", "Invalid"]
+    },
+    {
+      "code": "INTERPRETATION",
+      "name": "FluoroCycler XT Interpretation",
+      "type": "QUALITATIVE",
+      "possibleValues": ["Positive", "Negative", "Invalid"]
+    }
+  ],
+  "testSamples": [
+    {"sampleId": "FLX-001", "position": "A01", "result": "Detected", "interpretation": "Positive"},
+    {"sampleId": "FLX-002", "position": "B05", "result": "Not Detected", "interpretation": "Negative"}
   ]
 }

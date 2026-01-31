@@ -53,7 +53,7 @@
     },
     "identification": {
       "type": "object",
-      "description": "Protocol-specific identification strings and patterns",
+      "description": "How OpenELIS identifies this analyzer (ASTM header, HL7 sender, IP, file pattern)",
       "properties": {
         "astm_header": {
           "type": "string",
@@ -78,6 +78,55 @@
         "file_pattern": {
           "type": "string",
           "description": "Glob pattern for files"
+        }
+      }
+    },
+    "fileFormat": {
+      "type": "object",
+      "description": "File format configuration for FILE protocol",
+      "properties": {
+        "delimiter": {
+          "type": "string",
+          "default": ",",
+          "description": "Field delimiter character (e.g., ',', ';', '\\t')"
+        },
+        "hasHeader": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the first line contains column headers"
+        },
+        "encoding": {
+          "type": "string",
+          "default": "UTF-8",
+          "description": "Character encoding (e.g., 'UTF-8', 'ISO-8859-1')"
+        },
+        "extension": {
+          "type": "string",
+          "default": ".csv",
+          "description": "File extension (e.g., '.csv', '.txt')"
+        }
+      }
+    },
+    "columns": {
+      "type": "array",
+      "description": "Column definitions for FILE protocol",
+      "items": {
+        "type": "object",
+        "required": ["index", "name"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based column index"
+          },
+          "name": {
+            "type": "string",
+            "description": "Column name/header"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of the column"
+          }
         }
       }
     },
@@ -182,6 +231,23 @@
         "type": {
           "type": "string",
           "description": "Sample type (e.g., 'CBC^Complete Blood Count')"
+        }
+      }
+    },
+    "testSamples": {
+      "type": "array",
+      "description": "Array of test sample data for FILE protocol (for generating sample files)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sampleId": {
+            "type": "string",
+            "description": "Sample/Accession ID"
+          },
+          "position": {
+            "type": "string",
+            "description": "Well position (e.g., 'A01')"
+          }
         }
       }
     }

@@ -42,6 +42,9 @@ import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+from template_loader import TemplateLoader
+from hl7_generator import generate_oru_r01
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -780,20 +783,24 @@ def generate_astm_message(analyzer_type: str, fields_config: Dict,
 
 class PushAPIHandler(BaseHTTPRequestHandler):
     """HTTP API handler for triggering pushes."""
-    
+
     fields_config = {}
     openelis_url = None
-    
+    template_loader = None
+
     def do_POST(self):
         """Handle POST requests to trigger pushes."""
         if self.path == '/push' or self.path.startswith('/push?'):
             self.handle_push_request()
         else:
             self.send_error(404, "Not Found")
-    
+
     def do_GET(self):
-        """Handle GET requests for health check and info."""
-        if self.path == '/health' or self.path == '/':
+        """Handle GET requests for health check, info, and HL7 simulate."""
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip('/')
+
+        if path == '/health' or path == '' or path == '/':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -801,105 +808,164 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "service": "ASTM Mock Server Push API",
                 "endpoints": {
-                    "POST /push": "Trigger a push to OpenELIS",
+                    "POST /push": "Trigger a push to OpenELIS (ASTM or template=name for HL7)",
+                    "GET /simulate/hl7/{analyzer}": "Return one HL7 ORU^R01 message for CI",
                     "GET /health": "Health check"
                 }
             }
             self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
+        elif path.startswith('/simulate/hl7/'):
+            self.handle_simulate_hl7(path)
         else:
             self.send_error(404, "Not Found")
+
+    def handle_simulate_hl7(self, path: str):
+        """Generate one HL7 ORU^R01 for the given analyzer template and return as body."""
+        analyzer = path[len('/simulate/hl7/'):].strip('/').split('/')[0] or path.split('/')[-1]
+        if not analyzer:
+            self.send_error(400, "Bad Request")
+            return
+        try:
+            if self.template_loader is None:
+                self.template_loader = TemplateLoader()
+            template = self.template_loader.load_template(analyzer)
+            if template.get('protocol', {}).get('type') != 'HL7':
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(
+                    {"error": f"Template {analyzer} is not HL7 protocol"}
+                ).encode('utf-8'))
+                return
+            message = generate_oru_r01(template, deterministic=True)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(message.encode('utf-8'))
+        except FileNotFoundError:
+            self.send_error(404, f"Template not found: {analyzer}")
+        except Exception as e:
+            logger.exception(f"[API] simulate/hl7/{analyzer} failed")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
     
     def handle_push_request(self):
-        """Handle push trigger request."""
+        """Handle push trigger request. Supports ASTM (analyzer_type) or HL7 (template=name)."""
         client_addr = self.address_string()
         try:
             logger.info(f"[API] Push request received from {client_addr}: {self.path}")
-            
-            # Parse query parameters
+
             parsed_path = urlparse(self.path)
             query_params = parse_qs(parsed_path.query)
-            
-            # Get analyzer type from query or default
+
+            template_name = query_params.get('template', [None])[0]
             analyzer_type = query_params.get('analyzer_type', ['HEMATOLOGY'])[0].upper()
             count = int(query_params.get('count', ['1'])[0])
-            
-            logger.info(f"[API] Request parameters: analyzer_type={analyzer_type}, count={count}")
-            
-            # Read request body if present (JSON)
+
             content_length = int(self.headers.get('Content-Length', 0))
             request_body = {}
             if content_length > 0:
                 body_data = self.rfile.read(content_length)
                 try:
                     request_body = json.loads(body_data.decode('utf-8'))
-                    logger.debug(f"[API] Request body: {json.dumps(request_body)}")
-                    # Override query params with body if present
+                    template_name = request_body.get('template', template_name)
                     analyzer_type = request_body.get('analyzer_type', analyzer_type).upper()
                     count = int(request_body.get('count', count))
-                    logger.info(f"[API] Overridden parameters from body: analyzer_type={analyzer_type}, count={count}")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"[API] Failed to parse JSON body: {e}")
-            
-            # Generate and push messages
+                except json.JSONDecodeError:
+                    pass
+
+            if template_name:
+                self._handle_push_hl7(template_name, count, client_addr)
+                return
+
+            logger.info(f"[API] Request parameters: analyzer_type={analyzer_type}, count={count}")
+
             results = []
             success_count = 0
-            
-            logger.info(f"[API] Generating and pushing {count} message(s) of type {analyzer_type}")
-            
+            logger.info(f"[API] Generating and pushing {count} ASTM message(s) of type {analyzer_type}")
+
             for i in range(count):
-                logger.debug(f"[API] Generating message {i+1}/{count}")
                 message = generate_astm_message(
                     analyzer_type=analyzer_type,
                     fields_config=self.fields_config
                 )
-                
                 if message:
-                    logger.debug(f"[API] Pushing message {i+1}/{count} to {self.openelis_url}")
                     success = push_to_openelis(self.openelis_url, message)
-                    results.append({
-                        "message_number": i + 1,
-                        "success": success,
-                        "analyzer_type": analyzer_type
-                    })
+                    results.append({"message_number": i + 1, "success": success, "analyzer_type": analyzer_type})
                     if success:
                         success_count += 1
-                        logger.debug(f"[API] Message {i+1}/{count} pushed successfully")
-                    else:
-                        logger.warning(f"[API] Message {i+1}/{count} push failed")
                 else:
-                    logger.error(f"[API] Failed to generate message {i+1}/{count}")
-                    results.append({
-                        "message_number": i + 1,
-                        "success": False,
-                        "error": "Failed to generate message"
-                    })
-            
-            # Send response
+                    results.append({"message_number": i + 1, "success": False, "error": "Failed to generate message"})
+
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            
-            response = {
+            self.wfile.write(json.dumps({
                 "status": "completed",
                 "total": count,
                 "successful": success_count,
                 "failed": count - success_count,
                 "results": results
-            }
-            
+            }, indent=2).encode('utf-8'))
             logger.info(f"[API] Push request completed: {success_count}/{count} successful")
-            self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
-            
+
         except Exception as e:
-            logger.error(f"[API] Error handling push request from {client_addr}: {e}", exc_info=True)
+            logger.exception(f"[API] Error handling push request from {client_addr}")
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            error_response = {
+            self.wfile.write(json.dumps({"status": "error", "message": str(e)}, indent=2).encode('utf-8'))
+
+    def _handle_push_hl7(self, template_name: str, count: int, client_addr: str):
+        """Load HL7 template, generate messages, and push to OpenELIS."""
+        try:
+            if self.template_loader is None:
+                self.template_loader = TemplateLoader()
+            template = self.template_loader.load_template(template_name)
+        except FileNotFoundError:
+            self.send_error(404, f"Template not found: {template_name}")
+            return
+        except Exception as e:
+            logger.exception(f"[API] Failed to load template {template_name}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
+        if template.get('protocol', {}).get('type') != 'HL7':
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
                 "status": "error",
-                "message": str(e)
-            }
-            self.wfile.write(json.dumps(error_response, indent=2).encode('utf-8'))
+                "message": f"Template {template_name} is not HL7; use analyzer_type for ASTM push"
+            }).encode('utf-8'))
+            return
+
+        logger.info(f"[API] Generating and pushing {count} HL7 message(s) from template {template_name}")
+        results = []
+        success_count = 0
+        for i in range(count):
+            message = generate_oru_r01(template, deterministic=True)
+            success = push_hl7_to_openelis(self.openelis_url, message)
+            results.append({"message_number": i + 1, "success": success, "template": template_name})
+            if success:
+                success_count += 1
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "status": "completed",
+            "total": count,
+            "successful": success_count,
+            "failed": count - success_count,
+            "results": results
+        }, indent=2).encode('utf-8'))
+        logger.info(f"[API] HL7 push completed: {success_count}/{count} successful")
     
     def log_message(self, format, *args):
         """Override to use our logger instead of default."""
@@ -910,10 +976,12 @@ def start_push_api_server(api_port: int, openelis_url: str, fields_config: Dict)
     """Start HTTP API server for triggering pushes."""
     PushAPIHandler.fields_config = fields_config
     PushAPIHandler.openelis_url = openelis_url
-    
+    PushAPIHandler.template_loader = TemplateLoader()
+
     server = HTTPServer(('0.0.0.0', api_port), PushAPIHandler)
     logger.info(f"Push API server started on port {api_port}")
-    logger.info(f"  POST /push - Trigger push to OpenELIS")
+    logger.info(f"  POST /push - Trigger push to OpenELIS (ASTM or template=name for HL7)")
+    logger.info(f"  GET /simulate/hl7/{{analyzer}} - Return HL7 message for CI")
     logger.info(f"  GET /health - Health check")
     
     try:
@@ -997,6 +1065,66 @@ def push_to_openelis(openelis_url: str, astm_message: str, timeout: int = 30) ->
         return False
     except Exception as e:
         logger.error(f"[PUSH] ✗ Push failed with exception: {e}", exc_info=True)
+        return False
+
+
+def push_hl7_to_openelis(openelis_url: str, hl7_message: str, timeout: int = 30) -> bool:
+    """
+    Push an HL7 ORU^R01 message to OpenELIS via HTTP POST.
+
+    Args:
+        openelis_url: Base URL for OpenELIS (e.g., "https://localhost:8443")
+        hl7_message: Complete HL7 message as string
+        timeout: Request timeout in seconds
+
+    Returns:
+        True if push succeeded, False otherwise
+    """
+    endpoint = f"{openelis_url}/api/OpenELIS-Global/analyzer/hl7"
+
+    try:
+        message_lines = hl7_message.strip().split('\n')
+        message_type = "unknown"
+        if message_lines and message_lines[0].startswith('MSH|'):
+            parts = message_lines[0].split('|')
+            if len(parts) >= 4:
+                message_type = f"HL7 from {parts[2]}|{parts[3]}"
+
+        logger.info(f"[PUSH] Pushing HL7 message to {endpoint}")
+        logger.info(f"[PUSH] Message type: {message_type}, size: {len(hl7_message)} bytes")
+
+        req = urllib.request.Request(
+            endpoint,
+            data=hl7_message.encode('utf-8'),
+            headers={'Content-Type': 'text/plain; charset=utf-8'},
+            method='POST'
+        )
+
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        start_time = time.time()
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
+            elapsed_time = time.time() - start_time
+            status_code = response.getcode()
+            if status_code == 200:
+                logger.info(f"[PUSH] ✓ HL7 push successful (HTTP {status_code}) in {elapsed_time:.2f}s")
+                return True
+            logger.error(f"[PUSH] ✗ HL7 push failed: HTTP {status_code}")
+            return False
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else "No error details"
+        logger.error(f"[PUSH] ✗ HL7 HTTP error {e.code}: {e.reason}")
+        logger.error(f"[PUSH] Error response: {error_body[:500]}")
+        return False
+    except urllib.error.URLError as e:
+        logger.error(f"[PUSH] ✗ HL7 URL error: {e.reason}")
+        return False
+    except Exception as e:
+        logger.error(f"[PUSH] ✗ HL7 push failed with exception: {e}", exc_info=True)
         return False
 
 

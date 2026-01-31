@@ -184,12 +184,16 @@ python server.py --push https://localhost:8443 --api-port 8080
 
    - Query parameters:
      - `analyzer_type` (optional): HEMATOLOGY, CHEMISTRY, IMMUNOLOGY, etc.
-       (default: HEMATOLOGY)
+       (default: HEMATOLOGY). Used for ASTM when `template` is not set.
+     - `template` (optional): Template name for HL7 push (e.g. `mindray_bc5380`,
+       `mindray_bs360e`). When set, generates HL7 ORU^R01 and POSTs to
+       `/api/OpenELIS-Global/analyzer/hl7`.
      - `count` (optional): Number of messages to push (default: 1)
    - Request body (JSON, optional):
      ```json
      {
        "analyzer_type": "CHEMISTRY",
+       "template": "mindray_bc5380",
        "count": 3
      }
      ```
@@ -207,14 +211,28 @@ python server.py --push https://localhost:8443 --api-port 8080
        ]
      }
      ```
+     For HL7 push (`template` set), `results` entries include `"template": "mindray_bc5380"`.
 
-2. **GET `/health`** - Health check and API information
+2. **GET `/simulate/hl7/{analyzer}`** - Return one HL7 ORU^R01 message (for CI)
+
+   - Path: e.g. `/simulate/hl7/mindray_bc5380`, `/simulate/hl7/mindray_bs360e`
+   - Response: Raw HL7 message body (Content-Type: text/plain). No push to OpenELIS.
+   - Use case: CI or scripts can GET the message and POST it to OpenELIS
+     `/api/OpenELIS-Global/analyzer/hl7` themselves.
+
+3. **GET `/health`** - Health check and API information
 
 **Usage Examples:**
 
 ```bash
-# Trigger single push via curl
+# Trigger single ASTM push via curl
 curl -X POST "http://localhost:8080/push?analyzer_type=HEMATOLOGY&count=1"
+
+# Trigger HL7 push (Mindray BC-5380 template)
+curl -X POST "http://localhost:8080/push?template=mindray_bc5380&count=1"
+
+# Get HL7 message for CI (no push)
+curl "http://localhost:8080/simulate/hl7/mindray_bc5380"
 
 # Trigger multiple pushes with JSON body
 curl -X POST http://localhost:8080/push \
@@ -231,6 +249,29 @@ curl http://localhost:8080/health
 - Integration with CI/CD pipelines
 - Manual testing via HTTP client (Postman, etc.)
 - Triggering pushes from other services
+
+### HL7 Mode and Mindray Templates
+
+The mock server can generate HL7 v2.x ORU^R01 (observation result) messages from
+analyzer templates and push them to OpenELIS’s `POST /analyzer/hl7` endpoint.
+This enables end-to-end testing of the Mindray HL7 plugin (BC-5380, BS-360E)
+without physical hardware.
+
+**Templates:**
+
+- **mindray_bc5380** – Hematology (CBC): WBC, RBC, HGB, HCT
+- **mindray_bs360e** – Chemistry: CREA, ALT, AST
+
+Templates live in `templates/` and conform to the same JSON schema as ASTM
+templates; use `protocol.type: "HL7"` and `identification.hl7_sending_app` /
+`hl7_sending_facility` for MSH-3/MSH-4.
+
+**Requirements:**
+
+- OpenELIS must be running and the HL7 analyzer import endpoint must be
+  configured (`/api/OpenELIS-Global/analyzer/hl7`).
+- Analyzer mapping may be required for the sending application/facility
+  (e.g. MINDRAY|LAB) so results appear on the “Results from Analyzer” dashboard.
 
 ## Testing
 
@@ -257,10 +298,13 @@ documentation.
 ### Run Unit Tests
 
 ```bash
-# Install test dependencies
+# HL7 generator tests (no server required)
+python3 test_hl7.py -v
+
+# Install test dependencies for ASTM server tests
 pip install pytest
 
-# Run unit tests (server must be running)
+# Run ASTM server unit tests (server must be running)
 python server.py &
 python -m pytest test_server.py -v
 ```
@@ -280,10 +324,19 @@ nc localhost 5000
 
 ```
 tools/astm-mock-server/
-├── server.py                    # Main server implementation
-├── test_server.py               # Unit tests (TDD)
+├── server.py                    # Main server implementation (ASTM + HL7 push API)
+├── hl7_generator.py             # HL7 ORU^R01 generator from templates
+├── template_loader.py           # Template loader and schema validation
+├── template_generator.py        # ASTM message generator from templates
+├── test_server.py               # ASTM server unit tests (TDD)
+├── test_hl7.py                  # HL7 generator unit tests
 ├── test_communication.py        # Communication pathway test & demo
-├── fields.json                  # Analyzer field configuration
+├── fields.json                  # Analyzer field configuration (ASTM)
+├── templates/
+│   ├── schema.json              # Template JSON schema (ASTM + HL7)
+│   ├── mindray_bc5380.json      # Mindray BC-5380 HL7 template (CBC)
+│   ├── mindray_bs360e.json      # Mindray BS-360E HL7 template (chemistry)
+│   └── ...                      # Other analyzer templates
 ├── requirements.txt             # Python dependencies
 ├── Dockerfile                   # Container build file
 ├── README.md                    # This file

@@ -2,22 +2,52 @@
   "analyzer": {
     "name": "Mindray BS-360E",
     "model": "BS-360E",
-    "manufacturer": "Mindray"
+    "manufacturer": "Mindray",
+    "category": "CHEMISTRY"
   },
   "protocol": {
     "type": "HL7",
-    "version": "2.5",
+    "version": "2.5.1",
     "transport": "TCP"
   },
   "identification": {
-    "msh_sender": "MINDRAY",
-    "ip_pattern": "192.168.1.*"
+    "hl7_sending_app": "MINDRAY",
+    "hl7_sending_facility": "LAB"
   },
   "fields": [
-    { "name": "GLUCOSE", "code": "2345-7", "type": "NUMERIC", "unit": "mg/dL", "normalRange": "70-100" },
-    { "name": "CREATININE", "code": "2160-0", "type": "NUMERIC", "unit": "mg/dL", "normalRange": "0.6-1.2" },
-    { "name": "UREA", "code": "3094-0", "type": "NUMERIC", "unit": "mg/dL", "normalRange": "7-20" },
-    { "name": "ALT", "code": "1742-6", "type": "NUMERIC", "unit": "IU/L", "normalRange": "7-56" },
-    { "name": "AST", "code": "1920-8", "type": "NUMERIC", "unit": "IU/L", "normalRange": "10-40" }
-  ]
+    {
+      "code": "CREA",
+      "name": "CREATININE",
+      "unit": "mg/dL",
+      "normalRange": "0.7-1.3",
+      "seedValue": 0.9,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "ALT",
+      "name": "ALANINE AMINOTRANSFERASE",
+      "unit": "U/L",
+      "normalRange": "7-56",
+      "seedValue": 25,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "AST",
+      "name": "ASPARTATE AMINOTRANSFERASE",
+      "unit": "U/L",
+      "normalRange": "10-40",
+      "seedValue": 22,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT002",
+    "name": "SMITH^JANE",
+    "sex": "F",
+    "dob": "19900520"
+  },
+  "testSample": {
+    "id": "PLACER789",
+    "type": "CHEM^CHEMISTRY PANEL"
+  }
 }

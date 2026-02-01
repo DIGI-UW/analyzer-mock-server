@@ -2,22 +2,60 @@
   "analyzer": {
     "name": "Mindray BC-5380",
     "model": "BC-5380",
-    "manufacturer": "Mindray"
+    "manufacturer": "Mindray",
+    "category": "HEMATOLOGY"
   },
   "protocol": {
     "type": "HL7",
-    "version": "2.5",
+    "version": "2.5.1",
     "transport": "TCP"
   },
   "identification": {
-    "msh_sender": "MINDRAY",
-    "ip_pattern": "192.168.1.*"
+    "hl7_sending_app": "MINDRAY",
+    "hl7_sending_facility": "LAB"
   },
   "fields": [
-    { "name": "WBC", "code": "6690-2", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "4.5-11.0" },
-    { "name": "RBC", "code": "789-8", "type": "NUMERIC", "unit": "10^6/uL", "normalRange": "4.5-5.5" },
-    { "name": "HGB", "code": "718-7", "type": "NUMERIC", "unit": "g/dL", "normalRange": "13.5-17.5" },
-    { "name": "HCT", "code": "4544-3", "type": "NUMERIC", "unit": "%", "normalRange": "40-54" },
-    { "name": "PLT", "code": "777-3", "type": "NUMERIC", "unit": "10^3/uL", "normalRange": "150-400" }
-  ]
+    {
+      "code": "WBC",
+      "name": "WHITE BLOOD CELL",
+      "unit": "10*3/uL",
+      "normalRange": "4.0-10.0",
+      "seedValue": 7.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "RBC",
+      "name": "RED BLOOD CELL",
+      "unit": "10*6/uL",
+      "normalRange": "4.0-5.5",
+      "seedValue": 4.82,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HGB",
+      "name": "HEMOGLOBIN",
+      "unit": "g/dL",
+      "normalRange": "12.0-17.5",
+      "seedValue": 14.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "HCT",
+      "name": "HEMATOCRIT",
+      "unit": "%",
+      "normalRange": "36-54",
+      "seedValue": 42.0,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT001",
+    "name": "DOE^JOHN",
+    "sex": "M",
+    "dob": "19800115"
+  },
+  "testSample": {
+    "id": "PLACER123",
+    "type": "CBC^COMPLETE BLOOD COUNT"
+  }
 }

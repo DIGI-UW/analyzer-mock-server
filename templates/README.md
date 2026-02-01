@@ -1,10 +1,10 @@
-# ASTM Mock Server Templates
+# Analyzer Mock Server Templates
 
-This directory contains analyzer templates for generating deterministic ASTM LIS2-A2 messages.
+This directory contains analyzer templates for generating deterministic mock messages across multiple lab communication protocols (ASTM LIS2-A2, HL7, FILE-based formats).
 
 ## Purpose
 
-Templates enable the mock server to generate ASTM messages with **exact field alignment** to OpenELIS analyzer plugins, supporting:
+Templates enable the mock server to generate protocol-specific messages with **exact field alignment** to OpenELIS analyzer plugins, supporting:
 
 - **Reproducible E2E testing**: Deterministic seed values for consistent assertions
 - **Plugin validation**: Generated messages match plugin `TestMapping` arrays exactly
@@ -124,8 +124,8 @@ Map to template fields:
 
 Templates are validated against `schema.json` which enforces:
 
-- Required fields: `analyzer`, `protocol`, `identification`, `fields`
-- Field types: `code`, `name`, `unit` are required per field
+- Required fields: `analyzer`, `protocol`, `fields`
+- Field properties: `code`, `name`, `type` are required per field (`unit` is optional)
 - Patient sex: Must be `M`, `F`, or `U`
 - Date format: DOB must be `YYYYMMDD`
 
@@ -148,6 +148,7 @@ cy.get('[data-testid="wbc-value"]').should('contain', '5.8');  // seedValue
 
 ## Related Documentation
 
-- [Plan: M9-M10 Testing Infrastructure](../../../.claude/plans/refactored-hatching-manatee.md)
-- [Checklist: m9-m10-testing-infrastructure.md](../../../specs/011-madagascar-analyzer-integration/checklists/m9-m10-testing-infrastructure.md)
-- [Environment Detection Guide](../../../frontend/cypress/ENVIRONMENT-DETECTION.md)
+For related documentation, see the main OpenELIS-Global-2 repository:
+- Plan files in `.claude/plans/`
+- Feature specs in `specs/011-madagascar-analyzer-integration/`
+- Cypress E2E tests in `frontend/cypress/`

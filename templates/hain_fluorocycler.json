@@ -25,6 +25,7 @@
     "has_header": true,
     "column_mapping": {
       "sample_id": "Sample ID",
+      "test_code": "Assay",
       "result": "Result",
       "interpretation": "Interpretation"
     }

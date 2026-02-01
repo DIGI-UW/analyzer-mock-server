@@ -125,11 +125,12 @@ class TemplateLoader:
         except json.JSONDecodeError as e:
             print(f"Invalid JSON: {e}", file=sys.stderr)
             return False
-        except jsonschema.ValidationError as e:
-            print(f"Schema validation failed: {e.message}", file=sys.stderr)
-            return False
         except Exception as e:
-            print(f"Validation error: {e}", file=sys.stderr)
+            # Handle jsonschema.ValidationError when jsonschema is installed
+            if HAS_JSONSCHEMA and isinstance(e, jsonschema.ValidationError):
+                print(f"Schema validation failed: {e.message}", file=sys.stderr)
+            else:
+                print(f"Validation error: {e}", file=sys.stderr)
             return False
 
     def list_templates(self) -> List[str]:

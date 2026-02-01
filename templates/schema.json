@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://openelis-global.org/astm-mock-server/template-schema",
   "title": "Analyzer Message Template",
-  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports deterministic seed values for reproducible testing.",
+  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports ASTM, HL7, RS232, FILE protocols with field definitions and deterministic seed values.",
   "type": "object",
   "required": ["analyzer", "protocol", "fields"],
   "properties": {
@@ -247,6 +247,14 @@
           "position": {
             "type": "string",
             "description": "Well position (e.g., 'A01')"
+          },
+          "result": {
+            "type": "string",
+            "description": "Test result value"
+          },
+          "interpretation": {
+            "type": "string",
+            "description": "Result interpretation"
           }
         }
       }

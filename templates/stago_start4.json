@@ -2,7 +2,8 @@
   "analyzer": {
     "name": "Stago STart 4",
     "model": "STart 4",
-    "manufacturer": "Stago"
+    "manufacturer": "Stago",
+    "category": "COAGULATION"
   },
   "protocol": {
     "type": "ASTM",
@@ -10,8 +11,8 @@
     "transport": "SERIAL"
   },
   "identification": {
-    "astm_header": "STAGO",
-    "msh_sender": "STAGO"
+    "astm_header": "STAGO^START4^V1.0",
+    "hl7_sending_app": "STAGO"
   },
   "serial_config": {
     "baud_rate": 9600,
@@ -20,9 +21,60 @@
     "stop_bits": 1
   },
   "fields": [
-    { "name": "PT", "code": "PT", "type": "NUMERIC", "unit": "s", "normalRange": "9.5-13.5" },
-    { "name": "INR", "code": "INR", "type": "NUMERIC", "unit": "", "normalRange": "0.9-1.2" },
-    { "name": "APTT", "code": "APTT", "type": "NUMERIC", "unit": "s", "normalRange": "25-35" },
-    { "name": "Fibrinogen", "code": "FIB", "type": "NUMERIC", "unit": "g/L", "normalRange": "2.0-4.0" }
-  ]
+    {
+      "code": "PT",
+      "name": "Prothrombin Time",
+      "loinc": "5902-2",
+      "unit": "sec",
+      "normalRange": "11.0-13.5",
+      "seedValue": 12.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "INR",
+      "name": "International Normalized Ratio",
+      "loinc": "6301-6",
+      "unit": "",
+      "normalRange": "0.9-1.2",
+      "seedValue": 1.05,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "APTT",
+      "name": "Activated Partial Thromboplastin Time",
+      "loinc": "3173-2",
+      "unit": "sec",
+      "normalRange": "25.0-35.0",
+      "seedValue": 28.5,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "FIB",
+      "name": "Fibrinogen",
+      "loinc": "3255-7",
+      "unit": "g/L",
+      "normalRange": "2.0-4.0",
+      "seedValue": 3.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "TT",
+      "name": "Thrombin Time",
+      "loinc": "3174-0",
+      "unit": "sec",
+      "normalRange": "14.0-21.0",
+      "seedValue": 15.2,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT-2026-003",
+    "name": "Razafy^Sophie^C",
+    "sex": "F",
+    "dob": "19900220"
+  },
+  "testSample": {
+    "id": "SAMPLE-2026-0003",
+    "type": "COAG^Coagulation Panel"
+  }
 }

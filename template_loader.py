@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Template Loader for ASTM Mock Server
+Template Loader for Analyzer Mock Server
 
 Loads and validates analyzer templates against the JSON schema.
 Templates define analyzer-specific field lists, ASTM identifiers,
@@ -176,7 +176,7 @@ class TemplateLoader:
 def main():
     """CLI entry point for template loader."""
     parser = argparse.ArgumentParser(
-        description='Load and validate ASTM mock server analyzer templates'
+        description='Load and validate analyzer mock server templates'
     )
     parser.add_argument(
         '--list', '-l',

@@ -1,6 +1,6 @@
-# ASTM Mock Server Templates
+# Analyzer Mock Server Templates
 
-This directory contains analyzer templates for generating deterministic ASTM LIS2-A2 messages.
+This directory contains analyzer templates for generating deterministic messages (ASTM LIS2-A2, HL7, file formats) for the multi-protocol analyzer simulator.
 
 ## Purpose
 

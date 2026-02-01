@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ASTM LIS2-A2 Mock Server for OpenELIS Analyzer Testing
+Multi-Protocol Analyzer Simulator for OpenELIS Analyzer Testing
 
-This server simulates an ASTM-compatible laboratory analyzer for testing
-the OpenELIS analyzer field mapping feature.
+This server simulates laboratory analyzers over ASTM LIS2-A2, HL7 v2.x,
+RS232/Serial, and file-based protocols for testing OpenELIS analyzer integration.
 
 Reference Documents:
 - specs/004-astm-analyzer-mapping/research.md Section 1 (ASTM Protocol)
@@ -21,7 +21,7 @@ Usage:
     python server.py [--port PORT] [--analyzer-type TYPE]
 
 Environment Variables:
-    ASTM_PORT: Server port (default: 5000)
+    ANALYZER_PORT: Server port (default: 5000); ASTM_PORT is deprecated
     ANALYZER_TYPE: Analyzer type from fields.json (default: HEMATOLOGY)
     RESPONSE_DELAY_MS: Simulated response delay in milliseconds (default: 100)
 """
@@ -67,6 +67,20 @@ LF = b'\x0A'   # Line Feed
 DEFAULT_PORT = 5000
 DEFAULT_ANALYZER_TYPE = 'HEMATOLOGY'
 DEFAULT_RESPONSE_DELAY_MS = 100
+
+
+def _get_port_from_env():
+    """Prefer ANALYZER_PORT; fall back to ASTM_PORT and log deprecation if used."""
+    port = os.environ.get('ANALYZER_PORT')
+    if port is not None:
+        return int(port)
+    port = os.environ.get('ASTM_PORT')
+    if port is not None:
+        logger.warning(
+            "ASTM_PORT is deprecated; use ANALYZER_PORT. Support for ASTM_PORT may be removed in a future release."
+        )
+        return int(port)
+    return DEFAULT_PORT
 
 # CLSI LIS1-A Timeout Requirements
 ESTABLISHMENT_TIMEOUT = 15  # seconds - ENQ response timeout
@@ -609,7 +623,7 @@ class ASTMMockServer:
         try:
             self.server_socket.bind(('0.0.0.0', self.port))
             self.server_socket.listen(MAX_CONNECTIONS)
-            logger.info(f"ASTM Mock Server started on port {self.port}")
+            logger.info(f"Analyzer Mock Server started on port {self.port}")
             logger.info(f"Analyzer type: {self.analyzer_type}")
             logger.info(f"Response delay: {self.response_delay_ms}ms")
             
@@ -645,7 +659,7 @@ class ASTMMockServer:
                 self.server_socket.close()
             except:
                 pass
-        logger.info("ASTM Mock Server stopped")
+        logger.info("Analyzer Mock Server stopped")
 
 
 class PushAPIHandler(BaseHTTPRequestHandler):
@@ -669,7 +683,7 @@ class PushAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = {
                 "status": "ok",
-                "service": "ASTM Mock Server Push API",
+                "service": "Analyzer Mock Server Push API",
                 "endpoints": {
                     "POST /push": "Trigger a push to OpenELIS",
                     "GET /health": "Health check"
@@ -976,12 +990,12 @@ def push_to_openelis(openelis_url: str, astm_message: str, timeout: int = 30) ->
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='ASTM LIS2-A2 Mock Server for OpenELIS Analyzer Testing'
+        description='Multi-Protocol Analyzer Simulator for OpenELIS Analyzer Testing'
     )
     parser.add_argument(
         '--port', '-p',
         type=int,
-        default=int(os.environ.get('ASTM_PORT', DEFAULT_PORT)),
+        default=_get_port_from_env(),
         help=f'Server port (default: {DEFAULT_PORT})'
     )
     parser.add_argument(
@@ -1121,7 +1135,7 @@ def main():
     # Push mode: Send messages to OpenELIS
     if args.push:
         print("=" * 60)
-        print("  ASTM Mock Server - Push Mode")
+        print("  Analyzer Mock Server - Push Mode")
         print("=" * 60)
         print(f"  OpenELIS URL: {args.push}")
         print(f"  Analyzer Type: {args.analyzer_type}")
@@ -1235,7 +1249,7 @@ def main():
             return 1
         
         print("=" * 60)
-        print("  ASTM Mock Server - API Mode")
+        print("  Analyzer Mock Server - API Mode")
         print("=" * 60)
         print(f"  API Port: {args.api_port}")
         print(f"  OpenELIS URL: {args.push}")

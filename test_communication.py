@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ASTM Mock Server Communication Test
+Analyzer Mock Server - ASTM Communication Test
 
-This script tests the ASTM mock server and demonstrates a typical
-ASTM LIS2-A2 communication pathway.
+This script tests the analyzer mock server's ASTM LIS2-A2 pathway and
+demonstrates a typical ASTM communication flow.
 
 Usage:
     python test_communication.py [--host HOST] [--port PORT]
@@ -311,7 +311,7 @@ def test_multiple_connections(host, port):
 def main():
     """Main test execution."""
     parser = argparse.ArgumentParser(
-        description='Test ASTM Mock Server Communication'
+        description='Test Analyzer Mock Server (ASTM) Communication'
     )
     parser.add_argument(
         '--host', '-H',
@@ -328,7 +328,7 @@ def main():
     args = parser.parse_args()
     
     print("="*60)
-    print("  ASTM Mock Server Communication Test")
+    print("  Analyzer Mock Server - ASTM Communication Test")
     print("="*60)
     print(f"\nTarget: {args.host}:{args.port}")
     print("\nThis test demonstrates typical ASTM LIS2-A2 communication")

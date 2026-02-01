@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ASTM Mock Server Tests - TDD RED Phase
+Analyzer Mock Server - ASTM Protocol Tests (TDD RED Phase)
 
 These tests are written BEFORE the server implementation per Constitution V
 (Test-Driven Development) and testing-roadmap.md.
@@ -26,7 +26,7 @@ Or: python test_server.py (runs unittest)
 
 import unittest
 import socket
-import threading
+import subprocess
 import time
 import json
 import os
@@ -51,6 +51,55 @@ TEST_HOST = 'localhost'
 TEST_PORT = 5000
 CONNECTION_TIMEOUT = 5  # seconds
 
+# Module-level server process; started in setUpModule if not already running
+_server_process = None
+_we_started_server = False
+
+
+def _check_server_available():
+    """Check if server is accepting connections on TEST_HOST:TEST_PORT."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((TEST_HOST, TEST_PORT))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+def setUpModule():
+    """Start server subprocess if not already running so integration tests are self-contained."""
+    global _server_process, _we_started_server
+    if _check_server_available():
+        return
+    root = os.path.dirname(os.path.abspath(__file__))
+    _server_process = subprocess.Popen(
+        [sys.executable, '-u', 'server.py', '--port', str(TEST_PORT)],
+        cwd=root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    for _ in range(30):
+        time.sleep(1)
+        if _check_server_available():
+            _we_started_server = True
+            return
+    _server_process.terminate()
+    _, err = _server_process.communicate(timeout=5)
+    raise RuntimeError(f"Server did not become ready: {err.decode()}")
+
+
+def tearDownModule():
+    """Stop server subprocess if we started it."""
+    global _server_process, _we_started_server
+    if _we_started_server and _server_process is not None:
+        _server_process.terminate()
+        try:
+            _server_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _server_process.kill()
+
 
 class TestASTMServerConnection(unittest.TestCase):
     """
@@ -58,32 +107,18 @@ class TestASTMServerConnection(unittest.TestCase):
     
     These tests validate TCP connection and ASTM handshake behavior.
     """
-    
+
     @classmethod
     def setUpClass(cls):
-        """Check if server is running before tests."""
-        cls.server_available = cls._check_server_available()
+        """Ensure server is available (started by setUpModule if needed)."""
+        cls.server_available = _check_server_available()
         if not cls.server_available:
-            print(f"\nWARNING: ASTM mock server not running on {TEST_HOST}:{TEST_PORT}")
-            print("Start the server first: python server.py")
-            print("Tests will be skipped.\n")
-    
-    @classmethod
-    def _check_server_available(cls):
-        """Check if server is accepting connections."""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex((TEST_HOST, TEST_PORT))
-            sock.close()
-            return result == 0
-        except Exception:
-            return False
-    
+            raise RuntimeError("Server not available after setUpModule")
+
     def setUp(self):
         """Skip tests if server not available."""
         if not self.server_available:
-            self.skipTest("ASTM mock server not running")
+            self.skipTest("Analyzer mock server not running")
     
     def _create_socket(self):
         """Create a socket with timeout."""
@@ -177,20 +212,20 @@ class TestASTMServerFieldQuery(unittest.TestCase):
     
     @classmethod
     def setUpClass(cls):
-        """Check if server is running before tests."""
-        cls.server_available = TestASTMServerConnection._check_server_available()
+        """Ensure server is available (started by setUpModule if needed)."""
+        cls.server_available = _check_server_available()
         if not cls.server_available:
-            print(f"\nWARNING: ASTM mock server not running on {TEST_HOST}:{TEST_PORT}")
-    
+            raise RuntimeError("Server not available after setUpModule")
+
     def setUp(self):
         if not self.server_available:
-            self.skipTest("ASTM mock server not running")
-    
+            self.skipTest("Analyzer mock server not running")
+
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(CONNECTION_TIMEOUT)
         return sock
-    
+
     def _send_frame(self, sock, data, frame_num=1):
         """
         Send an ASTM frame with proper framing.
@@ -290,14 +325,17 @@ class TestASTMServerMessageHandling(unittest.TestCase):
     These tests validate proper handling of incoming ASTM messages
     as would be sent by a real analyzer.
     """
-    
+
     @classmethod
     def setUpClass(cls):
-        cls.server_available = TestASTMServerConnection._check_server_available()
-    
+        """Ensure server is available (started by setUpModule if needed)."""
+        cls.server_available = _check_server_available()
+        if not cls.server_available:
+            raise RuntimeError("Server not available after setUpModule")
+
     def setUp(self):
         if not self.server_available:
-            self.skipTest("ASTM mock server not running")
+            self.skipTest("Analyzer mock server not running")
     
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -385,14 +423,17 @@ class TestASTMServerTimeout(unittest.TestCase):
     - 15 seconds for frame ACK timeout
     - 30 seconds for receiver timeout
     """
-    
+
     @classmethod
     def setUpClass(cls):
-        cls.server_available = TestASTMServerConnection._check_server_available()
-    
+        """Ensure server is available (started by setUpModule if needed)."""
+        cls.server_available = _check_server_available()
+        if not cls.server_available:
+            raise RuntimeError("Server not available after setUpModule")
+
     def setUp(self):
         if not self.server_available:
-            self.skipTest("ASTM mock server not running")
+            self.skipTest("Analyzer mock server not running")
     
     def test_connection_does_not_timeout_prematurely(self):
         """
@@ -426,14 +467,17 @@ class TestASTMStandardsCompliance(unittest.TestCase):
     - Retransmission handling (abort after 6 failures)
     - Character restrictions (restricted characters rejected)
     """
-    
+
     @classmethod
     def setUpClass(cls):
-        cls.server_available = TestASTMServerConnection._check_server_available()
-    
+        """Ensure server is available (started by setUpModule if needed)."""
+        cls.server_available = _check_server_available()
+        if not cls.server_available:
+            raise RuntimeError("Server not available after setUpModule")
+
     def setUp(self):
         if not self.server_available:
-            self.skipTest("ASTM mock server not running")
+            self.skipTest("Analyzer mock server not running")
     
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -614,7 +658,7 @@ class TestASTMStandardsCompliance(unittest.TestCase):
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("ASTM Mock Server Tests - TDD RED Phase")
+    print("Analyzer Mock Server - ASTM Protocol Tests")
     print("=" * 60)
     print(f"\nTarget: {TEST_HOST}:{TEST_PORT}")
     print("\nThese tests define expected behavior BEFORE implementation.")

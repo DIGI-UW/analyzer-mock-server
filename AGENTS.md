@@ -1,12 +1,12 @@
-# ASTM Mock Server - Agent Instructions
+# Analyzer Mock Server - Agent Instructions
 
-This file provides context and instructions for AI agents working on the ASTM Mock Server project.
+This file provides context and instructions for AI agents working on the Analyzer Mock Server project.
 
 ## Project Overview
 
-This project is a lightweight, Python-based mock server that simulates an ASTM LIS2-A2 compatible laboratory analyzer. It is used to test the OpenELIS ASTM Bridge.
+This project is a lightweight, Python-based multi-protocol analyzer simulator. It simulates laboratory analyzers over ASTM LIS2-A2, HL7 v2.x, RS232/Serial, and file-based protocols for testing OpenELIS analyzer integration.
 
-**Core Purpose**: To provide a rigorous, standards-compliant (CLSI LIS1-A) endpoint for validating ASTM protocol handling in OpenELIS.
+**Core Purpose**: To provide a standards-compliant (CLSI LIS1-A for ASTM; HL7 v2 for ORU^R01) multi-protocol endpoint for validating analyzer handling in OpenELIS.
 
 ## Governance & Principles
 
@@ -51,10 +51,10 @@ python -m pytest
 ### Docker
 ```bash
 # Build image
-docker build -t astm-mock-server .
+docker build -t analyzer-mock-server .
 
 # Run container
-docker run -p 5000:5000 astm-mock-server
+docker run -p 5000:5000 analyzer-mock-server
 ```
 
 ## Code Style & Conventions

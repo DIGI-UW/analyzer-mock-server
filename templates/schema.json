@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://openelis-global.org/astm-mock-server/template-schema",
+  "$id": "https://openelis-global.org/analyzer-mock-server/template-schema",
   "title": "Analyzer Message Template",
   "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports deterministic seed values for reproducible testing. Reference: specs/011-madagascar-analyzer-integration/research.md",
   "type": "object",

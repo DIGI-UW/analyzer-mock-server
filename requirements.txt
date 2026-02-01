@@ -1,10 +1,13 @@
-# ASTM Mock Server Dependencies
+# Analyzer Mock Server Dependencies
 # For testing analyzer integration with OpenELIS
 # Reference: specs/004-astm-analyzer-mapping/plan.md
 # M4: specs/011-madagascar-analyzer-integration - multi-protocol simulator
 
 # Testing
 pytest>=7.0.0
+
+# Template validation (template_loader.py --validate)
+jsonschema>=4.0.0
 
 # RS232 virtual serial simulation (M4)
 pyserial>=3.5

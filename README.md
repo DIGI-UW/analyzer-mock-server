@@ -1,19 +1,22 @@
-# ASTM LIS2-A2 Mock Server
+# Analyzer Mock Server
 
 > **For AI Agents:** See [AGENTS.md](AGENTS.md) for context and instructions.
 
-A simple mock server that simulates an ASTM-compatible laboratory analyzer for
-testing the OpenELIS analyzer field mapping feature.
+A multi-protocol analyzer simulator for testing OpenELIS analyzer integration.
+It simulates laboratory analyzers over ASTM LIS2-A2, HL7 v2.x, RS232/Serial, and
+file-based protocols.
 
 ## Overview
 
-This server implements a minimal subset of the ASTM LIS2-A2 protocol sufficient
-for:
+The server supports several protocols (M4 multi-protocol simulator):
 
-- Testing analyzer connection (ENQ/ACK handshake)
-- Querying available analyzer fields
-- Receiving sample results
-- Processing QC (Quality Control) data
+- **ASTM LIS2-A2** (TCP): Connection handshake, field query, result/QC messages
+- **HL7 v2.x ORU^R01**: HTTP API for result message generation
+- **RS232/Serial**: Virtual serial ports for ASTM over serial
+- **File**: CSV/TXT generation for file-import testing
+
+Templates define 12+ analyzer types (hematology, chemistry, molecular, etc.)
+with deterministic or random result generation.
 
 ## Quick Start
 
@@ -31,16 +34,16 @@ python server.py --port 5000 --analyzer-type HEMATOLOGY --response-delay 100 --v
 
 ```bash
 # Build the image
-docker build -t astm-mock-server .
+docker build -t analyzer-mock-server .
 
 # Run the container
-docker run -p 5000:5000 astm-mock-server
+docker run -p 5000:5000 analyzer-mock-server
 
 # With environment variables
 docker run -p 5000:5000 \
   -e ANALYZER_TYPE=CHEMISTRY \
   -e RESPONSE_DELAY_MS=50 \
-  astm-mock-server
+  analyzer-mock-server
 ```
 
 ### Running with Docker Compose (OpenELIS Integration)
@@ -48,7 +51,7 @@ docker run -p 5000:5000 \
 From the repository root:
 
 ```bash
-# Start OpenELIS with mock ASTM server
+# Start OpenELIS with analyzer mock server
 docker compose -f dev.docker-compose.yml -f docker-compose.astm-test.yml up -d
 ```
 
@@ -58,7 +61,8 @@ docker compose -f dev.docker-compose.yml -f docker-compose.astm-test.yml up -d
 
 | Variable            | Default    | Description              |
 | ------------------- | ---------- | ------------------------ |
-| `ASTM_PORT`         | 5000       | Server port              |
+| `ANALYZER_PORT`     | 5000       | Server port (preferred)  |
+| `ASTM_PORT`         | 5000       | Server port (deprecated; use `ANALYZER_PORT`) |
 | `ANALYZER_TYPE`     | HEMATOLOGY | Default analyzer type    |
 | `RESPONSE_DELAY_MS` | 100        | Simulated response delay |
 

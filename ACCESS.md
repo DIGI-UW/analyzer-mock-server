@@ -1,8 +1,8 @@
-# ASTM Mock Server Access Guide
+# Analyzer Mock Server Access Guide
 
 ## Quick Access
 
-The ASTM mock server is accessible via multiple methods:
+The analyzer mock server is accessible via multiple methods:
 
 ### From Host Machine
 

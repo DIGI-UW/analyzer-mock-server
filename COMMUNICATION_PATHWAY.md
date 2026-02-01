@@ -1,6 +1,7 @@
 # ASTM LIS2-A2 Communication Pathway
 
-This document outlines the typical communication flow between OpenELIS and an
+This document describes the ASTM protocol path of the Analyzer Mock Server.
+It outlines the typical communication flow between OpenELIS and an
 ASTM-compatible analyzer, with full CLSI LIS1-A standards compliance.
 
 ## Protocol Standards

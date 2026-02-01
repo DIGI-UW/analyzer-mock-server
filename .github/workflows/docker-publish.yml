@@ -12,7 +12,7 @@ env:
   # Use docker.io for Docker Hub if empty
   REGISTRY: docker.io
   # Image name
-  IMAGE_NAME: itechuw/astm-mock-server
+  IMAGE_NAME: itechuw/analyzer-mock-server
 
 jobs:
   build:

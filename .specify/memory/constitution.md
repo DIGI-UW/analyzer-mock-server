@@ -5,12 +5,12 @@ Sync Impact Report:
 - Added sections: Architecture & Tech Stack, Quality Assurance & Verification.
 - Templates requiring updates: None (Initial setup).
 -->
-# ASTM Mock Server Constitution
+# Analyzer Mock Server Constitution
 
 ## Core Principles
 
 ### I. Strict Standards Compliance
-The server MUST implement strict adherence to ASTM LIS2-A2 (message format) and CLSI LIS1-A (low-level protocol) standards. This includes mandatory checksum validation, frame number sequencing, timeout handling (15s establishment/ACK, 30s receiver), and retransmission logic (abort after 6 failures). "Good enough" is not acceptable; the mock must behave like a rigorous real-world analyzer to validly test the bridge.
+The server MUST implement strict adherence to protocol standards for each supported transport: ASTM LIS2-A2 (message format) and CLSI LIS1-A (low-level protocol) for ASTM/TCP and serial; HL7 v2.x for ORU^R01; and documented formats for file-based output. For ASTM, this includes mandatory checksum validation, frame number sequencing, timeout handling (15s establishment/ACK, 30s receiver), and retransmission logic (abort after 6 failures). "Good enough" is not acceptable; the mock must behave like a rigorous real-world analyzer to validly test the bridge.
 
 ### II. Container-Native Deployment
 The application MUST be designed as a container-native service. All configuration MUST be exposed via environment variables or mounted configuration files (e.g., `fields.json`). The system MUST function correctly in Docker, Docker Compose, and Docker Swarm environments, supporting service discovery and networking typical of these platforms.
@@ -43,7 +43,7 @@ The server MUST provide clear, verbose logging capabilities to aid in debugging 
 
 ## Governance
 
-This Constitution defines the core requirements for the ASTM Mock Server.
+This Constitution defines the core requirements for the Analyzer Mock Server.
 
 - **Amendments**: Require valid justification, particularly if relaxing standards compliance.
 - **Compliance Priority**: Protocol compliance is the highest priority; features that break strict LIS1-A/LIS2-A compliance MUST be rejected or strictly opt-in for edge-case testing.

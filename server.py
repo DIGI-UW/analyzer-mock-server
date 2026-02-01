@@ -839,8 +839,29 @@ class PushAPIHandler(BaseHTTPRequestHandler):
             destination = None
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > 0:
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                count = int(body.get('count', 1))
+                try:
+                    body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Invalid JSON body"}).encode('utf-8'))
+                    return
+                raw_count = body.get('count', 1)
+                try:
+                    count = int(raw_count)
+                except (TypeError, ValueError):
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be an integer"}).encode('utf-8'))
+                    return
+                if count < 1 or count > 1000:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be between 1 and 1000"}).encode('utf-8'))
+                    return
                 destination = body.get('destination')
             results = []
             success_count = 0
@@ -1107,7 +1128,7 @@ def push_hl7_to_openelis(openelis_url: str, hl7_message: str, timeout: int = 30)
         req = urllib.request.Request(
             endpoint,
             data=hl7_message.encode('utf-8'),
-            headers={'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'},
+            headers={'Content-Type': 'text/plain; charset=utf-8'},
             method='POST'
         )
         import ssl
@@ -1326,6 +1347,7 @@ def main():
                     if i < args.push_count - 1:
                         time.sleep(args.push_interval)
         except KeyboardInterrupt:
+            # Allow user-initiated interruption and proceed to summary output
             pass
         print()
         print("=" * 60)

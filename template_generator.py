@@ -23,7 +23,7 @@ import argparse
 import random
 import sys
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 
 
 class TemplateMessageGenerator:
@@ -121,9 +121,10 @@ class TemplateMessageGenerator:
         else:
             value = self._generate_random_value(field)
 
-        # Format value
-        if isinstance(value, float):
-            value = f"{value:.2f}" if value != int(value) else str(int(value))
+        # Format value consistently for both int and float
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            value = f"{numeric:.2f}" if numeric != int(numeric) else str(int(numeric))
         else:
             value = str(value)
 
@@ -133,21 +134,35 @@ class TemplateMessageGenerator:
 
         return f"R|{seq}|^^^{code}|{value}|{unit}|{normal_range}|{flag}||{status}|{ts}"
 
-    def _generate_random_value(self, field: Dict) -> float:
-        """Generate a random value within the normal range.
+    def _generate_random_value(self, field: Dict):
+        """Generate a random value appropriate for the field type.
 
         Args:
-            field: Field definition with optional normalRange
+            field: Field definition with optional normalRange/possibleValues
 
         Returns:
-            Random value within range, or default random value
+            A randomly generated value:
+                - float for NUMERIC fields (within normalRange when possible)
+                - one of possibleValues for QUALITATIVE fields
+                - a random string for TEXT fields
         """
         normal_range = field.get('normalRange', '')
         field_type = field.get('type', 'NUMERIC')
 
-        if field_type != 'NUMERIC':
-            return 0.0
+        # QUALITATIVE fields: choose from possibleValues if available
+        if field_type == 'QUALITATIVE':
+            possible_values = field.get('possibleValues')
+            if isinstance(possible_values, (list, tuple)) and possible_values:
+                return random.choice(possible_values)
+            # Fallback if no possibleValues defined
+            return 'UNKNOWN'
 
+        # TEXT fields: generate a simple random alphanumeric string
+        if field_type == 'TEXT':
+            chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            return ''.join(random.choices(chars, k=8))
+
+        # NUMERIC fields: generate within normal range
         if not normal_range:
             return round(random.uniform(1, 100), 2)
 
@@ -166,6 +181,7 @@ class TemplateMessageGenerator:
             else:
                 return round(random.uniform(1, 100), 2)
         except (ValueError, IndexError):
+            # If normalRange format is malformed, fall back to generic range
             return round(random.uniform(1, 100), 2)
 
     def get_field_count(self) -> int:

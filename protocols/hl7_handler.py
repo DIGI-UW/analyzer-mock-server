@@ -9,11 +9,11 @@ Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE,
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 def generate_oru_r01(
-    template: Dict[str, Any],
+    template: Dict,
     deterministic: bool = True,
     timestamp: Optional[datetime] = None,
     patient_id: Optional[str] = None,
@@ -44,13 +44,13 @@ def generate_oru_r01(
     if timestamp is None:
         timestamp = datetime.now()
 
-    analyzer = template.get("analyzer", {})
     identification = template.get("identification", {})
     fields = template.get("fields", [])
     test_patient = template.get("testPatient", {})
     test_sample = template.get("testSample", {})
 
-    sending_app = identification.get("hl7_sending_app", "SIMULATOR")
+    # Prefer new HL7 identification fields, but fall back to legacy msh_sender for backward compatibility
+    sending_app = identification.get("hl7_sending_app") or identification.get("msh_sender", "SIMULATOR")
     sending_facility = identification.get("hl7_sending_facility", "LAB")
     receiving_app = "OpenELIS"
     receiving_facility = "LAB"
@@ -58,14 +58,15 @@ def generate_oru_r01(
     ts = timestamp.strftime("%Y%m%d%H%M%S")
     if message_control_id is None:
         message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
+    # Use sample_id as placer_order_id if not explicitly provided (sample ID = accession number)
+    if sample_id is None:
+        sample_id = test_sample.get("id", "SAMPLE001")
     if placer_order_id is None:
-        placer_order_id = test_sample.get("id", "PLACER001")
+        placer_order_id = sample_id
     if filler_order_id is None:
         filler_order_id = "FILLER012"
     if patient_id is None:
         patient_id = test_patient.get("id", "PAT001")
-    if sample_id is None:
-        sample_id = test_sample.get("id", "SAMPLE001")
 
     pid_name = test_patient.get("name", "RAKOTO^JAO")
     pid_dob = test_patient.get("dob", "19850412")
@@ -102,11 +103,12 @@ def generate_oru_r01(
     ])
     segments.append(orc)
 
-    # OBR|1|placer|filler|1|^^^panel_code^panel_label|||datetime|...
+    # OBR|1|placer|filler|^^^panel_code^panel_label|||datetime|...
+    # OBR-4 is Universal Service Identifier (test/panel info), not a sequence number
     obr = "|".join([
-        "OBR", "1", placer_order_id, filler_order_id, "1",
+        "OBR", "1", placer_order_id, filler_order_id,
         obr_filler,
-        "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "F", "", "", "", "", "", "", ""
+        "", "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "F", "", "", "", "", "", "", ""
     ])
     segments.append(obr)
 
@@ -117,7 +119,7 @@ def generate_oru_r01(
     return "\r".join(segments) + "\r"
 
 
-def _obx_segment(seq: int, field: Dict[str, Any], deterministic: bool) -> str:
+def _obx_segment(seq: int, field: Dict, deterministic: bool) -> str:
     """Build one OBX segment. Value type ST for TEXT/QUALITATIVE, NM for NUMERIC."""
     code = field.get("code", f"TEST{seq}")
     name = field.get("name", code)
@@ -139,9 +141,9 @@ def _obx_segment(seq: int, field: Dict[str, Any], deterministic: bool) -> str:
             value = str(value)
 
     value_type = "NM" if field_type == "NUMERIC" else "ST"
-    # OBX|seq|value_type|^^^code^name||value|||N|||F||||||
+    # OBX|seq|value_type|^^^code^name||value|unit||N|||F||||||
     obx_id = f"^^^{code}^{name}"
-    parts = ["OBX", str(seq), value_type, obx_id, "", value, "", "", "N", "", "", "F", "", "", "", "", ""]
+    parts = ["OBX", str(seq), value_type, obx_id, "", value, unit, "", "N", "", "", "F", "", "", "", "", ""]
     return "|".join(parts)
 
 

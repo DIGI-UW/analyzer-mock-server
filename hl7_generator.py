@@ -18,7 +18,7 @@ Usage:
 import random
 import uuid
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 
 
 def generate_oru_r01(
@@ -43,14 +43,13 @@ def generate_oru_r01(
     if timestamp is None:
         timestamp = datetime.now()
 
-    analyzer = template.get('analyzer', {})
-    protocol = template.get('protocol', {})
     identification = template.get('identification', {})
     fields = template.get('fields', [])
     test_patient = template.get('testPatient', {})
     test_sample = template.get('testSample', {})
 
-    sending_app = identification.get('hl7_sending_app', 'MINDRAY')
+    # Prefer HL7-specific identification fields, but fall back to msh_sender for backward compatibility
+    sending_app = identification.get('hl7_sending_app') or identification.get('msh_sender', 'MINDRAY')
     sending_facility = identification.get('hl7_sending_facility', 'LAB')
     ts_str = timestamp.strftime('%Y%m%d%H%M%S')
     msg_id = f"{sending_app}{timestamp.strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
@@ -113,14 +112,31 @@ def generate_oru_r01(
     return '\n'.join(segments) + '\n'
 
 
-def _random_value_for_field(field: Dict) -> float:
-    """Generate a random value within normal range for a numeric field."""
+def _random_value_for_field(field: Dict):
+    """Generate a random value appropriate for the field type.
+
+    Args:
+        field: Field definition with optional normalRange/possibleValues
+
+    Returns:
+        A randomly generated value appropriate for the field type.
+    """
     normal_range = field.get('normalRange', '')
     field_type = field.get('type', 'NUMERIC')
 
-    if field_type != 'NUMERIC':
-        return 0.0
+    # QUALITATIVE fields: choose from possibleValues if available
+    if field_type == 'QUALITATIVE':
+        possible_values = field.get('possibleValues')
+        if isinstance(possible_values, (list, tuple)) and possible_values:
+            return random.choice(possible_values)
+        return 'UNKNOWN'
 
+    # TEXT fields: generate a simple random alphanumeric string
+    if field_type == 'TEXT':
+        chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        return ''.join(random.choices(chars, k=8))
+
+    # NUMERIC fields: generate within normal range
     if not normal_range:
         return round(random.uniform(1, 100), 2)
 
@@ -137,5 +153,6 @@ def _random_value_for_field(field: Dict) -> float:
             min_val = float(normal_range[1:].strip())
             return round(random.uniform(min_val * 1.1, min_val * 2), 2)
     except (ValueError, IndexError):
+        # If normalRange format is malformed, fall back to generic range
         pass
     return round(random.uniform(1, 100), 2)

@@ -5,6 +5,7 @@
 
 # Testing
 pytest>=7.0.0
+jsonschema>=4.0.0
 
 # RS232 virtual serial simulation (M4)
 pyserial>=3.5

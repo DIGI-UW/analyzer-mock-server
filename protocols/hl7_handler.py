@@ -1,143 +1,154 @@
 """
-HL7 v2.x ORU^R01 protocol handler (M4).
+HL7 ORU^R01 message generator for analyzer simulator.
 
-Generates valid ORU^R01 result messages for simulator.
-Reference: specs/011-madagascar-analyzer-integration, tasks T074–T078.
+Generates HL7 v2.x ORU^R01 (Observation Report) messages from template definitions
+so OpenELIS can route and parse them via analyzer plugins (e.g. Abbott Architect).
+
+Template identification.hl7_sending_app -> MSH-3, hl7_sending_facility -> MSH-4.
+Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE, NM for NUMERIC).
 """
 
-import logging
-import random
-import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-from .base_handler import BaseHandler
-
-logger = logging.getLogger(__name__)
-
-SEGMENT_TERM = "\r"
+from typing import Dict, List, Optional
 
 
-def _value_type(field: Dict[str, Any]) -> str:
-    t = (field.get("type") or "NUMERIC").upper()
-    if t == "NUMERIC":
-        return "NM"
-    if t == "QUALITATIVE":
-        return "CE"
-    return "ST"
+def generate_oru_r01(
+    template: Dict,
+    deterministic: bool = True,
+    timestamp: Optional[datetime] = None,
+    patient_id: Optional[str] = None,
+    sample_id: Optional[str] = None,
+    placer_order_id: Optional[str] = None,
+    filler_order_id: Optional[str] = None,
+    message_control_id: Optional[str] = None,
+) -> str:
+    """
+    Generate a complete HL7 ORU^R01 message from a template.
+
+    Args:
+        template: Loaded template dict (analyzer, protocol, identification, fields, testPatient, testSample).
+        deterministic: If True, use seedValue from fields; else use placeholder values.
+        timestamp: Optional timestamp (defaults to now).
+        patient_id: Override patient ID.
+        sample_id: Override sample/accession ID.
+        placer_order_id: Override ORC-2/OBR-2 placer order number.
+        filler_order_id: Override ORC-3/OBR-3 filler order number.
+        message_control_id: Override MSH-10 message control ID.
+
+    Returns:
+        Complete ORU^R01 message as newline-separated string (segment terminator \\r).
+    """
+    if template.get("protocol", {}).get("type") != "HL7":
+        raise ValueError("Template protocol type must be HL7")
+
+    if timestamp is None:
+        timestamp = datetime.now()
+
+    identification = template.get("identification", {})
+    fields = template.get("fields", [])
+    test_patient = template.get("testPatient", {})
+    test_sample = template.get("testSample", {})
+
+    # Prefer new HL7 identification fields, but fall back to legacy msh_sender for backward compatibility
+    sending_app = identification.get("hl7_sending_app") or identification.get("msh_sender", "SIMULATOR")
+    sending_facility = identification.get("hl7_sending_facility", "LAB")
+    receiving_app = "OpenELIS"
+    receiving_facility = "LAB"
+
+    ts = timestamp.strftime("%Y%m%d%H%M%S")
+    if message_control_id is None:
+        message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
+    # Use sample_id as placer_order_id if not explicitly provided (sample ID = accession number)
+    if sample_id is None:
+        sample_id = test_sample.get("id", "SAMPLE001")
+    if placer_order_id is None:
+        placer_order_id = sample_id
+    if filler_order_id is None:
+        filler_order_id = "FILLER012"
+    if patient_id is None:
+        patient_id = test_patient.get("id", "PAT001")
+
+    pid_name = test_patient.get("name", "RAKOTO^JAO")
+    pid_dob = test_patient.get("dob", "19850412")
+    pid_sex = test_patient.get("sex", "F")
+    panel_type = test_sample.get("type", "IMMUNO^IMMUNOASSAY PANEL")
+    if "^" in panel_type:
+        panel_code, panel_label = panel_type.split("^", 1)
+    else:
+        panel_code = panel_type
+        panel_label = panel_type
+    obr_filler = f"^^^{panel_code}^{panel_label}"
+
+    segments: List[str] = []
+
+    # MSH|^~\&|SENDING_APP|SENDING_FACILITY|RECV_APP|RECV_FAC|datetime||ORU^R01|control_id|P|2.5.1||||||||
+    msh = "|".join([
+        "MSH", "^~\\&", sending_app, sending_facility,
+        receiving_app, receiving_facility, ts, "", "ORU^R01",
+        message_control_id, "P", "2.5.1", "", "", "", "", "", "", ""
+    ])
+    segments.append(msh)
+
+    # PID|1||PATIENT_ID^^^HOSPITAL||Last^First^Middle||DOB|Sex|...
+    pid = "|".join([
+        "PID", "1", "", f"{patient_id}^^^HOSPITAL", "", pid_name, "", pid_dob, pid_sex,
+        "", "", "", "", "", "", "", "", "", "", "", ""
+    ])
+    segments.append(pid)
+
+    # ORC|RE|placer|filler|...
+    orc = "|".join([
+        "ORC", "RE", placer_order_id, filler_order_id,
+        "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
+    ])
+    segments.append(orc)
+
+    # OBR|1|placer|filler|^^^panel_code^panel_label|||datetime|...
+    # OBR-4 is Universal Service Identifier (test/panel info), not a sequence number
+    obr = "|".join([
+        "OBR", "1", placer_order_id, filler_order_id,
+        obr_filler,
+        "", "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "F", "", "", "", "", "", "", ""
+    ])
+    segments.append(obr)
+
+    for seq, field in enumerate(fields, start=1):
+        obx = _obx_segment(seq, field, deterministic)
+        segments.append(obx)
+
+    return "\r".join(segments) + "\r"
 
 
-def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out = []
-    for f in template.get("fields", []):
-        name = f.get("name", "Unknown")
-        code = f.get("code", name)
-        out.append({
-            "name": name,
-            "displayName": f.get("displayName", name),
-            "code": code,
-            "type": f.get("type", "NUMERIC"),
-            "unit": f.get("unit") or "",
-            "normalRange": f.get("normalRange", ""),
-            "possibleValues": f.get("possibleValues"),
-        })
-    return out
+def _obx_segment(seq: int, field: Dict, deterministic: bool) -> str:
+    """Build one OBX segment. Value type ST for TEXT/QUALITATIVE, NM for NUMERIC."""
+    code = field.get("code", f"TEST{seq}")
+    name = field.get("name", code)
+    unit = field.get("unit", "")
+    field_type = field.get("type", "NUMERIC")
+
+    if field_type == "NUMERIC":
+        if deterministic and "seedValue" in field:
+            raw = field["seedValue"]
+            value = str(int(raw)) if isinstance(raw, float) and raw == int(raw) else str(raw)
+        else:
+            value = "0"
+    elif field_type == "QUALITATIVE":
+        possible = field.get("possibleValues", ["NEGATIVE", "POSITIVE"])
+        value = possible[0] if possible else "NEGATIVE"
+    else:
+        value = field.get("seedValue", f"Result for {code}")
+        if not isinstance(value, str):
+            value = str(value)
+
+    value_type = "NM" if field_type == "NUMERIC" else "ST"
+    # OBX|seq|value_type|^^^code^name||value|unit||N|||F||||||
+    obx_id = f"^^^{code}^{name}"
+    parts = ["OBX", str(seq), value_type, obx_id, "", value, unit, "", "N", "", "", "F", "", "", "", "", ""]
+    return "|".join(parts)
 
 
-def _random_value(field: Dict[str, Any]) -> str:
-    typ = (field.get("type") or "NUMERIC").upper()
-    unit = field.get("unit") or ""
-    normal_range = field.get("normalRange", "")
+class HL7Handler:
+    """M4-compatible wrapper: generate(template, **kwargs) delegates to generate_oru_r01."""
 
-    if typ == "NUMERIC":
-        if normal_range:
-            try:
-                if "-" in normal_range:
-                    low, high = map(float, normal_range.split("-"))
-                    return str(round(random.uniform(low, high), 2))
-                if normal_range.startswith("<"):
-                    max_v = float(normal_range[1:])
-                    return str(round(random.uniform(0, max_v * 0.9), 2))
-                if normal_range.startswith(">"):
-                    min_v = float(normal_range[1:])
-                    return str(round(random.uniform(min_v * 1.1, min_v * 2), 2))
-            except Exception:
-                pass
-        return str(round(random.uniform(1, 100), 2))
-    if typ == "QUALITATIVE":
-        vals = field.get("possibleValues", ["NEGATIVE", "POSITIVE"])
-        return random.choice(vals)
-    return f"Result {field.get('name', '')}"
-
-
-class HL7Handler(BaseHandler):
-    """HL7 v2.x ORU^R01 message generation."""
-
-    protocol_type = "HL7"
-
-    def generate(self, template: Dict[str, Any], **kwargs) -> str:
-        if not self.validate_template(template):
-            raise ValueError("Invalid template: missing analyzer or fields")
-
-        ident = template.get("identification") or {}
-        msh_sender = ident.get("msh_sender") or "SIMULATOR"
-        anal = template["analyzer"]
-        manufacturer = anal.get("manufacturer", "")
-        model = anal.get("model", "")
-        name = anal.get("name", "Mock")
-
-        patient_id = kwargs.get("patient_id")
-        sample_id = kwargs.get("sample_id")
-        patient_name = kwargs.get("patient_name")
-        patient_dob = kwargs.get("patient_dob")
-        patient_sex = kwargs.get("patient_sex")
-        tests = kwargs.get("tests")
-
-        now = datetime.now()
-        ts = now.strftime("%Y%m%d%H%M%S")
-        msg_id = str(uuid.uuid4())[:8].upper()
-
-        if not patient_id:
-            patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
-        if not sample_id:
-            sample_id = f"S{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
-        if not patient_name:
-            fn = ["John", "Mary", "James", "Sarah"]
-            ln = ["Smith", "Johnson", "Williams"]
-            patient_name = f"{random.choice(ln)}^{random.choice(fn)}"
-        if not patient_dob:
-            y, m, d = random.randint(1950, 2000), random.randint(1, 12), random.randint(1, 28)
-            patient_dob = f"{y}{m:02d}{d:02d}"
-        if not patient_sex:
-            patient_sex = random.choice(["M", "F"])
-
-        fields = _normalize_fields(template)
-        if tests:
-            fields = [f for f in fields if f.get("name") in tests or f.get("code") in tests]
-        if not fields:
-            fields = _normalize_fields(template)
-
-        segments = []
-
-        msh = (
-            f"MSH|^~\\&|{msh_sender}|{manufacturer}|OPENELIS|LAB|{ts}||ORU^R01|{msg_id}|P|2.5||||||"
-        )
-        segments.append(msh)
-
-        pid = f"PID|1||{patient_id}^^^^^MR||{patient_name}||{patient_dob}|{patient_sex}"
-        segments.append(pid)
-
-        obr = f"OBR|1|{sample_id}|{sample_id}|{model}^{model}|||{ts}"
-        segments.append(obr)
-
-        for i, f in enumerate(fields, 1):
-            vt = _value_type(f)
-            code = f.get("code", f.get("name", ""))
-            disp = f.get("displayName", f.get("name", ""))
-            val = _random_value(f)
-            unit = f.get("unit", "")
-            ref = f.get("normalRange", "")
-            obx = f"OBX|{i}|{vt}|{code}^{disp}||{val}|{unit}|{ref}|||F|||{ts}"
-            segments.append(obx)
-
-        return SEGMENT_TERM.join(segments) + SEGMENT_TERM
+    def generate(self, template, deterministic=True, **kwargs):
+        return generate_oru_r01(template, deterministic=deterministic, **kwargs)

@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate JSON templates
+        run: |
+          python -c "
+          import json
+          import glob
+          for f in glob.glob('templates/*.json'):
+              print(f'Validating {f}...')
+              json.load(open(f))
+          print('All templates valid')
+          "
+
+      - name: Run unit tests
+        run: |
+          python -m pytest test_hl7.py test_protocols.py -v --tb=short
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile server.py template_loader.py template_generator.py
+          python -m py_compile protocols/*.py
+          python -m py_compile hl7_generator.py generate_file.py
+          echo "All Python files have valid syntax"

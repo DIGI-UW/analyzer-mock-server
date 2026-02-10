@@ -3,16 +3,16 @@
 **Date**: 2025-12-01  
 **Feature**: 004-astm-analyzer-mapping  
 **Analyzed Components**:
-- `tools/astm-http-bridge` (v2.3.5) - DIGI-UW/astm-http-bridge submodule
+- `tools/openelis-analyzer-bridge` (v2.3.5) - DIGI-UW/openelis-analyzer-bridge submodule
 - `tools/astm-mock-server` - Python mock analyzer server
 
 ---
 
 ## Executive Summary
 
-After thorough analysis of both the **astm-http-bridge** submodule and the **astm-mock-server**, this report provides a detailed assessment of their bi-directional communication capabilities and specification coverage.
+After thorough analysis of both the **openelis-analyzer-bridge** submodule and the **astm-mock-server**, this report provides a detailed assessment of their bi-directional communication capabilities and specification coverage.
 
-**Conclusion**: The `astm-http-bridge` **CAN support bi-directional communication** with the `astm-mock-server` for all workflows required by the 004-astm-analyzer-mapping feature.
+**Conclusion**: The `openelis-analyzer-bridge` **CAN support bi-directional communication** with the `astm-mock-server` for all workflows required by the 004-astm-analyzer-mapping feature.
 
 ---
 
@@ -20,7 +20,7 @@ After thorough analysis of both the **astm-http-bridge** submodule and the **ast
 
 ### 1.1 Core Architecture
 
-The `astm-http-bridge` (v2.3.5) is a Spring Boot 3.3.0 application that provides:
+The `openelis-analyzer-bridge` (v2.3.5) is a Spring Boot 3.3.0 application that provides:
 
 **Bi-Directional Translation:**
 
@@ -108,7 +108,7 @@ The `astm-mock-server` implements **full CLSI LIS1-A compliance**:
 
 ### 3.1 Compatibility Matrix
 
-| Workflow | astm-mock-server | astm-http-bridge | Compatible? |
+| Workflow | astm-mock-server | openelis-analyzer-bridge | Compatible? |
 |----------|------------------|------------------|-------------|
 | Analyzer → OpenELIS (results) | ✅ Sends frames | ✅ Receives, forwards to HTTP | ✅ **YES** |
 | OpenELIS → Analyzer (query) | ✅ Receives query, responds | ✅ Forwards HTTP → ASTM | ✅ **YES** |
@@ -147,7 +147,7 @@ The mock server's query response mechanism uses **role reversal** (line contenti
 3. Client becomes receiver, ACKs
 4. Server sends field list
 
-The `astm-http-bridge` handles this via `handleLineContention()` method in `DefaultForwardingHTTPToASTMHandler.java`:
+The `openelis-analyzer-bridge` handles this via `handleLineContention()` method in `DefaultForwardingHTTPToASTMHandler.java`:
 
 ```java
 private HTTPHandlerResponse handleLineContention(Communicator communicator, Socket socket, ASTMMessage message) {
@@ -251,7 +251,7 @@ private HTTPHandlerResponse handleLineContention(Communicator communicator, Sock
 
 1. **Create Bridge Configuration Template**:
    ```yaml
-   # tools/astm-http-bridge/configuration.yml (example)
+   # tools/openelis-analyzer-bridge/configuration.yml (example)
    org.itech.ahb:
      listen-astm-server:
        port: 12001
@@ -283,8 +283,8 @@ cd tools/astm-mock-server && python server.py --port 5000 --verbose
 Add to `dev.docker-compose.yml`:
 ```yaml
 services:
-  astm-http-bridge:
-    image: itechuw/astm-http-bridge:latest
+  openelis-analyzer-bridge:
+    image: itechuw/openelis-analyzer-bridge:latest
     ports:
       - "12001:12001"  # ASTM LIS1-A
       - "8442:8443"    # HTTP API
@@ -298,7 +298,7 @@ services:
 
 ## 7. Conclusion
 
-**The `astm-http-bridge` CAN support bi-directional communication with the `astm-mock-server`** for all workflows required by the 004-astm-analyzer-mapping feature:
+**The `openelis-analyzer-bridge` CAN support bi-directional communication with the `astm-mock-server`** for all workflows required by the 004-astm-analyzer-mapping feature:
 
 | Workflow | Support Status |
 |----------|----------------|
@@ -312,7 +312,7 @@ The communication workflows are **~82.5% specified** with minor gaps around line
 
 ## References
 
-- [ASTM-HTTP-Bridge Repository](https://github.com/DIGI-UW/astm-http-bridge)
+- [ASTM-HTTP-Bridge Repository](https://github.com/DIGI-UW/openelis-analyzer-bridge)
 - [Mock Server README](../../tools/astm-mock-server/README.md)
 - [Communication Pathway Documentation](../../tools/astm-mock-server/COMMUNICATION_PATHWAY.md)
 - [Feature Specification](./spec.md)

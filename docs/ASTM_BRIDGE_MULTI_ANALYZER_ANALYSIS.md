@@ -3,13 +3,13 @@
 **Date**: 2025-01-28  
 **Feature**: 004-astm-analyzer-mapping  
 **Analysis Type**: Architecture Gap Analysis  
-**Scope**: Minimal updates needed to `tools/astm-http-bridge` for multi-analyzer mediation and bi-directional query support
+**Scope**: Minimal updates needed to `tools/openelis-analyzer-bridge` for multi-analyzer mediation and bi-directional query support
 
 ---
 
 ## Executive Summary
 
-The `astm-http-bridge` is a **simple TCP-HTTP protocol router**. It should remain focused on protocol translation, not business logic. OpenELIS handles analyzer identification, routing, and query management.
+The `openelis-analyzer-bridge` is a **simple TCP-HTTP protocol router**. It should remain focused on protocol translation, not business logic. OpenELIS handles analyzer identification, routing, and query management.
 
 **Key Findings**:
 - ✅ **Multi-analyzer support**: Bridge already handles multiple concurrent analyzer connections (one thread per connection via `ASTMServlet`)
@@ -295,7 +295,7 @@ H|\^&|||...
 
 ## Conclusion
 
-The `astm-http-bridge` requires **minimal updates** to support Feature 004 requirements. The bridge should remain a simple TCP-HTTP protocol router.
+The `openelis-analyzer-bridge` requires **minimal updates** to support Feature 004 requirements. The bridge should remain a simple TCP-HTTP protocol router.
 
 **Required Bridge Changes**:
 1. **Source IP Header** (CRITICAL) - Include `X-Source-Analyzer-IP` header when forwarding analyzer messages to OpenELIS

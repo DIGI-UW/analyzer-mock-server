@@ -462,19 +462,23 @@ class ASTMProtocolHandler:
         """
         logger.info(f"[FIELD_QUERY] Sending response to {self.addr}")
 
+        # Reset frame numbering for this new ASTM transmission.
+        # CLSI LIS1-A expects frame numbers to restart for each ENQ→EOT sequence.
+        self.frame_number = 0
+
         # Initiate transmission: send ENQ and wait for ACK
         logger.debug(f"[FIELD_QUERY] Sending ENQ to initiate response")
         self._send(ENQ)
 
-        try:
-            response = self._receive_byte()
-            if response != ACK:
-                logger.warning(f"[FIELD_QUERY] Did not receive ACK, got: {response.hex() if response else 'none'}")
-                return
-            logger.debug(f"[FIELD_QUERY] Received ACK, proceeding")
-        except socket.timeout:
+        # _receive_byte() catches socket.timeout and returns None
+        response = self._receive_byte()
+        if response is None:
             logger.warning("[FIELD_QUERY] Timeout waiting for ACK")
             return
+        if response != ACK:
+            logger.warning(f"[FIELD_QUERY] Did not receive ACK, got: {response.hex()}")
+            return
+        logger.debug(f"[FIELD_QUERY] Received ACK, proceeding")
 
         if self.astm_template:
             # Template mode: generate full ASTM message and send as framed records
@@ -761,7 +765,14 @@ class PushAPIHandler(BaseHTTPRequestHandler):
             # Get parameters from query string
             template_name = query_params.get('template', [None])[0]
             analyzer_type = query_params.get('analyzer_type', ['HEMATOLOGY'])[0].upper()
-            count = int(query_params.get('count', ['1'])[0])
+            try:
+                count = int(query_params.get('count', ['1'])[0])
+            except (TypeError, ValueError):
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be an integer"}).encode('utf-8'))
+                return
             destination = query_params.get('destination', [None])[0]
 
             # Read request body if present (JSON) — overrides query params
@@ -774,7 +785,14 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                     logger.debug(f"[API] Request body: {json.dumps(request_body)}")
                     template_name = request_body.get('template', template_name)
                     analyzer_type = request_body.get('analyzer_type', analyzer_type).upper()
-                    count = int(request_body.get('count', count))
+                    try:
+                        count = int(request_body.get('count', count))
+                    except (TypeError, ValueError):
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be an integer"}).encode('utf-8'))
+                        return
                     destination = request_body.get('destination', destination)
                 except json.JSONDecodeError as e:
                     logger.warning(f"[API] Failed to parse JSON body: {e}")
@@ -801,6 +819,12 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({"status": "error", "message": f"Template not found: {template_name}"}).encode('utf-8'))
+                    return
+                if template.get('protocol', {}).get('type') != 'ASTM':
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": f"Template '{template_name}' is not ASTM protocol"}).encode('utf-8'))
                     return
                 handler = ASTMHandler()
                 for i in range(count):
@@ -1118,7 +1142,7 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                 "endpoints": {
                     "GET /health": "Health check",
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
-                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count)",
+                    "POST /simulate/hl7/{template}": "Generate HL7 ORU^R01 (JSON body: patientId, sampleId)",
                     "GET /simulate/astm/{template}": "Generate ASTM message from template",
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count)",
                 },
@@ -1293,8 +1317,14 @@ def _push_astm_to_destination(destination: str, astm_message: str) -> bool:
             return False
         return push_astm_tcp(host, port, astm_message)
     else:
-        # HTTP push (same as legacy push_to_openelis)
-        return push_to_openelis(destination, astm_message)
+        # HTTP push — allow both base URLs and full endpoint URLs.
+        # push_to_openelis() appends /api/OpenELIS-Global/analyzer/astm, so strip
+        # it if the caller already included it (mirrors push_hl7_to_openelis logic).
+        astm_suffix = "/api/OpenELIS-Global/analyzer/astm"
+        clean_dest = destination.rstrip("/")
+        if clean_dest.endswith(astm_suffix):
+            clean_dest = clean_dest[:-len(astm_suffix)]
+        return push_to_openelis(clean_dest, astm_message)
 
 
 def start_simulate_api_server(port: int):
@@ -1481,7 +1511,7 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
         logger.info(f"[PUSH-TCP] Connected to {host}:{port}")
 
         # Step 1: Send ENQ to establish link
-        sock.send(ENQ)
+        sock.sendall(ENQ)
         response = sock.recv(1)
         if response != ACK:
             logger.error(f"[PUSH-TCP] ENQ not ACKed, got: {response.hex() if response else 'none'}")
@@ -1502,7 +1532,7 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
             checksum_str = f'{checksum:02X}'.encode()
 
             frame = STX + frame_num_bytes + content_bytes + ETX + checksum_str + CR + LF
-            sock.send(frame)
+            sock.sendall(frame)
 
             # Wait for frame ACK
             ack = sock.recv(1)
@@ -1515,7 +1545,7 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
             logger.debug(f"[PUSH-TCP] Frame {i+1}/{len(records)} ACKed")
 
         # Step 3: Send EOT to end transmission
-        sock.send(EOT)
+        sock.sendall(EOT)
         logger.info(f"[PUSH-TCP] Successfully sent {len(records)} frames to {host}:{port}")
         return True
 

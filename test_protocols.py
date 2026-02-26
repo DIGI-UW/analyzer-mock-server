@@ -271,5 +271,173 @@ class TestFileHandler(unittest.TestCase):
         self.assertIn("Result", csv)
 
 
+class TestASTMTcpPush(unittest.TestCase):
+    """Tests for push_astm_tcp() and _push_astm_to_destination() routing."""
+
+    # ASTM control characters (must match server.py constants)
+    ENQ = b'\x05'
+    ACK = b'\x06'
+    NAK = b'\x15'
+    EOT = b'\x04'
+    STX = b'\x02'
+    ETX = b'\x03'
+    CR = b'\x0D'
+    LF = b'\x0A'
+
+    def _make_message(self, record_count=3):
+        """Build a minimal ASTM message with the given number of records."""
+        records = [f"H|\\^&|||TEST|||||||LIS2-A2"]
+        for i in range(record_count - 2):
+            records.append(f"R|{i+1}|^^^TEST{i+1}|{i*10}|mg/dL")
+        records.append("L|1|N")
+        return "\n".join(records)
+
+    def test_push_astm_tcp_uses_sendall(self):
+        """push_astm_tcp must use sendall() not send() to prevent partial writes."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = self.ACK  # ACK everything
+
+        with patch('socket.socket', return_value=mock_sock):
+            result = push_astm_tcp("host", 9600, self._make_message())
+
+        # Verify sendall was used (not send)
+        self.assertTrue(mock_sock.sendall.called, "Must use sendall() not send()")
+        self.assertFalse(mock_sock.send.called, "send() should not be called — use sendall()")
+
+    def test_push_astm_tcp_enq_ack_flow(self):
+        """Verify ENQ is sent first, frames follow, EOT terminates."""
+        from unittest.mock import patch, MagicMock, call
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = self.ACK
+
+        with patch('socket.socket', return_value=mock_sock):
+            result = push_astm_tcp("host", 9600, self._make_message(3))
+
+        self.assertTrue(result)
+        calls = mock_sock.sendall.call_args_list
+        # First call: ENQ
+        self.assertEqual(calls[0], call(self.ENQ))
+        # Last call: EOT
+        self.assertEqual(calls[-1], call(self.EOT))
+        # Middle calls: frames (3 records = 3 frames)
+        frame_calls = calls[1:-1]
+        self.assertEqual(len(frame_calls), 3)
+
+    def test_push_astm_tcp_frame_checksum(self):
+        """Verify frame format: STX + FN + content + ETX + checksum(2hex) + CR + LF."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = self.ACK
+
+        msg = "H|\\^&|||TEST\nL|1|N"
+        with patch('socket.socket', return_value=mock_sock):
+            push_astm_tcp("host", 9600, msg)
+
+        # Get first frame (skip ENQ at index 0)
+        frame = mock_sock.sendall.call_args_list[1][0][0]
+        # Must start with STX
+        self.assertEqual(frame[0:1], self.STX)
+        # Must end with CR+LF
+        self.assertEqual(frame[-2:], self.CR + self.LF)
+        # Frame number is ASCII digit after STX
+        fn = frame[1:2]
+        self.assertTrue(fn.isdigit(), f"Frame number must be ASCII digit, got {fn}")
+        # ETX before checksum (2 hex bytes before CR+LF)
+        self.assertIn(self.ETX, frame)
+
+    def test_push_astm_tcp_frame_numbering_wraps_at_7(self):
+        """Frame numbers must cycle 1-7 per CLSI LIS1-A."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = self.ACK
+
+        # 8 records → frame numbers should be 1,2,3,4,5,6,7,1
+        msg = self._make_message(8)
+        with patch('socket.socket', return_value=mock_sock):
+            push_astm_tcp("host", 9600, msg)
+
+        frame_calls = mock_sock.sendall.call_args_list[1:-1]  # skip ENQ and EOT
+        frame_numbers = [c[0][0][1:2].decode() for c in frame_calls]
+        self.assertEqual(frame_numbers, ['1', '2', '3', '4', '5', '6', '7', '1'])
+
+    def test_push_astm_tcp_enq_nak_returns_false(self):
+        """If ENQ gets NAK, push should fail."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = self.NAK
+
+        with patch('socket.socket', return_value=mock_sock):
+            result = push_astm_tcp("host", 9600, self._make_message())
+
+        self.assertFalse(result)
+
+    def test_push_astm_tcp_frame_nak_returns_false(self):
+        """If a frame gets NAK, push should fail."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        # ACK the ENQ, NAK the first frame
+        mock_sock.recv.side_effect = [self.ACK, self.NAK]
+
+        with patch('socket.socket', return_value=mock_sock):
+            result = push_astm_tcp("host", 9600, self._make_message())
+
+        self.assertFalse(result)
+
+    def test_push_astm_tcp_connection_refused(self):
+        """ConnectionRefusedError should return False, not raise."""
+        from unittest.mock import patch, MagicMock
+        from server import push_astm_tcp
+
+        mock_sock = MagicMock()
+        mock_sock.connect.side_effect = ConnectionRefusedError("refused")
+
+        with patch('socket.socket', return_value=mock_sock):
+            result = push_astm_tcp("host", 9600, self._make_message())
+
+        self.assertFalse(result)
+
+    def test_destination_tcp_routes_to_push_astm_tcp(self):
+        """tcp:// destinations should call push_astm_tcp."""
+        from unittest.mock import patch
+        from server import _push_astm_to_destination
+
+        with patch('server.push_astm_tcp', return_value=True) as mock_tcp:
+            result = _push_astm_to_destination("tcp://bridge:12001", "H|test")
+
+        self.assertTrue(result)
+        mock_tcp.assert_called_once_with("bridge", 12001, "H|test")
+
+    def test_destination_http_routes_to_push_to_openelis(self):
+        """http(s):// destinations should call push_to_openelis."""
+        from unittest.mock import patch
+        from server import _push_astm_to_destination
+
+        with patch('server.push_to_openelis', return_value=True) as mock_http:
+            result = _push_astm_to_destination("https://oe:8443", "H|test")
+
+        self.assertTrue(result)
+        mock_http.assert_called_once()
+
+    def test_destination_tcp_invalid_port_returns_false(self):
+        """tcp:// with non-numeric port should return False."""
+        from server import _push_astm_to_destination
+
+        result = _push_astm_to_destination("tcp://host:abc", "H|test")
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

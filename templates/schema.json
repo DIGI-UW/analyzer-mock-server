@@ -165,13 +165,104 @@
             "description": "Normal reference range (e.g., '4.0-10.0')"
           },
           "seedValue": {
-            "type": "number",
+            "type": ["number", "null"],
             "description": "Deterministic value for reproducible testing"
+          },
+          "seedQualitative": {
+            "type": "string",
+            "description": "Deterministic qualitative value for reproducible testing (e.g., 'NEGATIVE')"
           },
           "possibleValues": {
             "type": "array",
             "items": { "type": "string" },
             "description": "Allowed values for QUALITATIVE type (e.g., NEGATIVE, POSITIVE)"
+          },
+          "version": {
+            "type": "string",
+            "description": "Assay version (e.g., '2.1') — used in ASTM R.3 component 6"
+          },
+          "complementaryResults": {
+            "type": "array",
+            "description": "Sub-results for multi-level ASTM results (e.g., Ct, Conc/LOG for GeneXpert)",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Complementary result name (e.g., 'Conc/LOG', 'Ct', 'EndPt')"
+                },
+                "unit": {
+                  "type": "string",
+                  "description": "Unit for the complementary result"
+                },
+                "seedValue": {
+                  "type": "number",
+                  "description": "Deterministic value for this complementary result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "astm_config": {
+      "type": "object",
+      "description": "ASTM-specific message configuration overrides (for analyzers needing non-default ASTM fields)",
+      "properties": {
+        "processing_id": {
+          "type": "string",
+          "default": "P",
+          "description": "H.12 Processing ID (P=Production, D=Debugging, T=Training)"
+        },
+        "version_number": {
+          "type": "string",
+          "description": "H.13 Version Number (e.g., '1394-97' for GeneXpert, 'LIS2-A2' for others)"
+        },
+        "receiver_id": {
+          "type": "string",
+          "description": "H.10 Receiver ID (e.g., 'LIS')"
+        },
+        "specimen_descriptor": {
+          "type": "string",
+          "description": "O.16 Specimen Descriptor (e.g., 'ORH' for POCT1-A Other)"
+        },
+        "enable_isid": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate Instrument Specimen ID in O.4"
+        },
+        "enable_qc": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate QC sample messages in addition to patient messages"
+        }
+      }
+    },
+    "qcSample": {
+      "type": "object",
+      "description": "QC sample configuration for generating QC messages (requires astm_config.enable_qc=true)",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "QC specimen ID (e.g., 'QC-MTB-CTRL-001')"
+        },
+        "actionCode": {
+          "type": "string",
+          "default": "Q",
+          "description": "O.12 Action Code that marks this as a QC sample"
+        },
+        "fields": {
+          "type": "array",
+          "description": "QC-specific field overrides (code + seedQualitative/seedValue)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "description": "Field code to override" },
+              "seedQualitative": { "type": "string", "description": "Fixed qualitative result for QC" },
+              "seedValue": { "type": "number", "description": "Fixed numeric result for QC" }
+            },
+            "required": ["code"]
           }
         }
       }

@@ -261,7 +261,8 @@
               "code": { "type": "string", "description": "Field code to override" },
               "seedQualitative": { "type": "string", "description": "Fixed qualitative result for QC" },
               "seedValue": { "type": "number", "description": "Fixed numeric result for QC" }
-            }
+            },
+            "required": ["code"]
           }
         }
       }

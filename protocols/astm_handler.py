@@ -99,7 +99,9 @@ def _build_test_id(field: Dict[str, Any], has_astm_config: bool) -> str:
     """Build the R.3 Universal Test ID field.
 
     Without astm_config (legacy): ^^^CODE or ^^^CODE^DisplayName
-    With astm_config (GeneXpert-style): ^^^CODE^Name^Version^^
+    With astm_config (GeneXpert-style): 8-component ^^^CODE^Name^Version^^
+      where component 8 is empty for main results, filled by
+      _build_complementary_test_id for sub-results (e.g., Conc/LOG).
     """
     if has_astm_config and field.get("version"):
         code = field.get("code", field.get("name", "Unknown"))
@@ -186,16 +188,26 @@ def _build_astm_message(
     # P-record: Patient
     segments.append(f"P|1||{patient_id}|{patient_name}||{patient_sex}|{patient_dob}")
 
-    # O-record: Order
+    # O-record: Order (26 fields per ASTM E-1394-97)
     if has_cfg:
         first_code = fields[0].get("code", "TEST") if fields else "TEST"
         specimen_desc = cfg.get("specimen_descriptor", "")
         report_type = "F"
-        # O: seq | specimen_id | ISID | ^^^test_id | priority | ordered_ts | ... | action_code | ... | specimen_desc | ... | report_type
-        segments.append(
-            f"O|1|{sample_id}||^^^{first_code}|R|{timestamp}"
-            f"|||||{action_code}||||{specimen_desc}|||^^|||||||{report_type}"
-        )
+        o_fields: List[str] = [""] * 26
+        o_fields[0] = "O"                   # O.1:  Record type
+        o_fields[1] = "1"                    # O.2:  Sequence number
+        o_fields[2] = sample_id              # O.3:  Specimen ID
+        # o_fields[3]                        # O.4:  Instrument Specimen ID (unused)
+        o_fields[4] = f"^^^{first_code}"     # O.5:  Universal test ID
+        o_fields[5] = "R"                    # O.6:  Priority (R = routine)
+        o_fields[6] = timestamp              # O.7:  Order date/time
+        # o_fields[7..10]                    # O.8–O.11: collection/volume/collector (unused)
+        o_fields[11] = action_code           # O.12: Action code ("Q" for QC)
+        # o_fields[12..14]                   # O.13–O.15: physician/phone/user (unused)
+        o_fields[15] = specimen_desc         # O.16: Specimen descriptor
+        # o_fields[16..24]                   # O.17–O.25: additional fields (unused)
+        o_fields[25] = report_type           # O.26: Report type
+        segments.append("|".join(o_fields))
     else:
         segments.append(f"O|1|{sample_id}^LAB|{panel_name}^{panel_name} Panel||{timestamp}")
 
@@ -226,10 +238,9 @@ def _build_astm_message(
         else:
             segments.append(f"R|{seq}|{test_id}|{value}|||N||F|{end_ts}")
 
-        # C-record: Comment for ERROR results
+        # C-record: Comment for ERROR results (timestamp aligns with result completion)
         if has_cfg and str(value) == "ERROR":
-            error_ts = (now + timedelta(minutes=random.randint(5, 30))).strftime("%Y%m%d%H%M%S")
-            segments.append(f"C|1|I|Error^^Error^^{error_ts}|N")
+            segments.append(f"C|1|I|Error^^Error^^{end_ts}|N")
 
         seq += 1
 
@@ -274,7 +285,7 @@ def _build_qc_message(
     for qf in qc_config.get("fields", []):
         qc_field_overrides[qf["code"]] = qf
 
-    # Use template fields but apply QC overrides
+    # Use all template fields, applying QC overrides where specified
     fields = _normalize_fields_from_template(template)
     qc_fields = []
     for field in fields:
@@ -286,11 +297,7 @@ def _build_qc_message(
                 field["seedQualitative"] = override["seedQualitative"]
             if "seedValue" in override:
                 field["seedValue"] = override["seedValue"]
-            qc_fields.append(field)
-
-    # If no QC fields defined, use all template fields
-    if not qc_fields:
-        qc_fields = fields
+        qc_fields.append(field)
 
     return _build_astm_message(
         analyzer_name=analyzer_name,

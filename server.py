@@ -1302,7 +1302,7 @@ def start_simulate_api_server(port: int):
     server = HTTPServer(("0.0.0.0", port), SimulateAPIHandler)
     logger.info("Simulate API server started on port %s", port)
     logger.info("  GET  /simulate/hl7/{template} - Generate HL7 ORU^R01")
-    logger.info("  POST /simulate/hl7/{template} - Generate + push HL7")
+    logger.info("  POST /simulate/hl7/{template} - Generate HL7 ORU^R01 (no push)")
     logger.info("  GET  /simulate/astm/{template} - Generate ASTM message")
     logger.info("  POST /simulate/astm/{template} - Generate + push ASTM")
     logger.info("  GET  /health - Health check")

@@ -1678,20 +1678,6 @@ def main():
         ok = send_astm_over_serial(port_path, msg, baud=baud)
         return 0 if ok else 1
 
-    # M4: Simulate API (HL7 /simulate/hl7/{analyzer}) for CI/CD
-    if getattr(args, 'simulate_api_port', None):
-        port = args.simulate_api_port
-        print("=" * 60)
-        print("  Multi-Protocol Simulator - HL7 Simulate API")
-        print("=" * 60)
-        print(f"  Port: {port}")
-        print("  GET  /simulate/hl7/{{analyzer}}  POST /simulate/hl7/{{analyzer}}")
-        print("  GET  /health")
-        print("=" * 60)
-        print()
-        start_simulate_api_server(port)
-        return 0
-
     # HL7 push mode: Send ORU^R01 to OpenELIS (template-driven, e.g. Abbott)
     if args.hl7 and args.push:
         if not HAS_HL7_SIM:
@@ -1879,6 +1865,16 @@ def main():
         start_push_api_server(args.api_port, args.push, fields_config)
         return 0
     
+    # Start simulate API in background thread if requested
+    if getattr(args, 'simulate_api_port', None):
+        api_thread = threading.Thread(
+            target=start_simulate_api_server,
+            args=(args.simulate_api_port,),
+            daemon=True,
+        )
+        api_thread.start()
+        logger.info("Simulate API started on port %s (background)", args.simulate_api_port)
+
     # Server mode: Listen for connections
     print("=" * 60)
     print("  ASTM LIS2-A2 Mock Server for OpenELIS")
@@ -1886,11 +1882,13 @@ def main():
     print(f"  Port: {args.port}")
     print(f"  Analyzer Type: {args.analyzer_type}")
     print(f"  Response Delay: {args.response_delay}ms")
+    if getattr(args, 'simulate_api_port', None):
+        print(f"  Simulate API: {args.simulate_api_port}")
     print("=" * 60)
     print("  Press Ctrl+C to stop")
     print("=" * 60)
     print()
-    
+
     server = ASTMMockServer(
         port=args.port,
         analyzer_type=args.analyzer_type,

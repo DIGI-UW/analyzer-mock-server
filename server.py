@@ -129,7 +129,34 @@ class ASTMProtocolHandler:
         """Main handler loop for client connection."""
         logger.info(f"Client connected: {self.addr}")
         self.conn.settimeout(SOCKET_TIMEOUT)
-        
+
+        # If template has proactive_enq, send ENQ immediately (like real
+        # GeneXpert which has queued results). This creates contention if the
+        # client also sends ENQ — matching real instrument behavior per
+        # CLSI LIS1-A §8.2.7.1.
+        if self.astm_template and self.astm_template.get('astm_config', {}).get('proactive_enq'):
+            logger.info(f"[PROACTIVE_ENQ] Sending ENQ to {self.addr} (instrument has data)")
+            self._send(ENQ)
+            try:
+                response = self._receive_byte()
+                if response == ACK:
+                    # Client accepted — send our data
+                    self._send_frames_from_template()
+                elif response == ENQ:
+                    # CONTENTION: both sides sent ENQ. Per spec, instrument wins.
+                    # Client should yield and send ACK on our next ENQ.
+                    logger.info(f"[PROACTIVE_ENQ] Contention detected with {self.addr}")
+                    time.sleep(1)  # Per spec: instrument waits >= 1s
+                    self._send(ENQ)  # Re-send ENQ
+                    response = self._receive_byte()
+                    if response == ACK:
+                        self._send_frames_from_template()
+                    else:
+                        logger.warning(f"[PROACTIVE_ENQ] Expected ACK after contention, got: {response}")
+                # Fall through to normal receive loop regardless
+            except socket.timeout:
+                logger.debug(f"[PROACTIVE_ENQ] No response, entering receive mode")
+
         try:
             while self.running:
                 data = self._receive_byte()
@@ -530,6 +557,21 @@ class ASTMProtocolHandler:
         self._send(EOT)
         logger.info(f"[FIELD_QUERY] Response complete for {self.addr}")
         
+    def _send_frames_from_template(self):
+        """Send template data as ASTM frames (ENQ/ACK already established).
+
+        Used by proactive ENQ flow where the handshake is handled by the caller.
+        """
+        if self.astm_template:
+            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            records = [r for r in message.strip().split('\n') if r.strip()]
+            for i, record in enumerate(records):
+                if not self._send_frame(record.strip()):
+                    logger.warning(f"[PROACTIVE_ENQ] Send failed at record {i+1}/{len(records)}")
+                    break
+            logger.info(f"[PROACTIVE_ENQ] Sent {len(records)} records to {self.addr}")
+        self._send(EOT)
+
     def _send_frame(self, content: str):
         """Send an ASTM frame with proper framing."""
         # Per CLSI LIS1-A: Frame numbers are 1-7, then wrap to 1.

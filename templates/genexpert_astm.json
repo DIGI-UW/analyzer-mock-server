@@ -19,7 +19,8 @@
     "receiver_id": "LIS",
     "specimen_descriptor": "ORH",
     "enable_isid": false,
-    "enable_qc": true
+    "enable_qc": true,
+    "proactive_enq": true
   },
   "fields": [
     {

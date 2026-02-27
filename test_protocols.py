@@ -211,6 +211,23 @@ class TestASTMGeneXpert(unittest.TestCase):
         self.assertGreaterEqual(len(qc_r_lines), 4,
                                 f"QC should include all template fields, got {len(qc_r_lines)} R-records")
 
+    # --- proactive_enq config ---
+
+    def test_proactive_enq_config_present(self):
+        """GeneXpert template should have proactive_enq enabled."""
+        self.assertTrue(
+            self.template.get('astm_config', {}).get('proactive_enq'),
+            "GeneXpert template should have proactive_enq: true in astm_config"
+        )
+
+    def test_proactive_enq_not_in_other_templates(self):
+        """Non-GeneXpert templates should NOT have proactive_enq."""
+        mindray = _load_template("mindray_bc5380")
+        self.assertFalse(
+            mindray.get('astm_config', {}).get('proactive_enq'),
+            "Mindray template should not have proactive_enq"
+        )
+
     # --- use_seed determinism ---
 
     def test_seed_produces_deterministic_output(self):

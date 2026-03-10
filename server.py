@@ -344,10 +344,15 @@ class ASTMProtocolHandler:
         """Process accumulated received data."""
         logger.info(f"[MESSAGE] Processing {len(self.received_data)} frames from {self.addr}")
         
-        # Detect if this was a query request BEFORE processing/clearing data
-        # Query is detected when we receive a complete message with header but no patient/order records
-        is_query = self._is_field_query()
-        logger.debug(f"[MESSAGE] Query detection: is_query={is_query}")
+        # Detect query type before processing/clearing data.
+        # - Field query: header-only capability discovery (H + L)
+        # - Results query: explicit Q-record request (H + Q + L)
+        is_field_query = self._is_field_query()
+        is_results_query = self._is_results_query()
+        logger.debug(
+            f"[MESSAGE] Query detection: is_field_query={is_field_query}, "
+            f"is_results_query={is_results_query}"
+        )
         
         for frame_idx, frame in enumerate(self.received_data, 1):
             try:
@@ -364,7 +369,7 @@ class ASTMProtocolHandler:
                 elif decoded.startswith('R|'):
                     self._process_result(decoded)
                 elif decoded.startswith('Q|'):
-                    self._process_qc(decoded)
+                    self._process_query_record(decoded)
                 elif decoded.startswith('L|'):
                     self._process_terminator(decoded)
                     
@@ -375,7 +380,10 @@ class ASTMProtocolHandler:
         self.received_data = []
         
         # Respond to query if detected
-        if is_query:
+        if is_results_query:
+            logger.info(f"[MESSAGE] Results query detected from {self.addr}, sending template results")
+            self.send_results_query_response()
+        elif is_field_query:
             logger.info(f"[MESSAGE] Field query detected from {self.addr}, sending field list")
             self.send_field_query_response()
         else:
@@ -406,10 +414,14 @@ class ASTMProtocolHandler:
             unit = parts[4] if len(parts) > 4 else ''
             logger.info(f"Result record: {test_code} = {value} {unit}")
             
-    def _process_qc(self, record: str):
-        """Process Q (QC/Quality Control) record."""
+    def _process_query_record(self, record: str):
+        """Process Q (ASTM query) record."""
         parts = record.split('|')
-        logger.info(f"QC record: {record[:60]}...")
+        sample_id = parts[2] if len(parts) > 2 else ""
+        requested_tests = parts[4] if len(parts) > 4 else "ALL"
+        logger.info(
+            f"Query record: sample={sample_id or 'unknown'} tests={requested_tests or 'ALL'}"
+        )
         
     def _process_terminator(self, record: str):
         """Process L (Terminator) record."""
@@ -420,6 +432,7 @@ class ASTMProtocolHandler:
         
         Query is detected when:
         - Header (H) record is present
+        - No explicit Q record
         - No Patient (P) or Order (O) records follow
         - Only header + terminator received
         """
@@ -428,6 +441,7 @@ class ASTMProtocolHandler:
         
         has_header = False
         has_patient_or_order = False
+        has_query_record = False
         
         for frame in self.received_data:
             try:
@@ -436,10 +450,35 @@ class ASTMProtocolHandler:
                     has_header = True
                 elif decoded.startswith('P|') or decoded.startswith('O|'):
                     has_patient_or_order = True
+                elif decoded.startswith('Q|'):
+                    has_query_record = True
             except:
                 pass
         
-        return has_header and not has_patient_or_order
+        return has_header and not has_patient_or_order and not has_query_record
+
+    def _is_results_query(self) -> bool:
+        """Detect if received message is an ASTM results query (H + Q + L)."""
+        if not self.received_data:
+            return False
+
+        has_header = False
+        has_query_record = False
+        has_patient_or_order = False
+
+        for frame in self.received_data:
+            try:
+                decoded = frame.decode('utf-8', errors='replace')
+                if decoded.startswith('H|'):
+                    has_header = True
+                elif decoded.startswith('Q|'):
+                    has_query_record = True
+                elif decoded.startswith('P|') or decoded.startswith('O|'):
+                    has_patient_or_order = True
+            except:
+                pass
+
+        return has_header and has_query_record and not has_patient_or_order
     
     def _validate_message_chars(self, content: bytes) -> bool:
         """Validate message text doesn't contain restricted characters per CLSI LIS1-A 8.6."""
@@ -529,6 +568,46 @@ class ASTMProtocolHandler:
         # End transmission
         self._send(EOT)
         logger.info(f"[FIELD_QUERY] Response complete for {self.addr}")
+
+    def send_results_query_response(self):
+        """Send a template-backed P/O/R response for H+Q results-query flows."""
+        logger.info(f"[RESULTS_QUERY] Sending response to {self.addr}")
+
+        self._send(ENQ)
+        try:
+            response = self._receive_byte()
+            if response != ACK:
+                logger.warning(
+                    f"[RESULTS_QUERY] Did not receive ACK, got: {response.hex() if response else 'none'}"
+                )
+                return
+        except socket.timeout:
+            logger.warning("[RESULTS_QUERY] Timeout waiting for ACK")
+            return
+
+        try:
+            if self.astm_template:
+                message = ASTMHandler().generate(self.astm_template, use_seed=True)
+                records = [r for r in message.strip().split('\n') if r.strip()]
+            else:
+                records = [
+                    "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
+                    "P|1|PAT-RESULTS||DOE^JANE",
+                    "O|1|ACC-RESULTS",
+                    "R|1|^^^GLUCOSE|102.5|mg/dL",
+                    "L|1|N",
+                ]
+
+            for i, record in enumerate(records):
+                if not self._send_frame(record.strip()):
+                    logger.warning(
+                        f"[RESULTS_QUERY] Send failed at record {i + 1}/{len(records)}"
+                    )
+                    break
+            logger.info(f"[RESULTS_QUERY] Sent {len(records)} records to {self.addr}")
+        finally:
+            self._send(EOT)
+            logger.info(f"[RESULTS_QUERY] Response complete for {self.addr}")
         
     def _send_frame(self, content: str):
         """Send an ASTM frame with proper framing."""

@@ -184,6 +184,7 @@ def test_abbott_template_msh_sender():
     "template_name,expected_facility",
     [
         ("mindray_bc5380", "BC-5380"),
+        ("mindray_bc2000", "BC2000"),
         ("mindray_bs200", "BS-200"),
         ("mindray_bs300", "BS-300"),
     ],

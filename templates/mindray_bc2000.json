@@ -1,7 +1,7 @@
 {
   "analyzer": {
-    "name": "Mindray BC-5380",
-    "model": "BC-5380",
+    "name": "Mindray BC2000",
+    "model": "BC2000",
     "manufacturer": "Mindray",
     "category": "HEMATOLOGY"
   },
@@ -12,13 +12,13 @@
   },
   "identification": {
     "hl7_sending_app": "MINDRAY",
-    "hl7_sending_facility": "BC-5380"
+    "hl7_sending_facility": "BC2000"
   },
   "fields": [
     {
       "code": "WBC",
       "name": "WHITE BLOOD CELL",
-      "unit": "10*3/uL",
+      "unit": "10^3/uL",
       "normalRange": "4.0-10.0",
       "seedValue": 7.5,
       "type": "NUMERIC"
@@ -26,7 +26,7 @@
     {
       "code": "RBC",
       "name": "RED BLOOD CELL",
-      "unit": "10*6/uL",
+      "unit": "10^6/uL",
       "normalRange": "4.0-5.5",
       "seedValue": 4.82,
       "type": "NUMERIC"
@@ -46,16 +46,24 @@
       "normalRange": "36-54",
       "seedValue": 42.0,
       "type": "NUMERIC"
+    },
+    {
+      "code": "PLT",
+      "name": "PLATELET COUNT",
+      "unit": "10^3/uL",
+      "normalRange": "150-450",
+      "seedValue": 250.0,
+      "type": "NUMERIC"
     }
   ],
   "testPatient": {
-    "id": "PAT001",
-    "name": "DOE^JOHN",
-    "sex": "M",
-    "dob": "19800115"
+    "id": "PAT004",
+    "name": "DOE^JANE",
+    "sex": "F",
+    "dob": "19860720"
   },
   "testSample": {
-    "id": "PLACER123",
+    "id": "PLACER456",
     "type": "CBC^COMPLETE BLOOD COUNT"
   }
 }

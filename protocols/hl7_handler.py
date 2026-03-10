@@ -54,6 +54,7 @@ def generate_oru_r01(
     sending_facility = identification.get("hl7_sending_facility", "LAB")
     receiving_app = "OpenELIS"
     receiving_facility = "LAB"
+    hl7_version = template.get("protocol", {}).get("version", "2.5.1")
 
     ts = timestamp.strftime("%Y%m%d%H%M%S")
     if message_control_id is None:
@@ -81,11 +82,11 @@ def generate_oru_r01(
 
     segments: List[str] = []
 
-    # MSH|^~\&|SENDING_APP|SENDING_FACILITY|RECV_APP|RECV_FAC|datetime||ORU^R01|control_id|P|2.5.1||||||||
+    # MSH|^~\&|SENDING_APP|SENDING_FACILITY|RECV_APP|RECV_FAC|datetime||ORU^R01|control_id|P|version||||||||
     msh = "|".join([
         "MSH", "^~\\&", sending_app, sending_facility,
         receiving_app, receiving_facility, ts, "", "ORU^R01",
-        message_control_id, "P", "2.5.1", "", "", "", "", "", "", ""
+        message_control_id, "P", hl7_version, "", "", "", "", "", "", ""
     ])
     segments.append(msh)
 

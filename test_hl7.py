@@ -51,6 +51,7 @@ def _msh_fields(msh_line: str):
         "sending_app": parts[2] if len(parts) > 2 else "",
         "sending_facility": parts[3] if len(parts) > 3 else "",
         "message_type": parts[8] if len(parts) > 8 else "",
+        "version": parts[11] if len(parts) > 11 else "",
     }
 
 
@@ -177,6 +178,31 @@ def test_abbott_template_msh_sender():
     msh = _msh_fields(segs["MSH"][0])
     assert msh["sending_app"] == "ARCHITECT"
     assert msh["sending_facility"] == "LAB"
+
+
+@pytest.mark.parametrize(
+    "template_name,expected_facility",
+    [
+        ("mindray_bc5380", "BC-5380"),
+        ("mindray_bs200", "BS-200"),
+        ("mindray_bs300", "BS-300"),
+    ],
+)
+def test_mindray_templates_emit_sender_identity_and_version(template_name, expected_facility):
+    """Mindray HL7 templates emit MSH-3/MSH-4 identity and the configured HL7 version."""
+    from template_loader import TemplateLoader
+    from protocols.hl7_handler import generate_oru_r01
+
+    loader = TemplateLoader()
+    template = loader.load_template(template_name)
+    msg = generate_oru_r01(template, deterministic=True)
+
+    segs = _segment_map(msg)
+    msh = _msh_fields(segs["MSH"][0])
+    assert msh["sending_app"] == "MINDRAY"
+    assert msh["sending_facility"] == expected_facility
+    assert msh["message_type"] == "ORU^R01"
+    assert msh["version"] == "2.3.1"
 
 
 def test_abbott_template_obx_codes_and_values():

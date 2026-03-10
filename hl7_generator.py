@@ -51,6 +51,7 @@ def generate_oru_r01(
     # Prefer HL7-specific identification fields, but fall back to msh_sender for backward compatibility
     sending_app = identification.get('hl7_sending_app') or identification.get('msh_sender', 'MINDRAY')
     sending_facility = identification.get('hl7_sending_facility', 'LAB')
+    hl7_version = template.get('protocol', {}).get('version', '2.5.1')
     ts_str = timestamp.strftime('%Y%m%d%H%M%S')
     msg_id = f"{sending_app}{timestamp.strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
 
@@ -67,7 +68,7 @@ def generate_oru_r01(
     # MSH - Message Header (delimiters |^~\&)
     msh = (
         f"MSH|^~\\&|{sending_app}|{sending_facility}|OpenELIS|LAB|{ts_str}"
-        f"||ORU^R01|{msg_id}|P|2.5.1||||||||"
+        f"||ORU^R01|{msg_id}|P|{hl7_version}||||||||"
     )
     segments.append(msh)
 

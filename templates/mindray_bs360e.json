@@ -7,12 +7,12 @@
   },
   "protocol": {
     "type": "HL7",
-    "version": "2.5.1",
+    "version": "2.3.1",
     "transport": "TCP"
   },
   "identification": {
     "hl7_sending_app": "MINDRAY",
-    "hl7_sending_facility": "LAB"
+    "hl7_sending_facility": "BS-360E"
   },
   "fields": [
     {

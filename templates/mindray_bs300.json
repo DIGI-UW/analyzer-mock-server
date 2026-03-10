@@ -1,0 +1,69 @@
+{
+  "analyzer": {
+    "name": "Mindray BS-300",
+    "model": "BS-300",
+    "manufacturer": "Mindray",
+    "category": "CHEMISTRY"
+  },
+  "protocol": {
+    "type": "HL7",
+    "version": "2.5.1",
+    "transport": "TCP"
+  },
+  "identification": {
+    "hl7_sending_app": "MINDRAY BS-300",
+    "hl7_sending_facility": "LAB"
+  },
+  "fields": [
+    {
+      "code": "CREA",
+      "name": "CREATININE",
+      "unit": "mg/dL",
+      "normalRange": "0.6-1.2",
+      "seedValue": 0.8,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "ALT",
+      "name": "ALANINE AMINOTRANSFERASE",
+      "unit": "U/L",
+      "normalRange": "7-56",
+      "seedValue": 19,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "AST",
+      "name": "ASPARTATE AMINOTRANSFERASE",
+      "unit": "U/L",
+      "normalRange": "10-40",
+      "seedValue": 24,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "GLU",
+      "name": "GLUCOSE",
+      "unit": "mg/dL",
+      "normalRange": "70-100",
+      "seedValue": 88,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "UREA",
+      "name": "BLOOD UREA NITROGEN",
+      "unit": "mg/dL",
+      "normalRange": "7-20",
+      "seedValue": 12,
+      "type": "NUMERIC"
+    }
+  ],
+  "testPatient": {
+    "id": "PAT004",
+    "name": "NIRINA^HERY",
+    "sex": "F",
+    "dob": "19880305"
+  },
+  "testSample": {
+    "id": "PLACER301",
+    "type": "CHEM^CHEMISTRY PANEL"
+  }
+}

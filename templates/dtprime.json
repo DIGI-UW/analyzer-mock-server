@@ -1,0 +1,37 @@
+{
+  "analyzer": {
+    "name": "DNA Technology DT-Prime",
+    "model": "DT-Prime",
+    "manufacturer": "DNA Technology",
+    "category": "MOLECULAR"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "0.2",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "Resultat DT-Prime-*.xml"
+  },
+  "file_config": {
+    "format": "XML"
+  },
+  "fileFormat": {
+    "extension": ".xml",
+    "encoding": "windows-1251"
+  },
+  "xmlFormat": {
+    "root": "package",
+    "encoding": "windows-1251",
+    "structure": {
+      "protocol_path": "C:\\Users\\user\\Desktop\\LA2M-TB_Vector\\TB 06 03 2026 SERIE01.r96"
+    }
+  },
+  "testSamples": [
+    {"name": "tst0305002A", "x": "6", "y": "2", "result": "+"},
+    {"name": "tst0305002B", "x": "6", "y": "3", "result": "-"},
+    {"name": "tst0305004", "x": "7", "y": "1", "result": "+"},
+    {"name": "C-", "x": "6", "y": "1", "result": "-"},
+    {"name": "C+", "x": "8", "y": "1", "result": "+"}
+  ]
+}

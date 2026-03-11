@@ -1,0 +1,52 @@
+{
+  "analyzer": {
+    "name": "Tecan Infinite F50",
+    "model": "Infinite F50",
+    "manufacturer": "Tecan",
+    "category": "IMMUNOLOGY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "tecan_*_grid.csv"
+  },
+  "fileFormat": {
+    "delimiter": "\t",
+    "hasHeader": false,
+    "encoding": "UTF-8",
+    "extension": ".csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": "\t"
+  },
+  "layout": "plate_grid",
+  "metadataBlock": [
+    {"key": "Application", "value": "Magellan"},
+    {"key": "Instrument", "value": "Infinite F50"},
+    {"key": "Method", "value": "HIV_ELISA_450"},
+    {"key": "Date", "value": "2026-03-05"},
+    {"key": "Time", "value": "14:23:45"},
+    {"key": "Wavelength", "value": "450 nm"}
+  ],
+  "columns": [
+    {"index": 0, "name": "Row"},
+    {"index": 1, "name": "1"},
+    {"index": 2, "name": "2"}
+  ],
+  "testSamples": [
+    {"WellPosition": "A01", "OD_450": "2.345"},
+    {"WellPosition": "A02", "OD_450": "0.048"},
+    {"WellPosition": "A03", "OD_450": "1.234"},
+    {"WellPosition": "B01", "OD_450": "2.401"},
+    {"WellPosition": "B02", "OD_450": "0.047"},
+    {"WellPosition": "C01", "OD_450": "0.051"},
+    {"WellPosition": "D01", "OD_450": "1.567"}
+  ],
+  "fields": [
+    {"code": "OD_450", "name": "OD 450nm", "type": "NUMERIC", "unit": "OD"}
+  ]
+}

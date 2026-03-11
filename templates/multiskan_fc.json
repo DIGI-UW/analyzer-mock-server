@@ -1,0 +1,51 @@
+{
+  "analyzer": {
+    "name": "Thermo Multiskan FC",
+    "model": "Multiskan FC",
+    "manufacturer": "Thermo Fisher",
+    "category": "IMMUNOLOGY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "multiskan_*.csv"
+  },
+  "fileFormat": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "encoding": "UTF-8",
+    "extension": ".csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": ",",
+    "has_header": true
+  },
+  "metadataBlock": [
+    {"key": "Instrument", "value": "Multiskan FC"},
+    {"key": "Protocol", "value": "HIV_ELISA_450"},
+    {"key": "Date", "value": "2026-03-05"},
+    {"key": "Time", "value": "14:23:45"},
+    {"key": "Filter", "value": "450 nm"},
+    {"key": "Plate Type", "value": "96-well"}
+  ],
+  "columns": [
+    {"index": 0, "name": "Well"},
+    {"index": 1, "name": "Sample ID"},
+    {"index": 2, "name": "Absorbance (450 nm)"},
+    {"index": 3, "name": "Content"}
+  ],
+  "fields": [
+    {"code": "OD_450", "name": "OD 450nm", "type": "NUMERIC", "unit": "OD"}
+  ],
+  "testSamples": [
+    {"Well": "A1", "Sample ID": "MSK-2026001", "Absorbance (450 nm)": "2.345", "Content": "Unknown"},
+    {"Well": "A2", "Sample ID": "MSK-2026002", "Absorbance (450 nm)": "0.048", "Content": "Unknown"},
+    {"Well": "A3", "Sample ID": "MSK-2026003", "Absorbance (450 nm)": "1.234", "Content": "Unknown"},
+    {"Well": "B1", "Sample ID": "", "Absorbance (450 nm)": "2.401", "Content": "Positive Control"},
+    {"Well": "B2", "Sample ID": "", "Absorbance (450 nm)": "0.047", "Content": "Negative Control"}
+  ]
+}

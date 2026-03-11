@@ -1,0 +1,46 @@
+{
+  "analyzer": {
+    "name": "Thermo Multiskan FC",
+    "model": "Multiskan FC",
+    "manufacturer": "Thermo Fisher",
+    "category": "IMMUNOLOGY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "multiskan_*_grid.csv"
+  },
+  "fileFormat": {
+    "delimiter": "\t",
+    "hasHeader": false,
+    "encoding": "UTF-8",
+    "extension": ".csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": "\t"
+  },
+  "layout": "plate_grid",
+  "metadataBlock": [
+    {"key": "Instrument", "value": "Multiskan FC"},
+    {"key": "Protocol", "value": "HIV_ELISA_450"},
+    {"key": "Date", "value": "2026-03-05"},
+    {"key": "Time", "value": "14:23:45"},
+    {"key": "Filter", "value": "450 nm"},
+    {"key": "Plate Type", "value": "96-well"}
+  ],
+  "columns": [],
+  "testSamples": [
+    {"WellPosition": "A1", "OD_450": "2.345"},
+    {"WellPosition": "A2", "OD_450": "0.048"},
+    {"WellPosition": "A3", "OD_450": "1.234"},
+    {"WellPosition": "B1", "OD_450": "2.401"},
+    {"WellPosition": "B2", "OD_450": "0.047"}
+  ],
+  "fields": [
+    {"code": "OD_450", "name": "OD 450nm", "type": "NUMERIC", "unit": "OD"}
+  ]
+}

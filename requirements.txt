@@ -10,6 +10,12 @@ jsonschema>=4.0.0
 # RS232 virtual serial simulation (M4)
 pyserial>=3.5
 
+# XLS BIFF8 generation for QuantStudio mock (FILE protocol)
+xlwt>=1.3.0
+
+# XLSX generation for FluoroCycler XT mock (FILE protocol)
+openpyxl>=3.1.0
+
 
 
 

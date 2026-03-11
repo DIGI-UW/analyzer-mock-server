@@ -1,0 +1,55 @@
+{
+  "analyzer": {
+    "name": "Tecan Infinite F50",
+    "model": "Infinite F50",
+    "manufacturer": "Tecan",
+    "category": "IMMUNOLOGY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "tecan_*.csv"
+  },
+  "fileFormat": {
+    "delimiter": "\t",
+    "hasHeader": true,
+    "encoding": "UTF-8",
+    "extension": ".csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": "\t",
+    "has_header": true
+  },
+  "layout": "well_per_row",
+  "metadataBlock": [
+    {"key": "Application", "value": "Magellan"},
+    {"key": "Instrument", "value": "Infinite F50"},
+    {"key": "Method", "value": "HIV_ELISA_450"},
+    {"key": "Date", "value": "2026-03-05"},
+    {"key": "Time", "value": "14:23:45"},
+    {"key": "Wavelength", "value": "450 nm"}
+  ],
+  "columns": [
+    {"index": 0, "name": "WellPosition"},
+    {"index": 1, "name": "SampleID"},
+    {"index": 2, "name": "OD_450"},
+    {"index": 3, "name": "OD_620"},
+    {"index": 4, "name": "CorrectedOD"},
+    {"index": 5, "name": "Interpretation"}
+  ],
+  "fields": [
+    {"code": "OD_450", "name": "OD 450nm", "type": "NUMERIC", "unit": "OD"},
+    {"code": "OD_620", "name": "OD 620nm", "type": "NUMERIC", "unit": "OD"}
+  ],
+  "testSamples": [
+    {"WellPosition": "A01", "SampleID": "TCN-2026001", "OD_450": "2.345", "OD_620": "0.052", "CorrectedOD": "2.293", "Interpretation": "Reactive"},
+    {"WellPosition": "A02", "SampleID": "TCN-2026002", "OD_450": "0.048", "OD_620": "0.048", "CorrectedOD": "0.000", "Interpretation": "Non-Reactive"},
+    {"WellPosition": "A03", "SampleID": "TCN-2026003", "OD_450": "1.234", "OD_620": "0.051", "CorrectedOD": "1.183", "Interpretation": "Reactive"},
+    {"WellPosition": "B01", "SampleID": "PC", "OD_450": "2.401", "OD_620": "0.047", "CorrectedOD": "2.354", "Interpretation": "QC"},
+    {"WellPosition": "B02", "SampleID": "NC", "OD_450": "0.047", "OD_620": "0.049", "CorrectedOD": "-0.002", "Interpretation": "QC"}
+  ]
+}

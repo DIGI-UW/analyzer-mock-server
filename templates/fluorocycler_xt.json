@@ -1,0 +1,65 @@
+{
+  "analyzer": {
+    "name": "Bruker FluoroCycler XT",
+    "model": "FluoroCycler XT",
+    "manufacturer": "Bruker",
+    "category": "MOLECULAR"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "FC-XT_*.xlsx"
+  },
+  "file_config": {
+    "format": "XLSX",
+    "sheetName": "Results"
+  },
+  "fileFormat": {
+    "extension": ".xlsx",
+    "encoding": "UTF-8"
+  },
+  "excelFormat": {
+    "sheetName": "Results",
+    "format": "xlsx",
+    "columns": [
+      {"index": 0, "name": "SampleID"},
+      {"index": 1, "name": "WellPosition"},
+      {"index": 2, "name": "AssayName"},
+      {"index": 3, "name": "TargetName"},
+      {"index": 4, "name": "TargetNo"},
+      {"index": 5, "name": "CP"},
+      {"index": 6, "name": "Interpretation"},
+      {"index": 7, "name": "CalcConc"},
+      {"index": 8, "name": "CalcConcUnit"},
+      {"index": 9, "name": "RunDate"},
+      {"index": 10, "name": "RunID"},
+      {"index": 11, "name": "Notes"}
+    ]
+  },
+  "columns": [
+    {"index": 0, "name": "SampleID"},
+    {"index": 1, "name": "WellPosition"},
+    {"index": 2, "name": "AssayName"},
+    {"index": 3, "name": "TargetName"},
+    {"index": 4, "name": "TargetNo"},
+    {"index": 5, "name": "CP"},
+    {"index": 6, "name": "Interpretation"},
+    {"index": 7, "name": "CalcConc"},
+    {"index": 8, "name": "CalcConcUnit"},
+    {"index": 9, "name": "RunDate"},
+    {"index": 10, "name": "RunID"},
+    {"index": 11, "name": "Notes"}
+  ],
+  "fields": [
+    {"code": "CP", "name": "Crossing Point", "type": "NUMERIC", "unit": "Ct"},
+    {"code": "Interpretation", "name": "Result", "type": "QUALITATIVE", "possibleValues": ["DETECTED", "NOT DETECTED", "INVALID", "INDETERMINATE"]}
+  ],
+  "testSamples": [
+    {"SampleID": "LAB-2026-0412", "WellPosition": "A1", "AssayName": "FluoroType MTBDR 2.0", "TargetName": "MTB", "TargetNo": "0", "CP": "14.48", "Interpretation": "DETECTED", "CalcConc": "", "CalcConcUnit": "", "RunDate": "2026-02-06", "RunID": "RUN-20260206-001", "Notes": ""},
+    {"SampleID": "LAB-2026-0413", "WellPosition": "A2", "AssayName": "FluoroType MTBDR 2.0", "TargetName": "MTB", "TargetNo": "0", "CP": "-1.00", "Interpretation": "NOT DETECTED", "CalcConc": "", "CalcConcUnit": "", "RunDate": "2026-02-06", "RunID": "", "Notes": ""},
+    {"SampleID": "QC-NTC", "WellPosition": "A12", "AssayName": "FluoroType MTBDR 2.0", "TargetName": "IC", "TargetNo": "1", "CP": "22.1", "Interpretation": "DETECTED", "CalcConc": "", "CalcConcUnit": "", "RunDate": "2026-02-06", "RunID": "", "Notes": ""}
+  ]
+}

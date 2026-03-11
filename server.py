@@ -1269,7 +1269,10 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
             if isinstance(raw, dict):
                 for k, v in raw.items():
                     if v and isinstance(v, str):
-                        port_to_template[int(k)] = v
+                        try:
+                            port_to_template[int(k)] = v
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping non-numeric port key %r", k)
         except json.JSONDecodeError as e:
             logger.warning("Invalid ASTM_PORT_TEMPLATES JSON: %s", e)
     else:
@@ -1280,7 +1283,10 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
                     raw = json.load(f)
                 for k, v in raw.items():
                     if v and isinstance(v, str):
-                        port_to_template[int(k)] = v
+                        try:
+                            port_to_template[int(k)] = v
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping non-numeric port key %r", k)
             except Exception as e:
                 logger.warning("Failed to load port_templates.json: %s", e)
 

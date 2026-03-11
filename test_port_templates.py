@@ -87,14 +87,22 @@ class TestMultiPortResponse(unittest.TestCase):
             response_delay_ms=0,
             port_to_template=port_to_template
         )
-        started = threading.Event()
         def run():
-            started.set()
             srv.start()
         t = threading.Thread(target=run, daemon=True)
         t.start()
-        self.assertTrue(started.wait(timeout=2), 'Server should start')
-        time.sleep(0.3)
+        # Wait for server to bind (start() runs before accept(), so poll the port)
+        for _ in range(40):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect(('127.0.0.1', port))
+                s.close()
+                break
+            except (socket.error, OSError):
+                time.sleep(0.05)
+        else:
+            self.fail('Server did not bind to port %s within 2s' % port)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)

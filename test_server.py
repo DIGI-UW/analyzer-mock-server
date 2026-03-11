@@ -342,7 +342,9 @@ class TestASTMServerMessageHandling(unittest.TestCase):
             sock.send(ENQ)
             ack = sock.recv(1)
             self.assertEqual(ack, ACK)
-            # Q-record handling validated at handshake level for now.
+            self._send_frame(sock, b'Q|1|ACC-QUERY||ALL', frame_num=1)
+            self.assertEqual(sock.recv(1), ACK, "Server should ACK a valid Q-record frame")
+            sock.send(EOT)
         finally:
             sock.close()
 

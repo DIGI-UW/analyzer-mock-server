@@ -64,7 +64,7 @@ docker compose -f dev.docker-compose.yml -f docker-compose.astm-test.yml up -d
 | `ANALYZER_TYPE`         | HEMATOLOGY | Default analyzer type                                    |
 | `RESPONSE_DELAY_MS`     | 100        | Simulated response delay                                 |
 
-**Port-to-template (multi-port):** When `config/port_templates.json` exists (or `ASTM_PORT_TEMPLATES` is set), the server listens on multiple ports and selects the ASTM template per connection from the port number. Example: connection to port 9601 uses the template mapped to 9601 (e.g. `mindray_ba88a`). Optional: send a frame `X|1|template_name|` before other records to override the port-based template.
+**Port-to-template (multi-port):** When `config/port_templates.json` exists (or `ASTM_PORT_TEMPLATES` is set), the server listens on all ports listed in that mapping (and does not use `ASTM_PORT`). Include `5000` in the mapping if you want the default port to remain available (e.g. for `python server.py` or Docker with no overrides). Example: connection to port 9601 uses the template mapped to 9601 (e.g. `mindray_ba88a`). Optional: send a frame `X|1|template_name|` before other records to override the port-based template.
 
 ### Field Configuration
 

@@ -26,6 +26,7 @@ Environment Variables:
     RESPONSE_DELAY_MS: Simulated response delay in milliseconds (default: 100)
 """
 
+import select
 import socket
 import threading
 import json
@@ -107,18 +108,28 @@ class ASTMProtocolHandler:
     """Handles ASTM LIS2-A2 protocol communication for a single client.
 
     Supports both legacy fields.json and template-driven ASTM generation.
-    When astm_template is provided, field query responses and data generation
-    use ASTMHandler.generate() for spec-compliant messages (GeneXpert, etc.).
+    When astm_template is provided (or resolved from local_port + port_to_template),
+    field query responses and data generation use ASTMHandler.generate() for
+    spec-compliant messages (GeneXpert, etc.).
     """
 
     def __init__(self, conn: socket.socket, addr: tuple, fields_config: Dict,
                  response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS,
-                 astm_template: Optional[Dict] = None):
+                 astm_template: Optional[Dict] = None,
+                 local_port: Optional[int] = None,
+                 port_to_template: Optional[Dict[int, str]] = None):
         self.conn = conn
         self.addr = addr
         self.fields_config = fields_config
         self.response_delay_ms = response_delay_ms
-        self.astm_template = astm_template
+        if port_to_template and local_port is not None:
+            template_name = port_to_template.get(local_port) or os.environ.get("ASTM_TEMPLATE")
+            self.astm_template = _load_template(template_name) if template_name else None
+            if self.astm_template and template_name:
+                name = self.astm_template.get("analyzer", {}).get("name", template_name)
+                logger.info("Connection on port %s: using template %s (%s)", local_port, template_name, name)
+        else:
+            self.astm_template = astm_template
         self.frame_number = 0
         self.last_accepted_frame = 0  # Track last accepted frame number per CLSI LIS1-A
         self.retransmit_count = 0  # Track retransmissions per CLSI LIS1-A
@@ -371,18 +382,25 @@ class ASTMProtocolHandler:
         """Process accumulated received data."""
         logger.info(f"[MESSAGE] Processing {len(self.received_data)} frames from {self.addr}")
         
-        # Detect if this was a query request BEFORE processing/clearing data
-        # Query is detected when we receive a complete message with header but no patient/order records
-        is_query = self._is_field_query()
-        logger.debug(f"[MESSAGE] Query detection: is_query={is_query}")
+        # Detect query type before processing/clearing data.
+        # - Field query: header-only capability discovery (H + L)
+        # - Results query: explicit Q-record request (H + Q + L)
+        is_field_query = self._is_field_query()
+        is_results_query = self._is_results_query()
+        logger.debug(
+            f"[MESSAGE] Query detection: is_field_query={is_field_query}, "
+            f"is_results_query={is_results_query}"
+        )
         
         for frame_idx, frame in enumerate(self.received_data, 1):
             try:
                 decoded = frame.decode('utf-8', errors='replace')
                 logger.debug(f"[MESSAGE] Frame {frame_idx}/{len(self.received_data)}: {decoded[:100]}")
                 
-                # Parse ASTM records
-                if decoded.startswith('H|'):
+                # Parse ASTM records (optional X|1|template_name| overrides port-based template)
+                if decoded.startswith('X|'):
+                    self._process_template_hint(decoded)
+                elif decoded.startswith('H|'):
                     self._process_header(decoded)
                 elif decoded.startswith('P|'):
                     self._process_patient(decoded)
@@ -391,7 +409,7 @@ class ASTMProtocolHandler:
                 elif decoded.startswith('R|'):
                     self._process_result(decoded)
                 elif decoded.startswith('Q|'):
-                    self._process_qc(decoded)
+                    self._process_query_record(decoded)
                 elif decoded.startswith('L|'):
                     self._process_terminator(decoded)
                     
@@ -402,12 +420,27 @@ class ASTMProtocolHandler:
         self.received_data = []
         
         # Respond to query if detected
-        if is_query:
+        if is_results_query:
+            logger.info(f"[MESSAGE] Results query detected from {self.addr}, sending template results")
+            self.send_results_query_response()
+        elif is_field_query:
             logger.info(f"[MESSAGE] Field query detected from {self.addr}, sending field list")
             self.send_field_query_response()
         else:
             logger.debug(f"[MESSAGE] Not a field query, no response needed")
         
+    def _process_template_hint(self, record: str):
+        """Process X (template hint) record: X|1|template_name| overrides port-based template."""
+        parts = record.strip().split('|')
+        if len(parts) >= 3 and parts[2].strip():
+            name = parts[2].strip()
+            t = _load_template(name)
+            if t and t.get('protocol', {}).get('type') == 'ASTM':
+                self.astm_template = t
+                logger.info("Template hint: using %s", name)
+            else:
+                logger.warning("Template hint unknown or not ASTM: %s", name)
+
     def _process_header(self, record: str):
         """Process H (Header) record."""
         logger.info(f"Header record received: {record[:60]}...")
@@ -433,10 +466,14 @@ class ASTMProtocolHandler:
             unit = parts[4] if len(parts) > 4 else ''
             logger.info(f"Result record: {test_code} = {value} {unit}")
             
-    def _process_qc(self, record: str):
-        """Process Q (QC/Quality Control) record."""
+    def _process_query_record(self, record: str):
+        """Process Q (ASTM query) record."""
         parts = record.split('|')
-        logger.info(f"QC record: {record[:60]}...")
+        sample_id = parts[2] if len(parts) > 2 else ""
+        requested_tests = parts[4] if len(parts) > 4 else "ALL"
+        logger.info(
+            f"Query record: sample={sample_id or 'unknown'} tests={requested_tests or 'ALL'}"
+        )
         
     def _process_terminator(self, record: str):
         """Process L (Terminator) record."""
@@ -447,6 +484,7 @@ class ASTMProtocolHandler:
         
         Query is detected when:
         - Header (H) record is present
+        - No explicit Q record
         - No Patient (P) or Order (O) records follow
         - Only header + terminator received
         """
@@ -455,6 +493,7 @@ class ASTMProtocolHandler:
         
         has_header = False
         has_patient_or_order = False
+        has_query_record = False
         
         for frame in self.received_data:
             try:
@@ -463,10 +502,35 @@ class ASTMProtocolHandler:
                     has_header = True
                 elif decoded.startswith('P|') or decoded.startswith('O|'):
                     has_patient_or_order = True
+                elif decoded.startswith('Q|'):
+                    has_query_record = True
             except:
                 pass
         
-        return has_header and not has_patient_or_order
+        return has_header and not has_patient_or_order and not has_query_record
+
+    def _is_results_query(self) -> bool:
+        """Detect if received message is an ASTM results query (H + Q + L)."""
+        if not self.received_data:
+            return False
+
+        has_header = False
+        has_query_record = False
+        has_patient_or_order = False
+
+        for frame in self.received_data:
+            try:
+                decoded = frame.decode('utf-8', errors='replace')
+                if decoded.startswith('H|'):
+                    has_header = True
+                elif decoded.startswith('Q|'):
+                    has_query_record = True
+                elif decoded.startswith('P|') or decoded.startswith('O|'):
+                    has_patient_or_order = True
+            except:
+                pass
+
+        return has_header and has_query_record and not has_patient_or_order
     
     def _validate_message_chars(self, content: bytes) -> bool:
         """Validate message text doesn't contain restricted characters per CLSI LIS1-A 8.6."""
@@ -556,6 +620,46 @@ class ASTMProtocolHandler:
         # End transmission
         self._send(EOT)
         logger.info(f"[FIELD_QUERY] Response complete for {self.addr}")
+
+    def send_results_query_response(self):
+        """Send a template-backed P/O/R response for H+Q results-query flows."""
+        logger.info(f"[RESULTS_QUERY] Sending response to {self.addr}")
+
+        self._send(ENQ)
+        try:
+            response = self._receive_byte()
+            if response != ACK:
+                logger.warning(
+                    f"[RESULTS_QUERY] Did not receive ACK, got: {response.hex() if response else 'none'}"
+                )
+                return
+        except socket.timeout:
+            logger.warning("[RESULTS_QUERY] Timeout waiting for ACK")
+            return
+
+        try:
+            if self.astm_template:
+                message = ASTMHandler().generate(self.astm_template, use_seed=True)
+                records = [r for r in message.strip().split('\n') if r.strip()]
+            else:
+                records = [
+                    "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
+                    "P|1|PAT-RESULTS||DOE^JANE",
+                    "O|1|ACC-RESULTS",
+                    "R|1|^^^GLUCOSE|102.5|mg/dL",
+                    "L|1|N",
+                ]
+
+            for i, record in enumerate(records):
+                if not self._send_frame(record.strip()):
+                    logger.warning(
+                        f"[RESULTS_QUERY] Send failed at record {i + 1}/{len(records)}"
+                    )
+                    break
+            logger.info(f"[RESULTS_QUERY] Sent {len(records)} records to {self.addr}")
+        finally:
+            self._send(EOT)
+            logger.info(f"[RESULTS_QUERY] Response complete for {self.addr}")
         
     def _send_frames_from_template(self):
         """Send template data as ASTM frames (ENQ/ACK already established).
@@ -620,21 +724,31 @@ class ASTMProtocolHandler:
 class ASTMMockServer:
     """ASTM LIS2-A2 Mock Server for analyzer testing.
 
-    Supports template-driven mode via ASTM_TEMPLATE env var. When set, the
-    server responds to client connections with spec-compliant ASTM messages
-    generated from the specified template (e.g., genexpert_astm).
+    Supports template-driven mode via ASTM_TEMPLATE env var (single port) or
+    port-to-template mapping (multi-port). When a connection is accepted, the
+    template is selected by the port (request-based); the handler loads the
+    template and processes the message accordingly.
     """
 
     def __init__(self, port: int = DEFAULT_PORT,
                  analyzer_type: str = DEFAULT_ANALYZER_TYPE,
-                 response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS):
+                 response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS,
+                 port_to_template: Optional[Dict[int, str]] = None):
         self.port = port
         self.analyzer_type = analyzer_type
         self.response_delay_ms = response_delay_ms
         self.fields_config = self._load_fields_config()
-        self.astm_template = self._load_astm_template()
+        if port_to_template is None:
+            port_to_template = _load_port_templates(port)
+        self.port_to_template = port_to_template
+        if port_to_template:
+            self.ports = sorted(port_to_template.keys())
+            self.astm_template = None
+        else:
+            self.ports = [port]
+            self.astm_template = self._load_astm_template()
         self.running = False
-        self.server_socket: Optional[socket.socket] = None
+        self.server_sockets: List[socket.socket] = []
         self.client_threads: List[threading.Thread] = []
 
     def _load_astm_template(self) -> Optional[Dict]:
@@ -685,51 +799,84 @@ class ASTMMockServer:
         }
         
     def start(self):
-        """Start the mock server."""
+        """Start the mock server (single or multi-port)."""
         self.running = True
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
         try:
-            self.server_socket.bind(('0.0.0.0', self.port))
-            self.server_socket.listen(MAX_CONNECTIONS)
-            logger.info(f"ASTM Mock Server started on port {self.port}")
-            logger.info(f"Analyzer type: {self.analyzer_type}")
-            logger.info(f"Response delay: {self.response_delay_ms}ms")
-            
-            while self.running:
-                try:
-                    self.server_socket.settimeout(1.0)
-                    conn, addr = self.server_socket.accept()
-                    
-                    # Handle client in separate thread
-                    handler = ASTMProtocolHandler(
-                        conn, addr, self.fields_config, self.response_delay_ms,
-                        astm_template=self.astm_template
-                    )
-                    thread = threading.Thread(target=handler.handle, daemon=True)
-                    thread.start()
-                    self.client_threads.append(thread)
-                    
-                except socket.timeout:
-                    # Check if we should stop
-                    continue
-                    
+            if self.port_to_template:
+                self._start_multi_port()
+            else:
+                self._start_single_port()
         except KeyboardInterrupt:
             logger.info("Server shutdown requested")
         except Exception as e:
             logger.error(f"Server error: {e}")
         finally:
             self.stop()
-            
+
+    def _start_single_port(self):
+        """Single-port mode: one socket, one template (legacy)."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('0.0.0.0', self.port))
+        sock.listen(MAX_CONNECTIONS)
+        self.server_sockets.append(sock)
+        logger.info("ASTM Mock Server started on port %s", self.port)
+        logger.info("Analyzer type: %s", self.analyzer_type)
+        logger.info("Response delay: %sms", self.response_delay_ms)
+        while self.running:
+            try:
+                sock.settimeout(1.0)
+                conn, addr = sock.accept()
+                handler = ASTMProtocolHandler(
+                    conn, addr, self.fields_config, self.response_delay_ms,
+                    astm_template=self.astm_template
+                )
+                thread = threading.Thread(target=handler.handle, daemon=True)
+                thread.start()
+                self.client_threads.append(thread)
+            except socket.timeout:
+                continue
+
+    def _start_multi_port(self):
+        """Multi-port mode: one socket per port, template per port."""
+        for port in self.ports:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('0.0.0.0', port))
+            sock.listen(MAX_CONNECTIONS)
+            sock.setblocking(False)
+            self.server_sockets.append(sock)
+        logger.info("ASTM Mock Server started on ports %s (port-to-template)", self.ports)
+        logger.info("Response delay: %sms", self.response_delay_ms)
+        while self.running:
+            try:
+                readable, _, _ = select.select(self.server_sockets, [], [], 1.0)
+                for sock in readable:
+                    conn, addr = sock.accept()
+                    local_port = sock.getsockname()[1]
+                    handler = ASTMProtocolHandler(
+                        conn, addr, self.fields_config, self.response_delay_ms,
+                        astm_template=None,
+                        local_port=local_port,
+                        port_to_template=self.port_to_template
+                    )
+                    thread = threading.Thread(target=handler.handle, daemon=True)
+                    thread.start()
+                    self.client_threads.append(thread)
+            except (select.error, OSError) as e:
+                if self.running:
+                    logger.debug("select: %s", e)
+                continue
+
     def stop(self):
         """Stop the mock server."""
         self.running = False
-        if self.server_socket:
+        for sock in self.server_sockets:
             try:
-                self.server_socket.close()
-            except:
+                sock.close()
+            except Exception:
                 pass
+        self.server_sockets.clear()
         logger.info("ASTM Mock Server stopped")
 
 
@@ -1144,6 +1291,51 @@ def _load_template(analyzer: str) -> Optional[Dict]:
     except Exception as e:
         logger.warning("Failed to load template %s: %s", path, e)
         return None
+
+
+def _load_port_templates(default_port: int) -> Dict[int, str]:
+    """Load port-to-template mapping from config file or ASTM_PORT_TEMPLATES env.
+
+    Returns a dict mapping port (int) to template name (str). Used for
+    request-based template selection: each connection port maps to one template.
+    If ASTM_PORT_TEMPLATES is set, it replaces config (use "{}" to force fallback).
+    If no config and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
+    """
+    base = os.path.dirname(os.path.abspath(__file__))
+    port_to_template: Dict[int, str] = {}
+
+    env_json = os.environ.get("ASTM_PORT_TEMPLATES")
+    if env_json is not None:
+        try:
+            raw = json.loads(env_json)
+            if isinstance(raw, dict):
+                for k, v in raw.items():
+                    if v and isinstance(v, str):
+                        try:
+                            port_to_template[int(k)] = v
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping non-numeric port key %r", k)
+        except json.JSONDecodeError as e:
+            logger.warning("Invalid ASTM_PORT_TEMPLATES JSON: %s", e)
+    else:
+        config_path = os.path.join(base, "config", "port_templates.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    raw = json.load(f)
+                for k, v in raw.items():
+                    if v and isinstance(v, str):
+                        try:
+                            port_to_template[int(k)] = v
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping non-numeric port key %r", k)
+            except Exception as e:
+                logger.warning("Failed to load port_templates.json: %s", e)
+
+    if not port_to_template and os.environ.get("ASTM_TEMPLATE"):
+        port_to_template[default_port] = os.environ.get("ASTM_TEMPLATE")
+
+    return port_to_template
 
 
 class SimulateAPIHandler(BaseHTTPRequestHandler):
@@ -1920,8 +2112,12 @@ def main():
     # Server mode: Listen for connections
     print("=" * 60)
     print("  ASTM LIS2-A2 Mock Server for OpenELIS")
+    port_to_template = _load_port_templates(args.port)
     print("=" * 60)
-    print(f"  Port: {args.port}")
+    if port_to_template:
+        print(f"  Ports: {sorted(port_to_template.keys())} (port-to-template)")
+    else:
+        print(f"  Port: {args.port}")
     print(f"  Analyzer Type: {args.analyzer_type}")
     print(f"  Response Delay: {args.response_delay}ms")
     if getattr(args, 'simulate_api_port', None):
@@ -1934,7 +2130,8 @@ def main():
     server = ASTMMockServer(
         port=args.port,
         analyzer_type=args.analyzer_type,
-        response_delay_ms=args.response_delay
+        response_delay_ms=args.response_delay,
+        port_to_template=port_to_template if port_to_template else None
     )
     server.start()
 

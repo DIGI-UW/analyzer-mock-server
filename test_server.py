@@ -190,7 +190,7 @@ class TestASTMServerFieldQuery(unittest.TestCase):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(CONNECTION_TIMEOUT)
         return sock
-    
+
     def _send_frame(self, sock, data, frame_num=1):
         """
         Send an ASTM frame with proper framing.
@@ -303,6 +303,14 @@ class TestASTMServerMessageHandling(unittest.TestCase):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(CONNECTION_TIMEOUT)
         return sock
+
+    def _send_frame(self, sock, data, frame_num=1):
+        frame_num_byte = str(frame_num).encode()
+        content = frame_num_byte + data
+        checksum = (sum(content) + ord(ETX)) % 256
+        checksum_str = f'{checksum:02X}'.encode()
+        frame = STX + content + ETX + checksum_str + CR + LF
+        sock.send(frame)
     
     def test_accepts_valid_result_message(self):
         """
@@ -323,13 +331,10 @@ class TestASTMServerMessageHandling(unittest.TestCase):
         finally:
             sock.close()
     
-    def test_accepts_qc_segment_message(self):
+    def test_accepts_query_segment_message(self):
         """
-        Server MUST accept Q-segment (QC) messages.
-        Reference: spec.md FR-021, research.md Q-segment format
-        
-        Q-segment format:
-        Q|sequence|test_code^control_lot^control_level|result_value|unit|timestamp|flag
+        Server MUST accept ASTM Q-record query messages.
+        Q-record queries are distinct from QC result records.
         """
         sock = self._create_socket()
         try:
@@ -337,7 +342,59 @@ class TestASTMServerMessageHandling(unittest.TestCase):
             sock.send(ENQ)
             ack = sock.recv(1)
             self.assertEqual(ack, ACK)
-            # Q-segment handling validated at handshake level
+            self._send_frame(sock, b'Q|1|ACC-QUERY||ALL', frame_num=1)
+            self.assertEqual(sock.recv(1), ACK, "Server should ACK a valid Q-record frame")
+            sock.send(EOT)
+        finally:
+            sock.close()
+
+    def test_results_query_receives_result_records(self):
+        """
+        Server MUST treat H+Q+L as results-query and return P/O/R response
+        (not field-discovery-only R definitions).
+        """
+        sock = self._create_socket()
+        try:
+            sock.connect((TEST_HOST, TEST_PORT))
+
+            # Handshake
+            sock.send(ENQ)
+            ack = sock.recv(1)
+            self.assertEqual(ack, ACK)
+
+            # Send H + Q + L query frames
+            query_header = b'H|\\^&|||OpenELIS^ResultsQuery^1.0|||||||LIS2-A2'
+            self._send_frame(sock, query_header, frame_num=1)
+            self.assertEqual(sock.recv(1), ACK)
+
+            query_record = b'Q|1|ACC-RESULTS||ALL'
+            self._send_frame(sock, query_record, frame_num=2)
+            self.assertEqual(sock.recv(1), ACK)
+
+            self._send_frame(sock, b'L|1|N', frame_num=3)
+            self.assertEqual(sock.recv(1), ACK)
+            sock.send(EOT)
+
+            # Server should reverse role and send response
+            sock.settimeout(5)
+            time.sleep(0.5)
+            server_enq = sock.recv(1)
+            self.assertEqual(server_enq, ENQ, "Server should initiate query response with ENQ")
+            sock.send(ACK)
+
+            response_data = b""
+            while True:
+                frame = sock.recv(2048)
+                if not frame:
+                    break
+                response_data += frame
+                if EOT in frame:
+                    break
+                sock.send(ACK)
+
+            self.assertIn(b'P|', response_data, "Results query response should include patient record")
+            self.assertIn(b'O|', response_data, "Results query response should include order record")
+            self.assertIn(b'R|', response_data, "Results query response should include result records")
         finally:
             sock.close()
 

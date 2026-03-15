@@ -40,7 +40,7 @@ public enum ASTMVersion {
 ```
 
 **Supported Features:**
-- ✅ Frame number validation (1-7, wrapping)
+- ✅ Frame number validation (0-7, starts at 1, wraps 7→0 per CLSI LIS01-A2)
 - ✅ Checksum calculation and verification
 - ✅ ENQ/ACK/NAK/EOT handshake
 - ✅ Frame retransmission (up to 5 retries)

@@ -76,10 +76,11 @@ Where:
 - **CR** (0x0D): Carriage Return
 - **LF** (0x0A): Line Feed
 
-**CLSI LIS1-A Frame Number Requirements:**
+**CLSI LIS01-A2 §6.3.2.1 Frame Number Requirements:**
 
-- Frame numbers are **1-7**, then wrap to **1**
-- First frame: Accept any valid frame number (1-7)
+- Frame numbers are **0-7**, beginning at **1**, wrapping **7→0**
+- Sequence: 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, ... (mod 8)
+- First frame: Accept any valid frame number (0-7)
 - Subsequent frames: Must be **same as last accepted** OR **one higher**
   (modulo 8)
 - Invalid frame numbers are rejected with **NAK**
@@ -269,7 +270,7 @@ Server stops sending, enters termination phase
 
 This mock server implements full CLSI LIS1-A compliance including:
 
-- ✅ Frame number validation (1-7, wraps to 1, sequence checking)
+- ✅ Frame number validation (0-7, starts at 1, wraps 7→0, mod 8)
 - ✅ Mandatory checksum validation
 - ✅ Timeout handling (15s establishment, 15s frame ACK, 30s receiver)
 - ✅ Retransmission tracking (abort after 6 failures)

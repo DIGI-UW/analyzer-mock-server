@@ -286,11 +286,12 @@ class ASTMProtocolHandler:
                 self.running = False
             return
         
-        # Validate frame number per CLSI LIS1-A: must be same as last accepted OR one higher (modulo 8)
+        # Validate frame number per CLSI LIS01-A2 §6.3.2.1:
+        # Frame numbers 0-7, begin at 1, increment by 1, wrap 7→0.
         if self.last_accepted_frame == 0:
-            # First frame - accept any valid frame number (1-7)
-            if frame_num < 1 or frame_num > 7:
-                logger.warning(f"Invalid frame number range: {frame_num} (must be 1-7)")
+            # First frame — accept any valid frame number (0-7)
+            if frame_num < 0 or frame_num > 7:
+                logger.warning(f"Invalid frame number range: {frame_num} (must be 0-7)")
                 self._send(NAK)
                 self.retransmit_count += 1
                 if self.retransmit_count >= 6:
@@ -299,10 +300,8 @@ class ASTMProtocolHandler:
                     self.running = False
                 return
         else:
-            # Subsequent frames: must be same as last accepted OR one higher (modulo 8)
-            # Per CLSI LIS1-A: frame number must be same as last accepted OR one higher (modulo 8)
-            # Frame numbers are 1-7, so "one higher" means: (last_accepted_frame % 7) + 1
-            expected_frame = (self.last_accepted_frame % 7) + 1
+            # Subsequent frames: must be same as last accepted OR one higher (mod 8)
+            expected_frame = (self.last_accepted_frame + 1) % 8
             if frame_num != self.last_accepted_frame and frame_num != expected_frame:
                 logger.warning(f"Frame number mismatch: expected {expected_frame} or {self.last_accepted_frame}, got {frame_num}")
                 self._send(NAK)
@@ -678,9 +677,9 @@ class ASTMProtocolHandler:
 
     def _send_frame(self, content: str):
         """Send an ASTM frame with proper framing."""
-        # Per CLSI LIS1-A: Frame numbers are 1-7, then wrap to 1.
-        # Since frame_number starts at 0, we use (frame_number % 7) + 1 to get 1-7
-        self.frame_number = (self.frame_number % 7) + 1
+        # CLSI LIS01-A2 §6.3.2.1: Frame numbers 0-7, begin at 1, wrap 7→0.
+        # Sequence: 1,2,3,4,5,6,7,0,1,2,...  Formula: (index + 1) % 8
+        self.frame_number = (self.frame_number + 1) % 8
         
         # Build frame: <STX><FN><content><ETX><checksum><CR><LF>
         frame_num = str(self.frame_number).encode()
@@ -1690,12 +1689,72 @@ def push_hl7_to_openelis(openelis_url: str, hl7_message: str, timeout: int = 30)
         return False
 
 
+def _send_astm_session(sock, records: list, session_label: str = "") -> bool:
+    """Send one ASTM session (ENQ → framed records → EOT) over an open socket.
+
+    A session corresponds to one complete H…L message. Each record becomes one
+    ASTM frame with CLSI LIS1-A framing:
+        [STX] [FrameNum] [Content] [ETX|ETB] [Checksum] [CR] [LF]
+
+    Frame numbers cycle 1-7,0,1-7,0,… Intermediate frames use ETB; the final
+    frame (L record) uses ETX.  Checksum covers FrameNum + Content + terminator.
+
+    Returns True if all frames were ACKed, False otherwise.
+    """
+    tag = f"[PUSH-TCP{' ' + session_label if session_label else ''}]"
+
+    # Establish: ENQ → ACK
+    sock.sendall(ENQ)
+    response = sock.recv(1)
+    if response != ACK:
+        logger.error(f"{tag} ENQ not ACKed, got: {response.hex() if response else 'none'}")
+        return False
+    logger.debug(f"{tag} ENQ acknowledged, sending {len(records)} frames")
+
+    for i, record in enumerate(records):
+        frame_number = (i + 1) % 8
+        # Append CR to record content so the bridge's getMessage() (which
+        # joins frames with no separator) produces CR-delimited text that
+        # BufferedReader.readLine() in OpenELIS can split into lines.
+        content_bytes = (record.strip() + '\r').encode('ascii', errors='replace')
+        frame_num_bytes = str(frame_number).encode()
+        is_last = (i == len(records) - 1)
+        terminator = ETX if is_last else ETB
+
+        # Checksum: sum of bytes from frame_num through terminator, mod 256
+        checksum_data = frame_num_bytes + content_bytes + terminator
+        checksum = sum(checksum_data) % 256
+        checksum_str = f'{checksum:02X}'.encode()
+
+        frame = STX + frame_num_bytes + content_bytes + terminator + checksum_str + CR + LF
+        sock.sendall(frame)
+
+        # Wait for frame ACK
+        ack = sock.recv(1)
+        if ack == EOT:
+            logger.info(f"{tag} Receiver sent EOT (interrupt) at frame {i+1}")
+            return False
+        if ack != ACK:
+            logger.warning(f"{tag} Frame {i+1}/{len(records)} NAKed: {ack.hex() if ack else 'none'}")
+            return False
+        logger.debug(f"{tag} Frame {i+1}/{len(records)} ACKed (FN={frame_number})")
+
+    # Terminate session
+    sock.sendall(EOT)
+    logger.info(f"{tag} Session complete — {len(records)} frames sent")
+    return True
+
+
 def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) -> bool:
     """
     Push an ASTM message via raw ASTM TCP (ENQ/ACK framing) to a bridge or LIS.
 
     Simulates a real analyzer sending results: connects via TCP, performs
     CLSI LIS1-A framing (ENQ → ACK → STX frames → EOT), then disconnects.
+
+    If the message contains multiple H…L sessions (e.g. patient + QC), each
+    session is sent as a separate ENQ/ACK/EOT exchange on the same connection
+    (per CLSI LIS1-A §7: one session per complete message).
 
     Args:
         host: Target hostname or IP (e.g., "openelis-analyzer-bridge")
@@ -1704,70 +1763,61 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
         timeout: Socket timeout in seconds
 
     Returns:
-        True if all frames were ACKed, False otherwise.
+        True if all sessions were ACKed, False otherwise.
     """
     logger.info(f"[PUSH-TCP] Connecting to {host}:{port} for ASTM TCP push")
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        logger.info(f"[PUSH-TCP] Connected to {host}:{port}")
 
-        # Step 1: Send ENQ to establish link
-        sock.send(ENQ)
-        response = sock.recv(1)
-        if response != ACK:
-            logger.error(f"[PUSH-TCP] ENQ not ACKed, got: {response.hex() if response else 'none'}")
+    # Split into individual H…L sessions (each starts with H record)
+    all_records = [r for r in astm_message.strip().split('\n') if r.strip()]
+    sessions = []
+    current = []
+    for record in all_records:
+        if record.strip().startswith('H|') and current:
+            sessions.append(current)
+            current = []
+        current.append(record)
+    if current:
+        sessions.append(current)
+
+    logger.info(f"[PUSH-TCP] Message has {len(sessions)} session(s), {len(all_records)} total records")
+
+    # Each session uses its own TCP connection (bridge closes the receive
+    # thread after EOT, so a second ENQ on the same socket gets no response).
+    for idx, session_records in enumerate(sessions):
+        label = f"S{idx+1}/{len(sessions)}" if len(sessions) > 1 else ""
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((host, port))
+            logger.info(f"[PUSH-TCP] Connected to {host}:{port} for session {idx+1}/{len(sessions)}")
+
+            if not _send_astm_session(sock, session_records, label):
+                return False
+
+        except socket.timeout:
+            logger.error(f"[PUSH-TCP] Timeout connecting to {host}:{port}")
             return False
-        logger.debug("[PUSH-TCP] ENQ acknowledged, sending frames")
+        except ConnectionRefusedError:
+            logger.error(f"[PUSH-TCP] Connection refused by {host}:{port}")
+            return False
+        except Exception as e:
+            logger.error(f"[PUSH-TCP] Push failed: {e}", exc_info=True)
+            return False
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
-        # Step 2: Split message into records and send as ASTM frames
-        records = [r for r in astm_message.strip().split('\n') if r.strip()]
-        frame_number = 0
-        for i, record in enumerate(records):
-            frame_number = (frame_number % 7) + 1
-            content_bytes = record.strip().encode('utf-8')
-            frame_num_bytes = str(frame_number).encode()
+        # Brief pause between sessions so bridge can accept the next connection
+        if idx < len(sessions) - 1:
+            import time
+            time.sleep(0.5)
 
-            # Checksum: sum of bytes from frame_num through ETX, mod 256
-            checksum_data = frame_num_bytes + content_bytes + ETX
-            checksum = sum(checksum_data) % 256
-            checksum_str = f'{checksum:02X}'.encode()
-
-            frame = STX + frame_num_bytes + content_bytes + ETX + checksum_str + CR + LF
-            sock.send(frame)
-
-            # Wait for frame ACK
-            ack = sock.recv(1)
-            if ack == EOT:
-                logger.info("[PUSH-TCP] Receiver sent EOT (interrupt), stopping")
-                return False
-            if ack != ACK:
-                logger.warning(f"[PUSH-TCP] Frame {i+1} not ACKed: {ack.hex() if ack else 'none'}")
-                return False
-            logger.debug(f"[PUSH-TCP] Frame {i+1}/{len(records)} ACKed")
-
-        # Step 3: Send EOT to end transmission
-        sock.send(EOT)
-        logger.info(f"[PUSH-TCP] Successfully sent {len(records)} frames to {host}:{port}")
-        return True
-
-    except socket.timeout:
-        logger.error(f"[PUSH-TCP] Timeout connecting to {host}:{port}")
-        return False
-    except ConnectionRefusedError:
-        logger.error(f"[PUSH-TCP] Connection refused by {host}:{port}")
-        return False
-    except Exception as e:
-        logger.error(f"[PUSH-TCP] Push failed: {e}", exc_info=True)
-        return False
-    finally:
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+    logger.info(f"[PUSH-TCP] All {len(sessions)} session(s) sent to {host}:{port}")
+    return True
 
 
 def main():

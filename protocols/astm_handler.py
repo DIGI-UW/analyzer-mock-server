@@ -27,15 +27,18 @@ EOT = b"\x04"
 def build_astm_frames(astm_message: str) -> list:
     """Build ASTM LIS2-A2 frames from newline-separated segments (for serial send)."""
     frames = []
-    for i, line in enumerate(astm_message.strip().split("\n")):
+    frame_idx = 0
+    for line in astm_message.strip().split("\n"):
         if not line:
             continue
-        fn = str((i % 7) + 1)
+        # CLSI LIS1-A frame numbering: cycles 1,2,3,4,5,6,7,0,1,2,...
+        fn = str((frame_idx + 1) % 8)
         content = line.encode("utf-8")
         checksum_data = fn.encode() + content + ETX
         cs = sum(checksum_data) % 256
         frame = STX + fn.encode() + content + ETX + f"{cs:02X}".encode() + CR + LF
         frames.append(frame)
+        frame_idx += 1
     return frames
 
 

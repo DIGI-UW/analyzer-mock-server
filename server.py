@@ -908,6 +908,8 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                 "GET /health": "Health check",
                 "GET /simulate/astm/<template>": "Generate ASTM message from template",
                 "POST /simulate/astm/<template>": "Generate + push ASTM (body: destination, count)",
+                "GET /simulate/file/<template>": "Generate FILE payload from template",
+                "POST /simulate/file/<template>": "Generate + optionally write FILE payload",
             }
             if HAS_HL7_SIM:
                 endpoints["GET /simulate/hl7/<template>"] = "Generate HL7 ORU^R01"
@@ -1354,6 +1356,8 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count)",
                     "GET /simulate/astm/{template}": "Generate ASTM message from template",
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count)",
+                    "GET /simulate/file/{template}": "Generate FILE payload from template",
+                    "POST /simulate/file/{template}": "Generate + optionally write FILE payload (body: target_dir, filename)",
                 },
             })
             return
@@ -1376,6 +1380,13 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"status": "error", "message": "Missing template name"})
                 return
             self._handle_simulate_astm_get(template_name)
+            return
+        if self.path.startswith("/simulate/file/"):
+            template_name = self._extract_name("/simulate/file/")
+            if not template_name:
+                self._send_json(400, {"status": "error", "message": "Missing template name"})
+                return
+            self._handle_simulate_file_get(template_name)
             return
         self.send_error(404, "Not Found")
 
@@ -1405,6 +1416,13 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"status": "error", "message": "Missing template name"})
                 return
             self._handle_simulate_astm_post(template_name)
+            return
+        if self.path.startswith("/simulate/file/"):
+            template_name = self._extract_name("/simulate/file/")
+            if not template_name:
+                self._send_json(400, {"status": "error", "message": "Missing template name"})
+                return
+            self._handle_simulate_file_post(template_name)
             return
         self.send_error(404, "Not Found")
 
@@ -1494,6 +1512,65 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             "destination": destination,
             "results": results
         })
+
+    def _handle_simulate_file_get(self, template_name: str):
+        """GET /simulate/file/{template}: generate one FILE payload."""
+        template = _load_template(template_name)
+        if not template:
+            self._send_json(404, {"status": "error", "message": f"Template not found: {template_name}"})
+            return
+        if template.get('protocol', {}).get('type') != 'FILE':
+            self._send_json(400, {"status": "error", "message": "Template is not FILE protocol"})
+            return
+        try:
+            content = FileHandler().generate(template)
+            self._send_json(200, {"status": "generated", "template": template_name, "content": content})
+        except Exception as e:
+            logger.exception("FILE simulate GET failed for %s", template_name)
+            self._send_json(500, {"status": "error", "message": str(e)})
+
+    def _handle_simulate_file_post(self, template_name: str):
+        """POST /simulate/file/{template}: generate + optionally write FILE payload."""
+        template = _load_template(template_name)
+        if not template:
+            self._send_json(404, {"status": "error", "message": f"Template not found: {template_name}"})
+            return
+        if template.get('protocol', {}).get('type') != 'FILE':
+            self._send_json(400, {"status": "error", "message": "Template is not FILE protocol"})
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        params = {}
+        if length > 0:
+            try:
+                params = json.loads(self.rfile.read(length).decode("utf-8"))
+            except json.JSONDecodeError:
+                self._send_json(400, {"status": "error", "message": "Invalid JSON body"})
+                return
+
+        try:
+            content = FileHandler().generate(template)
+            target_dir = params.get("target_dir")
+            filename = params.get("filename")
+            written_path = None
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
+                if not filename:
+                    default_pattern = (template.get("identification") or {}).get("file_pattern", "sim_%s.csv")
+                    token = str(uuid.uuid4()).replace("-", "")[:8]
+                    filename = (default_pattern % token) if "%" in default_pattern else f"sim_{template_name}_{token}.csv"
+                out_path = os.path.join(target_dir, filename)
+                written_path = FileHandler().write_to_file(template, out_path)
+
+            self._send_json(200, {
+                "status": "completed",
+                "template": template_name,
+                "written_path": written_path,
+                "content": content,
+            })
+        except Exception as e:
+            logger.exception("FILE simulate POST failed for %s", template_name)
+            self._send_json(500, {"status": "error", "message": str(e)})
 
     def _send_json(self, code: int, obj: Dict):
         self.send_response(code)

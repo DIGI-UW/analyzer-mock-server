@@ -305,6 +305,7 @@ class TestFileSimulateAPI(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
+        cls.thread.join(timeout=10)
 
     def test_get_simulate_file_quantstudio7(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)

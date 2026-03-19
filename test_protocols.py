@@ -7,11 +7,16 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T091–T095.
 import json
 import os
 import unittest
+import tempfile
+import threading
+import http.client
+from http.server import HTTPServer
 
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
 from protocols.serial_handler import SerialHandler
 from protocols.file_handler import FileHandler
+from server import SimulateAPIHandler
 
 
 def _load_template(name: str):
@@ -286,6 +291,48 @@ class TestFileHandler(unittest.TestCase):
         self.assertIn("Sample ID", csv)
         self.assertIn("Assay", csv)
         self.assertIn("Result", csv)
+
+
+class TestFileSimulateAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = HTTPServer(("127.0.0.1", 0), SimulateAPIHandler)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=10)
+
+    def test_get_simulate_file_quantstudio7(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/simulate/file/quantstudio7")
+        resp = conn.getresponse()
+        body = json.loads(resp.read().decode("utf-8"))
+        conn.close()
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body.get("status"), "generated")
+        self.assertIn("Sample Name", body.get("content", ""))
+
+    def test_post_simulate_file_write_target_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = json.dumps({"target_dir": tmpdir, "filename": "sim.csv"})
+            headers = {"Content-Type": "application/json"}
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("POST", "/simulate/file/quantstudio7", body=payload, headers=headers)
+            resp = conn.getresponse()
+            body = json.loads(resp.read().decode("utf-8"))
+            conn.close()
+
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(body.get("status"), "completed")
+            written_path = body.get("written_path")
+            self.assertTrue(written_path)
+            self.assertTrue(os.path.exists(written_path))
 
 
 if __name__ == "__main__":

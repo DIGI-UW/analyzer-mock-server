@@ -95,8 +95,13 @@ class FileHandler(BaseHandler):
     def write_to_file(self, template: Dict[str, Any], path: str, **kwargs) -> Optional[str]:
         """Generate and write to path. Creates parent dirs. Returns path or None."""
         content = self.generate(template, **kwargs)
+        return self.write_text_to_path(path, content)
+
+    def write_text_to_path(self, path: str, content: str) -> Optional[str]:
+        """Write pre-generated text to path (same bytes as a single generate call)."""
         try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            parent = os.path.dirname(path) or "."
+            os.makedirs(parent, exist_ok=True)
             with open(path, "w", newline="", encoding="utf-8") as f:
                 f.write(content)
             logger.info("Wrote %s (%s bytes)", path, len(content))

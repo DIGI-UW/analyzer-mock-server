@@ -11,7 +11,7 @@ The ASTM mock server is accessible via multiple methods:
 nc localhost 5000
 
 # Or via Python
-python3 -c "import socket; s=socket.socket(); s.connect(('localhost', 5000)); s.send(b'\x05'); print(s.recv(1).hex())"
+python -c "import socket; s=socket.socket(); s.connect(('localhost', 5000)); s.send(b'\x05'); print(s.recv(1).hex())"
 ```
 
 ### From OpenELIS Backend Container

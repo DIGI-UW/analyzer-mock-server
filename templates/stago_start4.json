@@ -1,80 +1,117 @@
 {
-  "analyzer": {
-    "name": "Stago STart 4",
-    "model": "STart 4",
-    "manufacturer": "Stago",
-    "category": "COAGULATION"
-  },
-  "protocol": {
-    "type": "ASTM",
-    "version": "LIS2-A2",
-    "transport": "SERIAL"
-  },
-  "identification": {
-    "astm_header": "STAGO^START4^V1.0",
-    "hl7_sending_app": "STAGO"
-  },
-  "serial_config": {
-    "baud_rate": 9600,
-    "data_bits": 8,
-    "parity": "NONE",
-    "stop_bits": 1
-  },
-  "fields": [
-    {
-      "code": "PT",
-      "name": "Prothrombin Time",
-      "loinc": "5902-2",
-      "unit": "sec",
-      "normalRange": "11.0-13.5",
-      "seedValue": 12.5,
-      "type": "NUMERIC"
+    "analyzer": {
+        "name": "Stago STart 4",
+        "model": "STart 4",
+        "manufacturer": "Stago",
+        "category": "COAGULATION"
     },
-    {
-      "code": "INR",
-      "name": "International Normalized Ratio",
-      "loinc": "6301-6",
-      "unit": "",
-      "normalRange": "0.9-1.2",
-      "seedValue": 1.05,
-      "type": "NUMERIC"
+    "protocol": {
+        "type": "ASTM",
+        "version": "LIS2-A2",
+        "transport": "SERIAL"
     },
-    {
-      "code": "APTT",
-      "name": "Activated Partial Thromboplastin Time",
-      "loinc": "3173-2",
-      "unit": "sec",
-      "normalRange": "25.0-35.0",
-      "seedValue": 28.5,
-      "type": "NUMERIC"
+    "identification": {
+        "astm_header": "STAGO^START4^V1.0",
+        "hl7_sending_app": "STAGO"
     },
-    {
-      "code": "FIB",
-      "name": "Fibrinogen",
-      "loinc": "3255-7",
-      "unit": "g/L",
-      "normalRange": "2.0-4.0",
-      "seedValue": 3.2,
-      "type": "NUMERIC"
+    "serial_config": {
+        "baud_rate": 9600,
+        "data_bits": 8,
+        "parity": "NONE",
+        "stop_bits": 1
     },
-    {
-      "code": "TT",
-      "name": "Thrombin Time",
-      "loinc": "3174-0",
-      "unit": "sec",
-      "normalRange": "14.0-21.0",
-      "seedValue": 15.2,
-      "type": "NUMERIC"
-    }
-  ],
-  "testPatient": {
-    "id": "PAT-2026-003",
-    "name": "Razafy^Sophie^C",
-    "sex": "F",
-    "dob": "19900220"
-  },
-  "testSample": {
-    "id": "SAMPLE-2026-0003",
-    "type": "COAG^Coagulation Panel"
-  }
+    "fields": [
+        {
+            "code": "PT",
+            "name": "Prothrombin Time",
+            "loinc": "5902-2",
+            "unit": "sec",
+            "normalRange": "11.0-13.5",
+            "seedValue": 12.5,
+            "type": "NUMERIC"
+        },
+        {
+            "code": "INR",
+            "name": "International Normalized Ratio",
+            "loinc": "6301-6",
+            "unit": "",
+            "normalRange": "0.9-1.2",
+            "seedValue": 1.05,
+            "type": "NUMERIC"
+        },
+        {
+            "code": "APTT",
+            "name": "Activated Partial Thromboplastin Time",
+            "loinc": "3173-2",
+            "unit": "sec",
+            "normalRange": "25.0-35.0",
+            "seedValue": 28.5,
+            "type": "NUMERIC"
+        },
+        {
+            "code": "FIB",
+            "name": "Fibrinogen",
+            "loinc": "3255-7",
+            "unit": "g/L",
+            "normalRange": "2.0-4.0",
+            "seedValue": 3.2,
+            "type": "NUMERIC"
+        },
+        {
+            "code": "TT",
+            "name": "Thrombin Time",
+            "loinc": "3174-0",
+            "unit": "sec",
+            "normalRange": "14.0-21.0",
+            "seedValue": 15.2,
+            "type": "NUMERIC"
+        }
+    ],
+    "testPatient": {
+        "id": "PAT-2026-003",
+        "name": "Razafy^Sophie^C",
+        "sex": "F",
+        "dob": "19900220"
+    },
+    "testSample": {
+        "id": "SAMPLE-2026-0003",
+        "type": "COAG^Coagulation Panel"
+    },
+    "qc_controls": [
+        {
+            "field_code": "PT",
+            "lot_number": "LOT-PT-N",
+            "level": "N",
+            "level_name": "Normal",
+            "target": 12.5
+        },
+        {
+            "field_code": "INR",
+            "lot_number": "LOT-INR-N",
+            "level": "N",
+            "level_name": "Normal",
+            "target": 1.05
+        },
+        {
+            "field_code": "APTT",
+            "lot_number": "LOT-APTT-N",
+            "level": "N",
+            "level_name": "Normal",
+            "target": 28.5
+        },
+        {
+            "field_code": "FIB",
+            "lot_number": "LOT-FIB-N",
+            "level": "N",
+            "level_name": "Normal",
+            "target": 3.2
+        },
+        {
+            "field_code": "TT",
+            "lot_number": "LOT-TT-N",
+            "level": "N",
+            "level_name": "Normal",
+            "target": 15.2
+        }
+    ]
 }

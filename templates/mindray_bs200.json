@@ -54,6 +54,30 @@
       "normalRange": "7-20",
       "seedValue": 15,
       "type": "NUMERIC"
+    },
+    {
+      "code": "ALB",
+      "name": "ALBUMIN",
+      "unit": "g/dL",
+      "normalRange": "3.5-5.0",
+      "seedValue": 4.2,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "TP",
+      "name": "TOTAL PROTEIN",
+      "unit": "g/dL",
+      "normalRange": "6.0-8.3",
+      "seedValue": 7.1,
+      "type": "NUMERIC"
+    },
+    {
+      "code": "TBIL",
+      "name": "TOTAL BILIRUBIN",
+      "unit": "mg/dL",
+      "normalRange": "0.1-1.2",
+      "seedValue": 0.7,
+      "type": "NUMERIC"
     }
   ],
   "testPatient": {

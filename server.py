@@ -27,6 +27,7 @@ Environment Variables:
 """
 
 import select
+import re
 import socket
 import threading
 import uuid
@@ -1383,7 +1384,12 @@ def _safe_file_output_path(
         name = os.path.basename(raw) if raw else ""
         if not name:
             token = uuid.uuid4().hex[:8]
-            name = (default_pattern % token) if "%" in default_pattern else f"sim_{template_name}_{token}.csv"
+            if "%" in default_pattern:
+                name = default_pattern % token
+            elif "*" in default_pattern:
+                name = default_pattern.replace("*", token)
+            else:
+                name = f"sim_{template_name}_{token}.csv"
         if not name or name in (".", ".."):
             return None
         out = os.path.realpath(os.path.join(base, name))
@@ -1395,8 +1401,13 @@ def _safe_file_output_path(
         return None
 
 
+_SAFE_TEMPLATE_NAME = re.compile(r'^[A-Za-z0-9_\-]+$')
+
+
 def file_simulate_get(template_name: str) -> tuple:
     """Shared FILE simulate GET — returns (http_status, response_dict)."""
+    if not _SAFE_TEMPLATE_NAME.match(template_name):
+        return 400, {"status": "error", "message": "Invalid template name (alphanumeric, _, - only)"}
     template = _load_template(template_name)
     if not template:
         return 404, {"status": "error", "message": f"Template not found: {template_name}"}
@@ -1410,8 +1421,12 @@ def file_simulate_get(template_name: str) -> tuple:
         return 500, {"status": "error", "message": str(e)}
 
 
-def file_simulate_post(template_name: str, params: Dict) -> tuple:
+def file_simulate_post(template_name: str, params) -> tuple:
     """Shared FILE simulate POST — returns (http_status, response_dict)."""
+    if not _SAFE_TEMPLATE_NAME.match(template_name):
+        return 400, {"status": "error", "message": "Invalid template name (alphanumeric, _, - only)"}
+    if not isinstance(params, dict):
+        return 400, {"status": "error", "message": "Request body must be a JSON object"}
     template = _load_template(template_name)
     if not template:
         return 404, {"status": "error", "message": f"Template not found: {template_name}"}

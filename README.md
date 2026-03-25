@@ -277,6 +277,125 @@ curl -X POST http://localhost:8080/simulate/hl7/abbott_architect_hl7 \
 HL7 messages use template `identification` (e.g. `hl7_sending_app` → MSH-3) so
 OpenELIS can route to the correct analyzer plugin.
 
+## QC (Quality Control) Push Mode
+
+The mock server can generate and push QC messages that flow through OE's full
+Westgard rule evaluation pipeline. QC messages use the ASTM R+Q segment pattern
+where R carries the measurement and Q identifies the control lot.
+
+### Prerequisites
+
+Before pushing QC data, OE must have the required metadata seeded:
+
+```bash
+# Generate and apply the seed SQL (analyzers, tests, control lots, Westgard rules)
+python generate_analyzer_sql.py
+docker exec -i openelisglobal-database psql -U clinlims -d clinlims < seed_analyzers.sql
+```
+
+This seeds:
+- Analyzers with `identifier_pattern` for ASTM header matching
+- `analyzer_test_map` entries (field code → OE test)
+- `qc_control_lot` with manufacturer mean/SD (calculation method: `MANUFACTURER_FIXED`)
+- `qc_statistics` for immediate z-score calculation
+- `westgard_rule_config` with all 8 standard rules enabled per test/instrument
+
+### Usage
+
+```bash
+# Normal QC: realistic random scatter around target (Gaussian noise)
+# Values vary each run, z-scores typically between -2 and +2
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc
+
+# Exact target: z-score = 0, always ACCEPTED
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --qc-deviation 0
+
+# Warning level: 2.5 SD above target (triggers 1₂ₛ WARNING)
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --qc-deviation 2.5
+
+# Rejection level: 3.5 SD above target (triggers 1₃ₛ REJECTION)
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --qc-deviation 3.5
+
+# Below target (negative deviation)
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --qc-deviation -3.5
+
+# Simulate 30 days of daily QC runs
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc -c 30
+
+# Preview without sending (dry run)
+python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --dry-run
+```
+
+### QC Flags
+
+| Flag | Description |
+| --- | --- |
+| `--qc` | Enable QC mode (uses template's `qc_controls` section) |
+| `--qc-deviation SD` | Shift all results by exactly N standard deviations from target. Omit for realistic random scatter. |
+| `--dry-run` | Print the generated ASTM message without sending it |
+| `-c N` | Number of messages to push (default: 1) |
+
+### How It Works
+
+1. The mock server reads the template's `qc_controls` section (target values, lot numbers, levels)
+2. For each QC field, it generates a value:
+   - **No `--qc-deviation`**: random Gaussian scatter around target (SD = 5% of target for hematology)
+   - **`--qc-deviation N`**: exact shift of N standard deviations from target
+3. Builds an ASTM message with R+Q segment pairs per field
+4. Sends via TCP with ASTM LIS2-A2 framing (ENQ/ACK/STX/ETX) to the bridge
+5. The bridge forwards to OE's `/analyzer/astm` endpoint
+6. OE's GenericASTM plugin parses the message, creates `analyzer_results`, then
+   the QC pipeline matches Q segments to control lots and evaluates Westgard rules
+
+### ASTM QC Message Structure
+
+```
+H|\^&|||ABX^PENTRA60^V2.0|||||||LIS2-A2|20260320150301    ← Header (analyzer ID)
+P|1||QC-CTRL-001|QC^Control||U|19000101                   ← Patient (placeholder)
+O|1|QC-20260320150301^LAB|QC^QC Panel||20260320150301      ← Order (sample ID)
+R|1|^^^WBC|5.55|10^3/uL|4.0-10.0|N||F|20260320150301      ← Result (measurement)
+Q|1|WBC^LOT-WBC-N^N|5.55|10^3/uL|20260320150301           ← QC metadata (lot + level)
+R|2|^^^RBC|5.02|10^6/uL|4.0-5.5|N||F|20260320150301
+Q|2|RBC^LOT-RBC-N^N|5.02|10^6/uL|20260320150301
+...
+L|1|N                                                      ← Terminator
+```
+
+- **R segment**: the measured value — goes into `analyzer_results`
+- **Q segment**: identifies the control lot (`WBC^LOT-WBC-N^N` = test^lot_number^level) — triggers QC evaluation
+- **O and R segments** are required by OE's current implementation even for pure QC data
+
+### Westgard Rules
+
+The seed script enables all 8 standard Westgard rules for each QC test/instrument:
+
+| Rule | Severity | Corrective Action | Trigger |
+| --- | --- | --- | --- |
+| 1₂ₛ | WARNING | No | Single result > 2 SD from mean |
+| 1₃ₛ | REJECTION | Yes | Single result > 3 SD from mean |
+| 2₂ₛ | REJECTION | Yes | Two consecutive results > 2 SD same side |
+| R₄ₛ | REJECTION | Yes | Range of two consecutive results > 4 SD |
+| 3₁ₛ | WARNING | No | Three consecutive results > 1 SD same side |
+| 4₁ₛ | WARNING | No | Four consecutive results > 1 SD same side |
+| 7ₜ | WARNING | No | Seven consecutive results trending same direction |
+| 10ₓ | REJECTION | Yes | Ten consecutive results on same side of mean |
+
+### Verifying QC Results
+
+```bash
+# Check QC dashboard
+curl -sk https://localhost:8443/api/OpenELIS-Global/rest/qc/dashboard/summary \
+  -u admin:adminADMIN!
+
+# Check individual instrument
+curl -sk https://localhost:8443/api/OpenELIS-Global/rest/qc/dashboard/instruments/19 \
+  -u admin:adminADMIN!
+
+# Check qc_result table directly
+docker exec openelisglobal-database psql -U clinlims -d clinlims \
+  -c "SELECT result_value, z_score, result_status FROM clinlims.qc_result ORDER BY last_updated DESC LIMIT 10;"
+```
+
 ## Testing
 
 ### Run Communication Test (Recommended)

@@ -315,6 +315,89 @@ def _build_qc_message(
     )
 
 
+def _build_qc_astm_message(
+    analyzer_name: str,
+    fields: List[Dict[str, Any]],
+    qc_controls: Dict[str, Dict[str, Any]],
+    deviation: Optional[float] = None,
+    category: str = "",
+) -> str:
+    """Build an ASTM QC message with Q segments per LIS2-A2.
+
+    Structure: H | P | O | (R + Q)× | L
+
+    Q segment format (per OE GenericASTM convention):
+      Q|{seq}|{field_code}^{lot_number}^{level}|{value}|{unit}|{timestamp}
+
+    Only fields present in qc_controls generate R+Q pairs.
+    O+R segments are required to trigger OE isAnalyzerResult();
+    Q carries the lot/level/target metadata for QC processing.
+
+    Args:
+        deviation: Number of standard deviations to shift results.
+            None = realistic random scatter (Gaussian around target).
+            0 = exact target value (z-score will be 0).
+            3.5 = exactly 3.5 SD above target (triggers 1₃ₛ rejection).
+            SD is estimated as a percentage of target (5% hematology, 10% molecular).
+    """
+    # SD estimates as percentage of mean, matching generate_analyzer_sql.py
+    SD_PCT = {
+        "HEMATOLOGY": 0.05, "CHEMISTRY": 0.05,
+        "MOLECULAR": 0.10, "COAGULATION": 0.08, "IMMUNOLOGY": 0.10,
+    }
+    sd_pct = SD_PCT.get(category, 0.05)
+
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d%H%M%S")
+    qc_sample_id = f"QC-{timestamp}"
+
+    segments = [
+        f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}",
+        f"P|1||QC-CTRL-001|QC^Control||U|19000101",
+        f"O|1|{qc_sample_id}^LAB|QC^QC Panel||{timestamp}",
+    ]
+
+    seq = 1
+    for field in fields:
+        code = field.get("code", "")
+        ctrl = qc_controls.get(code)
+        if not ctrl:
+            continue
+
+        lot    = ctrl.get("lot_number", f"LOT-{code}-N")
+        level  = ctrl.get("level", "N")
+        target = ctrl.get("target")
+        if target is None:
+            target = field.get("seedValue") or _generate_value(field, use_seed=True)
+        unit         = field.get("unit", "")
+        normal_range = field.get("normalRange", "")
+
+        # Apply deviation or realistic scatter
+        sd = target * sd_pct if target else 0
+        if deviation is not None and target:
+            # Fixed deviation: shift by exactly N standard deviations
+            value = round(target + (deviation * sd), 2)
+        elif target and sd > 0:
+            # Normal operation: random scatter within ~±1.5 SD (realistic instrument noise)
+            value = round(random.gauss(target, sd), 2)
+        else:
+            value = target
+
+        # Clamp to 0 — physical measurements can't be negative
+        if isinstance(value, (int, float)) and value < 0:
+            value = 0.0
+
+        segments.append(f"R|{seq}|^^^{code}|{value}|{unit}|{normal_range}|N||F|{timestamp}")
+        segments.append(f"Q|{seq}|{code}^{lot}^{level}|{value}|{unit}|{timestamp}")
+        seq += 1
+
+    if seq == 1:
+        raise ValueError("No fields matched any qc_controls entry — check field_code values")
+
+    segments.append("L|1|N")
+    return "\n".join(segments) + "\n"
+
+
 class ASTMHandler(BaseHandler):
     """ASTM LIS2-A2 message generation. Supports template and legacy fields.json."""
 
@@ -379,6 +462,39 @@ class ASTMHandler(BaseHandler):
         if qc_msg:
             return patient_msg + qc_msg
         return patient_msg
+
+    def generate_qc(self, template: Dict[str, Any], **kwargs) -> str:
+        """Generate an ASTM QC message from the template's qc_controls section.
+
+        Each field listed in qc_controls produces an R+Q segment pair.
+        Raises ValueError if the template has no qc_controls defined.
+        """
+        if not self.validate_template(template):
+            raise ValueError("Invalid template: missing analyzer or fields")
+
+        qc_controls_list = template.get("qc_controls", [])
+        if not qc_controls_list:
+            raise ValueError(
+                f"Template '{template['analyzer'].get('name')}' has no qc_controls defined"
+            )
+
+        qc_controls = {c["field_code"]: c for c in qc_controls_list}
+
+        ident = template.get("identification", {})
+        anal  = template["analyzer"]
+        if ident.get("astm_header"):
+            name = ident["astm_header"]
+        else:
+            name = f"{anal.get('manufacturer', '')}^{anal.get('model', '')}^{anal.get('name', '')}".strip("^") or "MockAnalyzer"
+
+        fields = _normalize_fields_from_template(template)
+        return _build_qc_astm_message(
+            analyzer_name=name,
+            fields=fields,
+            qc_controls=qc_controls,
+            deviation=kwargs.get("deviation"),
+            category=anal.get("category", ""),
+        )
 
 
 def generate_astm_message(

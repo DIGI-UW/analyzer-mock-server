@@ -51,4 +51,5 @@ coverage.xml
 
 # Project specific
 terminals/
+seed_analyzers.sql
 

@@ -2012,6 +2012,32 @@ def main():
         help='Push mode: Send ASTM message to OpenELIS at URL (e.g., https://localhost:8443)'
     )
     parser.add_argument(
+        '--template',
+        type=str,
+        metavar='NAME',
+        default=os.environ.get('ASTM_TEMPLATE'),
+        help='Template name to use for push mode (e.g. horiba_pentra60). Uses fields.json if not set.'
+    )
+    parser.add_argument(
+        '--qc',
+        action='store_true',
+        help='QC push mode: generate ASTM QC message (H+O+R+Q+L) from template qc_controls. Requires --template.'
+    )
+    parser.add_argument(
+        '--qc-deviation',
+        type=float,
+        default=None,
+        metavar='SD',
+        help='Shift QC results by exactly N standard deviations from target. '
+             'Omit for realistic random scatter. '
+             'Examples: 0=exact target, 2.5=warning (1₂ₛ), 3.5=rejection (1₃ₛ), -3.5=below target'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Print the generated ASTM message without sending it. Works with --push, --qc, --template.'
+    )
+    parser.add_argument(
         '--push-count', '-c',
         type=int,
         default=1,
@@ -2176,32 +2202,61 @@ def main():
         print("=" * 60)
         print("  ASTM Mock Server - Push Mode")
         print("=" * 60)
+        mode_label = "QC" if args.qc else "Patient"
         print(f"  OpenELIS URL: {args.push}")
-        print(f"  Analyzer Type: {args.analyzer_type}")
+        print(f"  Template:     {args.template or '(fields.json / --analyzer-type)'}")
+        print(f"  Mode:         {mode_label}")
         print(f"  Message Count: {args.push_count}")
         print(f"  Interval: {args.push_interval}s")
         print("=" * 60)
         print()
-        
-        # Load fields configuration
-        fields_config = {}
-        fields_file = os.path.join(os.path.dirname(__file__), 'fields.json')
-        if os.path.exists(fields_file):
+
+        if args.qc and not args.template:
+            logger.error("--qc requires --template (fields.json has no qc_controls)")
+            return 1
+
+        # Resolve message generator: template-driven or legacy fields.json
+        push_template = None
+        if args.template:
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', f'{args.template}.json')
+            if not os.path.exists(template_path):
+                logger.error(f"Template not found: {template_path}")
+                return 1
+            with open(template_path, 'r') as f:
+                push_template = json.load(f)
+            if push_template.get('protocol', {}).get('type') != 'ASTM':
+                logger.error(f"Template '{args.template}' is not an ASTM template")
+                return 1
+            logger.info(f"Using template: {push_template['analyzer']['name']} [{mode_label}]")
+
+        def generate_push_message() -> Optional[str]:
+            if push_template:
+                handler = ASTMHandler()
+                if args.qc:
+                    return handler.generate_qc(push_template, deviation=args.qc_deviation)
+                return handler.generate(push_template)
+            fields_file = os.path.join(os.path.dirname(__file__), 'fields.json')
             try:
                 with open(fields_file, 'r') as f:
                     fields_config = json.load(f)
             except Exception as e:
                 logger.error(f"Error loading fields.json: {e}")
-                return 1
-        
-        if not fields_config:
-            logger.error("No fields configuration available")
-            return 1
-        
+                return None
+            return generate_astm_message(analyzer_type=args.analyzer_type, fields_config=fields_config)
+
+        # Dry run: print message and exit
+        if args.dry_run:
+            message = generate_push_message()
+            if message:
+                print(message)
+            else:
+                logger.error("Failed to generate message")
+            return
+
         # Push messages
         success_count = 0
         total_pushed = 0
-        
+
         if args.push_continuous:
             # Continuous mode: Push indefinitely (simulates real analyzer behavior)
             logger.info("Starting continuous push mode (press Ctrl+C to stop)")
@@ -2209,25 +2264,15 @@ def main():
                 while True:
                     total_pushed += 1
                     logger.info(f"Generating and pushing message #{total_pushed}")
-                    
-                    # Generate ASTM message
-                    message = generate_astm_message(
-                        analyzer_type=args.analyzer_type,
-                        fields_config=fields_config
-                    )
-                    
+                    message = generate_push_message()
                     if not message:
                         logger.error("Failed to generate message")
                         time.sleep(args.push_interval)
                         continue
-                    
-                    # Push to OpenELIS
-                    if push_to_openelis(args.push, message):
+                    if _push_astm_to_destination(args.push, message):
                         success_count += 1
                     else:
                         logger.warning(f"Push #{total_pushed} failed")
-                    
-                    # Wait before next push
                     time.sleep(args.push_interval)
             except KeyboardInterrupt:
                 logger.info("Continuous push mode stopped by user")
@@ -2236,24 +2281,14 @@ def main():
             for i in range(args.push_count):
                 total_pushed += 1
                 logger.info(f"Generating and pushing message {i+1}/{args.push_count}")
-                
-                # Generate ASTM message
-                message = generate_astm_message(
-                    analyzer_type=args.analyzer_type,
-                    fields_config=fields_config
-                )
-                
+                message = generate_push_message()
                 if not message:
                     logger.error("Failed to generate message")
                     continue
-                
-                # Push to OpenELIS
-                if push_to_openelis(args.push, message):
+                if _push_astm_to_destination(args.push, message):
                     success_count += 1
                 else:
                     logger.warning(f"Push {i+1} failed")
-                
-                # Wait before next push (except for last one)
                 if i < args.push_count - 1:
                     time.sleep(args.push_interval)
         

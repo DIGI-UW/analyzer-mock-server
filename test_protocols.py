@@ -335,5 +335,41 @@ class TestFileSimulateAPI(unittest.TestCase):
             self.assertTrue(os.path.exists(written_path))
 
 
+    def test_post_simulate_file_sanitizes_path_traversal_filename(self):
+        """Path traversal in filename is stripped to basename (safe write)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = json.dumps({"target_dir": tmpdir, "filename": "../evil.csv"})
+            headers = {"Content-Type": "application/json"}
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("POST", "/simulate/file/quantstudio7", body=payload, headers=headers)
+            resp = conn.getresponse()
+            body = json.loads(resp.read())
+            conn.close()
+            # Server strips path components — writes "evil.csv" in target_dir (safe)
+            self.assertEqual(resp.status, 200)
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "evil.csv")))
+            # Verify no file escaped to parent
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(tmpdir), "evil.csv")))
+
+    def test_post_simulate_file_rejects_invalid_json_body(self):
+        headers = {"Content-Type": "application/json"}
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("POST", "/simulate/file/quantstudio7", body="not json", headers=headers)
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertGreaterEqual(resp.status, 400)
+        self.assertLess(resp.status, 500)
+
+    def test_simulate_file_rejects_path_traversal_template(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/simulate/file/../../etc/passwd")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertGreaterEqual(resp.status, 400)
+        self.assertLess(resp.status, 500)
+
+
 if __name__ == "__main__":
     unittest.main()

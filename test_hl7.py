@@ -241,7 +241,7 @@ def test_abbott_template_patient_and_sample_ids():
     assert "PAT003" in pid["patient_id"]
     assert "RAKOTO" in pid["name"] or "JAO" in pid["name"]
     assert orc["placer_order_id"] == "PLACER789"
-    assert orc["filler_order_id"] == "FILLER012"
+    assert orc["filler_order_id"] == "PLACER789"  # filler = sample_id (same as placer)
 
 
 # --- Golden fixture semantics (key fields only) ---
@@ -251,7 +251,7 @@ ABBOTT_GOLDEN_SEMANTICS = {
     "MSH": {"sending_app": "ARCHITECT", "sending_facility": "LAB", "message_type": "ORU^R01"},
     "OBX": [{"code": "HIV", "value": "NEGATIVE"}, {"code": "HBSAG", "value": "POSITIVE"}],
     "PID": {"patient_id_contains": "PAT003", "name_contains": "RAKOTO"},
-    "ORC": {"placer_order_id": "PLACER789", "filler_order_id": "FILLER012"},
+    "ORC": {"placer_order_id": "PLACER789", "filler_order_id": "PLACER789"},
 }
 
 

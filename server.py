@@ -1522,10 +1522,25 @@ def file_simulate_post(template_name: str, params) -> tuple:
 
 
 class SimulateAPIHandler(BaseHTTPRequestHandler):
-    """HTTP API for /simulate/{protocol}/{template} (M4 CI/CD).
+    """HTTP API for /simulate/{protocol}/{template} and /analyzers (M4 CI/CD).
 
-    Supports both HL7 and ASTM template-driven message generation and push.
+    Supports template-driven message generation/push and dynamic analyzer
+    network management via Docker API.
     """
+
+    # Shared network manager instance (initialized lazily on first /analyzers call)
+    _network_manager = None
+
+    @classmethod
+    def _get_network_manager(cls):
+        if cls._network_manager is None:
+            try:
+                from analyzer_network_manager import AnalyzerNetworkManager
+                cls._network_manager = AnalyzerNetworkManager()
+            except Exception as e:
+                logger.error("Failed to initialize AnalyzerNetworkManager: %s", e)
+                return None
+        return cls._network_manager
 
     def do_GET(self):
         if self.path == "/health" or self.path == "/":
@@ -1540,8 +1555,18 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count)",
                     "GET /simulate/file/{template}": "Generate FILE payload from template",
                     "POST /simulate/file/{template}": "Generate + optionally write FILE payload (body: target_dir, filename)",
+                    "GET /analyzers": "List active mock analyzers with IPs",
+                    "POST /analyzers": "Create mock analyzer with unique network+IP",
+                    "DELETE /analyzers/{name}": "Remove mock analyzer network",
                 },
             })
+            return
+        if self.path == "/analyzers" or self.path == "/analyzers/":
+            mgr = self._get_network_manager()
+            if not mgr:
+                self._send_json(500, {"error": "Docker API not available"})
+                return
+            self._send_json(200, {"analyzers": mgr.list_analyzers()})
             return
         if self.path.startswith("/simulate/hl7/"):
             analyzer = self._extract_name("/simulate/hl7/")
@@ -1573,6 +1598,32 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def do_POST(self):
+        if self.path == "/analyzers" or self.path == "/analyzers/":
+            mgr = self._get_network_manager()
+            if not mgr:
+                self._send_json(500, {"error": "Docker API not available"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            if length == 0:
+                self._send_json(400, {"error": "Request body required: {name, template, port?}"})
+                return
+            try:
+                body = json.loads(self.rfile.read(length))
+            except Exception:
+                self._send_json(400, {"error": "Invalid JSON"})
+                return
+            name = body.get("name")
+            template = body.get("template")
+            port = body.get("port", 0)
+            if not name or not template:
+                self._send_json(400, {"error": "name and template are required"})
+                return
+            try:
+                result = mgr.create_analyzer(name, template, port)
+                self._send_json(201, result)
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
         if self.path.startswith("/simulate/hl7/"):
             analyzer = self._extract_name("/simulate/hl7/")
             if not analyzer:
@@ -1755,6 +1806,24 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                 return
         code, obj = file_simulate_post(template_name, params)
         self._send_json(code, obj)
+
+    def do_DELETE(self):
+        if self.path.startswith("/analyzers/"):
+            name = self.path.split("/analyzers/")[-1].strip("/")
+            if not name:
+                self._send_json(400, {"error": "Analyzer name required in URL"})
+                return
+            mgr = self._get_network_manager()
+            if not mgr:
+                self._send_json(500, {"error": "Docker API not available"})
+                return
+            removed = mgr.remove_analyzer(name)
+            if removed:
+                self._send_json(200, {"removed": True, "name": name})
+            else:
+                self._send_json(404, {"removed": False, "error": f"Analyzer '{name}' not found"})
+            return
+        self.send_error(404, "Not Found")
 
     def _send_json(self, code: int, obj: Dict):
         self.send_response(code)

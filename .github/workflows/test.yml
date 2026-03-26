@@ -5,6 +5,12 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      parent_ref:
+        description: 'Parent repo ref for analyzer profiles (branch, tag, or SHA)'
+        default: 'develop'
+        type: string
 
 jobs:
   test:
@@ -13,6 +19,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Checkout analyzer profiles from parent repo
+        uses: actions/checkout@v4
+        with:
+          repository: DIGI-UW/OpenELIS-Global-2
+          sparse-checkout: projects/analyzer-profiles
+          path: parent
+          # Default: develop (latest merged profiles).
+          # Override via workflow_dispatch input for linked PRs with profile changes.
+          ref: ${{ inputs.parent_ref || 'develop' }}
+
+      - name: Set profiles path for tests
+        run: echo "ANALYZER_PROFILES_DIR=${{ github.workspace }}/parent/projects/analyzer-profiles/hl7" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -42,7 +61,7 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile server.py template_loader.py template_generator.py
+          python -m py_compile server.py template_loader.py template_generator.py profile_adapter.py
           python -m py_compile protocols/*.py
           python -m py_compile hl7_generator.py generate_file.py
           echo "All Python files have valid syntax"

@@ -73,6 +73,8 @@ ETX = b'\x03'  # End of Text (frame end with checksum)
 ETB = b'\x17'  # End of Text Block (intermediate frame)
 CR = b'\x0D'   # Carriage Return
 LF = b'\x0A'   # Line Feed
+VT = b'\x0B'   # MLLP Start Block
+FS = b'\x1C'   # MLLP End Block
 
 # Server Configuration
 DEFAULT_PORT = 5000
@@ -1174,7 +1176,7 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                 message = generate_oru_r01(template, deterministic=True)
                 pushed = False
                 if destination:
-                    pushed = push_hl7_to_openelis(destination, message)
+                    pushed = _push_hl7_to_destination(destination, message)
                     if pushed:
                         success_count += 1
                 results.append({
@@ -1312,6 +1314,15 @@ class PushAPIHandler(BaseHTTPRequestHandler):
 
 def _load_template(analyzer: str) -> Optional[Dict]:
     """Load analyzer template from templates/<analyzer>.json."""
+    try:
+        from profile_adapter import load_strict_013_profile_template
+
+        profile_template = load_strict_013_profile_template(analyzer)
+        if profile_template is not None:
+            return profile_template
+    except Exception as e:
+        logger.warning("Failed to load strict profile-backed template for %s: %s", analyzer, e)
+
     base = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base, "templates", f"{analyzer}.json")
     if not os.path.exists(path):
@@ -1528,6 +1539,8 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
                 "patient_id": params.get("patientId") or params.get("patient_id"),
                 "sample_id": params.get("sampleId") or params.get("sample_id"),
                 "tests": params.get("tests"),
+                "destination": params.get("destination"),
+                "count": params.get("count", 1),
             }
             self._handle_simulate_hl7(analyzer, kwargs)
             return
@@ -1558,7 +1571,48 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"status": "error", "message": f"Template not found: {analyzer}"})
             return
         try:
-            msg = HL7Handler().generate(template, **{k: v for k, v in kwargs.items() if v is not None})
+            destination = kwargs.get("destination")
+            raw_count = kwargs.get("count", 1)
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                self._send_json(400, {"status": "error", "message": "Parameter 'count' must be an integer"})
+                return
+            if count < 1 or count > 1000:
+                self._send_json(400, {"status": "error", "message": "Parameter 'count' must be between 1 and 1000"})
+                return
+
+            generation_kwargs = {k: v for k, v in kwargs.items() if k in ("patient_id", "sample_id", "tests") and v is not None}
+            results = []
+            pushed_count = 0
+            first_message = None
+            for i in range(count):
+                msg = HL7Handler().generate(template, **generation_kwargs)
+                if first_message is None:
+                    first_message = msg
+                pushed = False
+                if destination:
+                    pushed = _push_hl7_to_destination(destination, msg)
+                    if pushed:
+                        pushed_count += 1
+                results.append({
+                    "message_number": i + 1,
+                    "pushed": pushed,
+                    "preview": msg.split("\r")[0][:80] + "...",
+                })
+
+            if destination or count > 1:
+                self._send_json(200, {
+                    "status": "completed",
+                    "analyzer": analyzer,
+                    "count": count,
+                    "destination": destination,
+                    "pushed": pushed_count if destination else None,
+                    "results": results,
+                })
+                return
+
+            msg = first_message or HL7Handler().generate(template, **generation_kwargs)
             msg_id = "MSG-" + msg.split("ORU^R01|")[-1].split("|")[0] if "ORU^R01|" in msg else "MSG-UNK"
             self._send_json(200, {"status": "sent", "messageId": msg_id, "message": msg})
         except Exception as e:
@@ -1692,7 +1746,7 @@ def start_simulate_api_server(port: int):
     server = HTTPServer(("0.0.0.0", port), SimulateAPIHandler)
     logger.info("Simulate API server started on port %s", port)
     logger.info("  GET  /simulate/hl7/{template} - Generate HL7 ORU^R01")
-    logger.info("  POST /simulate/hl7/{template} - Generate HL7 ORU^R01 (no push)")
+    logger.info("  POST /simulate/hl7/{template} - Generate + optional push HL7 (destination, count)")
     logger.info("  GET  /simulate/astm/{template} - Generate ASTM message")
     logger.info("  POST /simulate/astm/{template} - Generate + push ASTM")
     logger.info("  GET  /health - Health check")
@@ -1900,6 +1954,65 @@ def _send_astm_session(sock, records: list, session_label: str = "") -> bool:
     sock.sendall(EOT)
     logger.info(f"{tag} Session complete — {len(records)} frames sent")
     return True
+
+
+def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30) -> bool:
+    """
+    Push an HL7 message over MLLP and require positive application ACK.
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        payload = VT + hl7_message.encode("utf-8") + FS + CR
+        sock.sendall(payload)
+
+        ack = b""
+        while not ack.endswith(FS + CR):
+            chunk = sock.recv(4096)
+            if not chunk:
+                logger.error("[PUSH-HL7-MLLP] Peer closed before MLLP terminator from %s:%s", host, port)
+                return False
+            ack += chunk
+        ack_text = ack.replace(VT, b"").replace(FS + CR, b"").decode("utf-8", errors="replace")
+        if "MSA|AA|" in ack_text:
+            logger.info("[PUSH-HL7-MLLP] Positive ACK received from %s:%s", host, port)
+            return True
+        logger.error("[PUSH-HL7-MLLP] Negative/invalid ACK from %s:%s: %s", host, port, ack_text[:200])
+        return False
+    except Exception as e:
+        logger.error(f"[PUSH-HL7-MLLP] Push failed: {e}", exc_info=True)
+        return False
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def _push_hl7_to_destination(destination: str, hl7_message: str) -> bool:
+    """
+    Route HL7 push by destination scheme.
+
+    Supports:
+        mllp://host:port
+        http(s)://...
+    """
+    if destination.startswith("mllp://"):
+        addr = destination[len("mllp://"):]
+        if ":" not in addr:
+            logger.error(f"[PUSH-HL7] Invalid MLLP destination (missing port): {destination}")
+            return False
+        host, port_str = addr.rsplit(":", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            logger.error(f"[PUSH-HL7] Invalid MLLP port: {port_str}")
+            return False
+        return push_hl7_mllp(host, port, hl7_message)
+    return push_hl7_to_openelis(destination, hl7_message)
 
 
 def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) -> bool:

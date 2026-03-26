@@ -65,7 +65,7 @@ def generate_oru_r01(
     if placer_order_id is None:
         placer_order_id = sample_id
     if filler_order_id is None:
-        filler_order_id = "FILLER012"
+        filler_order_id = sample_id  # OE's HL7 reader uses OBR-3 (filler) as accession
     if patient_id is None:
         patient_id = test_patient.get("id", "PAT001")
 

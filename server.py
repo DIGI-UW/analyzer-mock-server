@@ -45,6 +45,7 @@ from urllib.parse import urlparse, parse_qs
 
 from protocols.astm_handler import generate_astm_message, ASTMHandler
 from protocols.hl7_handler import HL7Handler, generate_oru_r01
+from protocols.mllp_listener import MLLPProtocolHandler
 from protocols.serial_handler import SerialHandler, send_astm_over_serial
 from protocols.file_handler import FileHandler
 
@@ -840,29 +841,72 @@ class ASTMMockServer:
             except socket.timeout:
                 continue
 
+    def _resolve_protocol_for_port(self, port: int) -> str:
+        """Determine protocol type for a port by checking its template.
+
+        Returns 'HL7' or 'ASTM' (default). Both are equal citizens —
+        the template's protocol.type field determines the handler.
+        """
+        template_name = self.port_to_template.get(port)
+        if template_name:
+            template = _load_template(template_name)
+            if template:
+                proto = template.get("protocol", {}).get("type", "").upper()
+                if proto == "HL7":
+                    return "HL7"
+        return "ASTM"
+
     def _start_multi_port(self):
-        """Multi-port mode: one socket per port, template per port."""
+        """Multi-port mode: one socket per port, protocol-aware handler dispatch.
+
+        Each port maps to a template. The template's protocol.type determines
+        which handler serves connections on that port:
+          - ASTM → ASTMProtocolHandler (ENQ/ACK framing)
+          - HL7  → MLLPProtocolHandler (VT/FS framing + HL7 ACK)
+        """
+        # Pre-resolve protocol per port for logging and dispatch
+        port_protocols = {}
         for port in self.ports:
+            proto = self._resolve_protocol_for_port(port)
+            port_protocols[port] = proto
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('0.0.0.0', port))
             sock.listen(MAX_CONNECTIONS)
             sock.setblocking(False)
             self.server_sockets.append(sock)
-        logger.info("ASTM Mock Server started on ports %s (port-to-template)", self.ports)
+
+        astm_ports = [p for p, proto in port_protocols.items() if proto == "ASTM"]
+        hl7_ports = [p for p, proto in port_protocols.items() if proto == "HL7"]
+        logger.info("Mock Server started on %d ports (ASTM: %s, HL7/MLLP: %s)",
+                     len(self.ports), astm_ports or "none", hl7_ports or "none")
         logger.info("Response delay: %sms", self.response_delay_ms)
+
         while self.running:
             try:
                 readable, _, _ = select.select(self.server_sockets, [], [], 1.0)
                 for sock in readable:
                     conn, addr = sock.accept()
                     local_port = sock.getsockname()[1]
-                    handler = ASTMProtocolHandler(
-                        conn, addr, self.fields_config, self.response_delay_ms,
-                        astm_template=None,
-                        local_port=local_port,
-                        port_to_template=self.port_to_template
-                    )
+                    proto = port_protocols.get(local_port, "ASTM")
+
+                    if proto == "HL7":
+                        template_name = self.port_to_template.get(local_port)
+                        template = _load_template(template_name) if template_name else None
+                        handler = MLLPProtocolHandler(
+                            conn, addr,
+                            template=template,
+                            template_name=template_name,
+                            response_delay_ms=self.response_delay_ms,
+                        )
+                    else:
+                        handler = ASTMProtocolHandler(
+                            conn, addr, self.fields_config, self.response_delay_ms,
+                            astm_template=None,
+                            local_port=local_port,
+                            port_to_template=self.port_to_template
+                        )
+
                     thread = threading.Thread(target=handler.handle, daemon=True)
                     thread.start()
                     self.client_threads.append(thread)
@@ -1336,17 +1380,23 @@ def _load_template(analyzer: str) -> Optional[Dict]:
 
 
 def _load_port_templates(default_port: int) -> Dict[int, str]:
-    """Load port-to-template mapping from config file or ASTM_PORT_TEMPLATES env.
+    """Load port-to-template mapping from config or env.
 
     Returns a dict mapping port (int) to template name (str). Used for
-    request-based template selection: each connection port maps to one template.
-    If ASTM_PORT_TEMPLATES is set, it replaces config (use "{}" to force fallback).
-    If no config and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
+    protocol-aware dispatch: each port maps to a template, and the template's
+    protocol.type (ASTM or HL7) determines the connection handler.
+
+    Env vars (checked in order):
+      PORT_TEMPLATES          — protocol-agnostic (preferred)
+      ASTM_PORT_TEMPLATES     — backward-compatible alias
+
+    If no env var and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
     """
     base = os.path.dirname(os.path.abspath(__file__))
     port_to_template: Dict[int, str] = {}
 
-    env_json = os.environ.get("ASTM_PORT_TEMPLATES")
+    # PORT_TEMPLATES is the preferred env var; ASTM_PORT_TEMPLATES is kept for compat
+    env_json = os.environ.get("PORT_TEMPLATES") or os.environ.get("ASTM_PORT_TEMPLATES")
     if env_json is not None:
         try:
             raw = json.loads(env_json)

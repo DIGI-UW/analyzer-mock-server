@@ -927,12 +927,12 @@ class ASTMMockServer:
         logger.info("ASTM Mock Server stopped")
 
 
-class PushAPIHandler(BaseHTTPRequestHandler):
-    """HTTP API handler for triggering pushes."""
+# PushAPIHandler removed — consolidated into SimulateAPIHandler.
+# All /simulate/* routes, /health, /analyzers are served by SimulateAPIHandler.
+# The legacy /push endpoint and --api-port flag are no longer supported.
 
-    fields_config = {}
-    openelis_url = None
-    template_loader = None
+
+class _PushAPIHandlerRemoved:
 
     def _send_json(self, code: int, obj: Dict):
         self.send_response(code)
@@ -953,7 +953,10 @@ class PushAPIHandler(BaseHTTPRequestHandler):
             if not template_name:
                 self.send_error(400, "Missing template name")
                 return
-            length = int(self.headers.get("Content-Length", 0))
+            length = self._parse_content_length()
+            if length < 0:
+                self._send_json(400, {"error": "Invalid Content-Length header"})
+                return
             params = {}
             if length > 0:
                 try:
@@ -1606,13 +1609,24 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             return
         self.send_error(404, "Not Found")
 
+    def _parse_content_length(self) -> int:
+        """Parse Content-Length header, returning -1 on invalid values."""
+        raw = self.headers.get("Content-Length", "0")
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
     def do_POST(self):
         if self.path == "/analyzers" or self.path == "/analyzers/":
             mgr = self._get_network_manager()
             if not mgr:
                 self._send_json(500, {"error": "Docker API not available"})
                 return
-            length = int(self.headers.get("Content-Length", 0))
+            length = self._parse_content_length()
+            if length < 0:
+                self._send_json(400, {"error": "Invalid Content-Length header"})
+                return
             if length == 0:
                 self._send_json(400, {"error": "Request body required: {name, template, port?}"})
                 return
@@ -1627,6 +1641,9 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             if not name or not template:
                 self._send_json(400, {"error": "name and template are required"})
                 return
+            if not re.match(r'^[A-Za-z0-9_-]+$', name):
+                self._send_json(400, {"error": "name must contain only alphanumeric, dash, or underscore characters"})
+                return
             try:
                 result = mgr.create_analyzer(name, template, port)
                 self._send_json(201, result)
@@ -1638,7 +1655,10 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             if not analyzer:
                 self._send_json(400, {"status": "error", "message": "Missing analyzer"})
                 return
-            length = int(self.headers.get("Content-Length", 0))
+            length = self._parse_content_length()
+            if length < 0:
+                self._send_json(400, {"error": "Invalid Content-Length header"})
+                return
             params = {}
             if length > 0:
                 try:
@@ -1761,7 +1781,10 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
             return
 
         # Parse body
-        length = int(self.headers.get("Content-Length", 0))
+        length = self._parse_content_length()
+        if length < 0:
+            self._send_json(400, {"error": "Invalid Content-Length header"})
+            return
         params = {}
         if length > 0:
             try:
@@ -1818,7 +1841,10 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
 
     def _handle_simulate_file_post(self, template_name: str):
         """POST /simulate/file/{template}: generate + optionally write FILE payload."""
-        length = int(self.headers.get("Content-Length", 0))
+        length = self._parse_content_length()
+        if length < 0:
+            self._send_json(400, {"error": "Invalid Content-Length header"})
+            return
         params = {}
         if length > 0:
             try:
@@ -1831,7 +1857,7 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         if self.path.startswith("/analyzers/"):
-            name = self.path.split("/analyzers/")[-1].strip("/")
+            name = self._extract_name("/analyzers/")
             if not name:
                 self._send_json(400, {"error": "Analyzer name required in URL"})
                 return

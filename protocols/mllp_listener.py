@@ -5,7 +5,7 @@ Accepts inbound MLLP connections and responds with HL7 ACK — simulating
 a real HL7 analyzer that listens for LIS-initiated messages (ORM^O01
 worklist download, QRY queries, etc.).
 
-MLLP framing (RFC 3863):
+MLLP framing (per HL7 v2.x MLLP conventions):
   Inbound:  <VT> hl7_message <FS><CR>
   Response: <VT> ack_message <FS><CR>
 
@@ -118,18 +118,48 @@ class MLLPProtocolHandler:
                 pass
             logger.info("[MLLP-LISTEN] Connection closed from %s", self.addr)
 
+    def __init_leftover(self):
+        """Lazy-init the leftover buffer for pipelined frames."""
+        if not hasattr(self, "_leftover"):
+            self._leftover = bytearray()
+
     def _receive_mllp_frame(self) -> Optional[str]:
-        """Read one MLLP-framed message. Returns message content or None on disconnect."""
-        # Wait for VT start byte
-        try:
-            start = self.conn.recv(1)
-        except socket.timeout:
-            return None
+        """Read one MLLP-framed message. Returns message content or None on disconnect.
 
-        if not start:
-            return None  # Connection closed
+        Supports persistent connections: loops on idle timeouts waiting for VT,
+        only returns None on actual disconnect. Handles pipelined frames by
+        preserving leftover bytes after FS+CR for the next call.
+        """
+        self.__init_leftover()
 
-        if start != VT:
+        # Wait for VT start byte — loop on timeout to keep persistent connections alive
+        while self.running:
+            # Check leftover buffer first (from pipelined frames)
+            if self._leftover:
+                if self._leftover[0:1] == VT:
+                    self._leftover = self._leftover[1:]
+                    break
+                else:
+                    logger.warning(
+                        "[MLLP-LISTEN] Expected VT (0x0B) in leftover, got 0x%s from %s",
+                        self._leftover[0:1].hex(),
+                        self.addr,
+                    )
+                    self._leftover.clear()
+                    return None
+
+            try:
+                start = self.conn.recv(1)
+            except socket.timeout:
+                # Idle timeout — keep connection alive for persistent analyzers
+                continue
+
+            if not start:
+                return None  # Connection closed
+
+            if start == VT:
+                break
+
             logger.warning(
                 "[MLLP-LISTEN] Expected VT (0x0B), got 0x%s from %s",
                 start.hex(),
@@ -137,9 +167,26 @@ class MLLPProtocolHandler:
             )
             return None
 
+        if not self.running:
+            return None
+
         # Read until FS+CR end marker
-        buffer = bytearray()
+        buffer = bytearray(self._leftover)
+        self._leftover.clear()
+
         while True:
+            # Check for FS+CR terminator anywhere in buffer (handles pipelined frames)
+            term_pos = buffer.find(FS + CR)
+            if term_pos >= 0:
+                message = buffer[:term_pos].decode("utf-8", errors="replace")
+                # Preserve any bytes after FS+CR for next frame
+                self._leftover = bytearray(buffer[term_pos + 2:])
+                return message
+
+            if len(buffer) > 1_000_000:
+                logger.error("[MLLP-LISTEN] Message too large (>1MB) from %s", self.addr)
+                return None
+
             try:
                 chunk = self.conn.recv(RECV_BUFFER)
             except socket.timeout:
@@ -150,16 +197,6 @@ class MLLPProtocolHandler:
                 return None  # Connection closed mid-message
 
             buffer.extend(chunk)
-
-            # Check for FS+CR terminator
-            if len(buffer) >= 2 and buffer[-2:] == FS + CR:
-                # Strip FS+CR terminator
-                message = buffer[:-2].decode("utf-8", errors="replace")
-                return message
-
-            if len(buffer) > 1_000_000:
-                logger.error("[MLLP-LISTEN] Message too large (>1MB) from %s", self.addr)
-                return None
 
     def _send_mllp_frame(self, message: str):
         """Send an MLLP-framed message."""

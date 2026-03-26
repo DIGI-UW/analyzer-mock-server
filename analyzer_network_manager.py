@@ -79,6 +79,7 @@ class AnalyzerNetworkManager:
         bridge_ip = f"172.21.{subnet_id}.{BRIDGE_IP_SUFFIX}"
         network_name = f"{NETWORK_PREFIX}{name}"
 
+        network_created = False
         try:
             # Create network
             import docker.types
@@ -87,6 +88,7 @@ class AnalyzerNetworkManager:
             network = self.docker.networks.create(
                 network_name, driver="bridge", ipam=ipam_config
             )
+            network_created = True
             logger.info("Created network %s (subnet %s)", network_name, subnet)
 
             # Connect mock container
@@ -114,8 +116,8 @@ class AnalyzerNetworkManager:
 
         except Exception as e:
             logger.error("Failed to create analyzer network %s: %s", name, e)
-            # Cleanup on failure
-            self._cleanup_network(network_name)
+            if network_created:
+                self._cleanup_network(network_name)
             raise
 
     def remove_analyzer(self, name: str) -> bool:

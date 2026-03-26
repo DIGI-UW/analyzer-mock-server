@@ -12,7 +12,7 @@ import http.client
 from http.server import HTTPServer
 from unittest.mock import MagicMock, patch
 
-from server import SimulateAPIHandler
+from api import MockAPIHandler as SimulateAPIHandler
 
 
 class TestAnalyzersAPI(unittest.TestCase):

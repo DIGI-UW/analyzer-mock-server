@@ -10,7 +10,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import server as server_module
+import push as push_module
 
 
 def _start_ack_server():
@@ -49,7 +49,7 @@ def test_push_hl7_mllp_success():
     """MLLP push succeeds when receiver returns MSA|AA."""
     port, received, thread = _start_ack_server()
     message = "MSH|^~\\&|MINDRAY|BS-200|OE|LAB|20260310120000||ORU^R01|CTRL1|P|2.3.1\rOBX|1|NM|^^^GLU||102|mg/dL\r"
-    ok = server_module.push_hl7_mllp("127.0.0.1", port, message, timeout=5)
+    ok = push_module.push_hl7_mllp("127.0.0.1", port, message, timeout=5)
     thread.join(timeout=2)
 
     assert ok is True
@@ -62,6 +62,6 @@ def test_push_hl7_destination_routes_mllp_scheme():
     """Destination parser routes mllp://host:port to MLLP transport."""
     port, _, thread = _start_ack_server()
     message = "MSH|^~\\&|MINDRAY|BS-300|OE|LAB|20260310120000||ORU^R01|CTRL2|P|2.3.1\r"
-    ok = server_module._push_hl7_to_destination(f"mllp://127.0.0.1:{port}", message)
+    ok = push_module.push_hl7_to_destination(f"mllp://127.0.0.1:{port}", message)
     thread.join(timeout=2)
     assert ok is True

@@ -16,7 +16,7 @@ from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
 from protocols.serial_handler import SerialHandler
 from protocols.file_handler import FileHandler
-from server import SimulateAPIHandler
+from api import MockAPIHandler as SimulateAPIHandler
 
 
 def _load_template(name: str):

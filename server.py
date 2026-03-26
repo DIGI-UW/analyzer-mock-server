@@ -1223,9 +1223,18 @@ class PushAPIHandler(BaseHTTPRequestHandler):
                     pushed = _push_hl7_to_destination(destination, message)
                     if pushed:
                         success_count += 1
+                # Extract sample_id from OBR-3 (filler order number = accession in OE)
+                sample_id_from_msg = None
+                for seg in message.split('\r'):
+                    if seg.startswith('OBR|'):
+                        fields = seg.split('|')
+                        if len(fields) > 3:
+                            sample_id_from_msg = fields[3]
+                        break
                 results.append({
                     "message_number": i + 1,
                     "pushed": pushed,
+                    "sample_id": sample_id_from_msg,
                     "preview": message.split('\r')[0][:80] + "..."
                 })
             self.send_response(200)
@@ -1767,16 +1776,29 @@ class SimulateAPIHandler(BaseHTTPRequestHandler):
         results = []
         success_count = 0
         handler = ASTMHandler()
+        # Pass sample_id from request body if provided
+        gen_kwargs = {"use_seed": True}
+        if params.get("sample_id"):
+            gen_kwargs["sample_id"] = params["sample_id"]
         for i in range(count):
-            msg = handler.generate(template, use_seed=True)
+            msg = handler.generate(template, **gen_kwargs)
             pushed = False
             if destination:
                 pushed = _push_astm_to_destination(destination, msg)
                 if pushed:
                     success_count += 1
+            # Extract sample_id from O-segment field 2 (specimen ID)
+            sample_id_from_msg = None
+            for line in msg.split('\n'):
+                if line.startswith('O|'):
+                    fields = line.split('|')
+                    if len(fields) > 2:
+                        sample_id_from_msg = fields[2].split('^')[0]
+                    break
             results.append({
                 "message_number": i + 1,
                 "pushed": pushed,
+                "sample_id": sample_id_from_msg,
                 "preview": msg.split('\n')[0][:80] + "..." if msg else ""
             })
 

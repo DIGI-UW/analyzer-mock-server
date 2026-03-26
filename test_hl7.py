@@ -240,8 +240,9 @@ def test_abbott_template_patient_and_sample_ids():
 
     assert "PAT003" in pid["patient_id"]
     assert "RAKOTO" in pid["name"] or "JAO" in pid["name"]
-    assert orc["placer_order_id"] == "PLACER789"
-    assert orc["filler_order_id"] == "PLACER789"  # filler = sample_id (same as placer)
+    # Sample IDs are generated sequentially by the mock (like a real analyzer)
+    assert orc["placer_order_id"], "placer_order_id should not be empty"
+    assert orc["filler_order_id"] == orc["placer_order_id"], "filler should match placer"
 
 
 # --- Golden fixture semantics (key fields only) ---
@@ -251,7 +252,7 @@ ABBOTT_GOLDEN_SEMANTICS = {
     "MSH": {"sending_app": "ARCHITECT", "sending_facility": "LAB", "message_type": "ORU^R01"},
     "OBX": [{"code": "HIV", "value": "NEGATIVE"}, {"code": "HBSAG", "value": "POSITIVE"}],
     "PID": {"patient_id_contains": "PAT003", "name_contains": "RAKOTO"},
-    "ORC": {"placer_order_id": "PLACER789", "filler_order_id": "PLACER789"},
+    "ORC": {"placer_prefix": "PLACER789-", "filler_equals_placer": True},
 }
 
 
@@ -282,8 +283,8 @@ def test_generated_abbott_message_matches_golden_semantics():
     assert ABBOTT_GOLDEN_SEMANTICS["PID"]["name_contains"] in pid["name"]
 
     orc = _orc_obr_placer_filler(segs["ORC"][0])
-    assert orc["placer_order_id"] == ABBOTT_GOLDEN_SEMANTICS["ORC"]["placer_order_id"]
-    assert orc["filler_order_id"] == ABBOTT_GOLDEN_SEMANTICS["ORC"]["filler_order_id"]
+    assert orc["placer_order_id"].startswith(ABBOTT_GOLDEN_SEMANTICS["ORC"]["placer_prefix"])
+    assert orc["filler_order_id"] == orc["placer_order_id"]  # filler = placer
 
 
 def test_non_hl7_template_raises():

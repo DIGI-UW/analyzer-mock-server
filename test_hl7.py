@@ -11,6 +11,7 @@ Tests:
 
 import os
 import sys
+import json
 
 import pytest
 
@@ -191,11 +192,10 @@ def test_abbott_template_msh_sender():
 )
 def test_mindray_templates_emit_sender_identity_and_version(template_name, expected_facility):
     """Mindray HL7 templates emit MSH-3/MSH-4 identity and the configured HL7 version."""
-    from template_loader import TemplateLoader
+    from server import _load_template
     from protocols.hl7_handler import generate_oru_r01
 
-    loader = TemplateLoader()
-    template = loader.load_template(template_name)
+    template = _load_template(template_name)
     msg = generate_oru_r01(template, deterministic=True)
 
     segs = _segment_map(msg)
@@ -298,3 +298,44 @@ def test_non_hl7_template_raises():
     }
     with pytest.raises(ValueError, match="protocol type must be HL7"):
         generate_oru_r01(non_hl7, deterministic=True)
+
+
+def test_strict_013_profiles_have_adapter_targets():
+    """Strict 013 profile files must have explicit adapter targets."""
+    from profile_adapter import STRICT_013_PROFILE_FILES
+
+    expected = {"mindray-bc5380.json", "mindray-bs200.json", "mindray-bs300.json"}
+    assert set(STRICT_013_PROFILE_FILES.values()) == expected
+
+
+@pytest.mark.parametrize(
+    "template_name,profile_file",
+    [
+        ("mindray_bc5380", "mindray-bc5380.json"),
+        ("mindray_bs200", "mindray-bs200.json"),
+        ("mindray_bs300", "mindray-bs300.json"),
+    ],
+)
+def test_strict_013_templates_follow_profile_obx_codes_and_units(template_name, profile_file):
+    """Strict 013 templates should derive OBX code/unit semantics from profile defaults."""
+    from server import _load_template
+
+    profiles_dir = os.environ.get("ANALYZER_PROFILES_DIR")
+    if not profiles_dir:
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        profiles_dir = os.path.join(repo_root, "projects", "analyzer-profiles", "hl7")
+    profile_path = os.path.join(profiles_dir, profile_file)
+    with open(profile_path, "r", encoding="utf-8") as fh:
+        profile = json.load(fh)
+
+    template = _load_template(template_name)
+    assert template is not None
+
+    profile_code_units = {
+        (item.get("obx_identifier") or item.get("analyzer_code")): item.get("unit", "")
+        for item in profile.get("default_test_mappings", [])
+    }
+    template_code_units = {field.get("code"): field.get("unit", "") for field in template.get("fields", [])}
+
+    assert set(template_code_units.keys()) == set(profile_code_units.keys())
+    assert template_code_units == profile_code_units

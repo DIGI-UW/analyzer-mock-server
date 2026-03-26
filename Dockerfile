@@ -9,8 +9,8 @@ LABEL description="ASTM LIS2-A2 Mock Server for analyzer testing"
 
 WORKDIR /app
 
-# Copy server, protocol handlers, and port-to-template config
-COPY server.py fields.json template_loader.py ./
+# Copy server, protocol handlers, port-to-template config, and profile adapter
+COPY server.py fields.json template_loader.py profile_adapter.py ./
 COPY protocols/ ./protocols/
 COPY templates/ ./templates/
 COPY config/ ./config/

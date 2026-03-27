@@ -23,12 +23,21 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Subnet allocation: 10.42.{10+N}.0/24 — completely separate range from
+# Subnet allocation: 10.42.{N}.0/24 — completely separate range from
 # analyzer-net (172.21.1.0/24) to avoid Docker routing conflicts
-SUBNET_BASE = 10
 ANALYZER_IP_SUFFIX = 10  # Analyzer (mock) gets .10 on each subnet
 BRIDGE_IP_SUFFIX = 2     # Bridge gets .2 (.1 is the Docker gateway)
 NETWORK_PREFIX = "mock-analyzer-"
+
+# Fixed subnet assignments for stable, deterministic IPs per analyzer.
+# Each analyzer always gets the same IP regardless of creation order.
+FIXED_SUBNETS: Dict[str, int] = {
+    "genexpert": 20,
+    "bc5380": 21,
+    "bs200": 22,
+    "bs300": 23,
+}
+DYNAMIC_SUBNET_BASE = 50  # Dynamic allocations start here (won't collide with fixed)
 
 
 class AnalyzerNetworkManager:
@@ -37,7 +46,7 @@ class AnalyzerNetworkManager:
     def __init__(self):
         self._docker = None
         self._analyzers: Dict[str, dict] = {}  # name → {network, ip, template, ...}
-        self._next_subnet = SUBNET_BASE
+        self._next_dynamic_subnet = DYNAMIC_SUBNET_BASE
         self._mock_container = os.environ.get("MOCK_CONTAINER_NAME", os.environ.get("HOSTNAME", ""))
         self._bridge_container = os.environ.get("BRIDGE_CONTAINER_NAME", "")
 
@@ -71,8 +80,12 @@ class AnalyzerNetworkManager:
         if name in self._analyzers:
             return self._analyzers[name]
 
-        subnet_id = self._next_subnet
-        self._next_subnet += 1
+        # Use fixed subnet if defined, otherwise allocate dynamically
+        if name in FIXED_SUBNETS:
+            subnet_id = FIXED_SUBNETS[name]
+        else:
+            subnet_id = self._next_dynamic_subnet
+            self._next_dynamic_subnet += 1
 
         subnet = f"10.42.{subnet_id}.0/24"
         analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"

@@ -17,16 +17,27 @@ from typing import Dict, List, Optional
 _sample_counters: Dict[str, itertools.count] = {}
 
 
+MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
+
+
 def _next_sample_id(prefix: str, timestamp: datetime) -> str:
     """Generate a unique sequential sample ID like a real analyzer would.
 
     Format: {PREFIX}-{YYYYMMDD}-{NNN} e.g., HARN-BC-20260326-001
     Counter is per-prefix and never resets (timestamp makes it unique across restarts).
+    Total length capped at 20 chars (OE DB constraint).
     """
     if prefix not in _sample_counters:
         _sample_counters[prefix] = itertools.count(1)
     seq = next(_sample_counters[prefix])
-    return f"{prefix}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+    sid = f"{prefix}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+    if len(sid) > MAX_SAMPLE_ID_LEN:
+        # Truncate prefix to fit — suffix is 13 chars (-YYYYMMDD-NNN)
+        max_prefix = MAX_SAMPLE_ID_LEN - 13
+        sid = f"{prefix[:max_prefix]}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+        logger.warning("Sample ID prefix '%s' too long, truncated to '%s' (max %d chars)",
+                        prefix, prefix[:max_prefix], MAX_SAMPLE_ID_LEN)
+    return sid
 
 
 def generate_oru_r01(

@@ -23,7 +23,7 @@ NAK = b'\x15'
 EOT = b'\x04'
 STX = b'\x02'
 ETX = b'\x03'
-ETB = b'\x1b'
+ETB = b'\x17'
 CR = b'\x0D'
 LF = b'\x0A'
 
@@ -211,6 +211,7 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             sock.settimeout(timeout)
             sock.connect((host, port))
             if not send_astm_session(sock, session_records, label):

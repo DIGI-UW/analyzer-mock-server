@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from typing import Dict, Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -448,9 +449,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         logger.info("%s - %s", self.address_string(), format % args)
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Thread-per-request HTTP server. Required so ASTM/MLLP TCP push operations
+    don't block the HTTP handler thread (Nagle/buffering interaction)."""
+    daemon_threads = True
+
+
 def start_api_server(port: int):
     """Start the mock API HTTP server."""
-    server = HTTPServer(("0.0.0.0", port), MockAPIHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), MockAPIHandler)
     logger.info("Mock API server started on port %s", port)
     try:
         server.serve_forever()

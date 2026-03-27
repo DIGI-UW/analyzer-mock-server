@@ -23,11 +23,11 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Subnet allocation: 172.21.{10+N}.0/24 — avoids conflict with
-# analyzer-net (172.21.1.0/24) used by compose
+# Subnet allocation: 10.42.{10+N}.0/24 — completely separate range from
+# analyzer-net (172.21.1.0/24) to avoid Docker routing conflicts
 SUBNET_BASE = 10
-ANALYZER_IP_SUFFIX = 10  # Analyzer gets .10 on each subnet
-BRIDGE_IP_SUFFIX = 1     # Bridge gets .1 (gateway-like)
+ANALYZER_IP_SUFFIX = 10  # Analyzer (mock) gets .10 on each subnet
+BRIDGE_IP_SUFFIX = 2     # Bridge gets .2 (.1 is the Docker gateway)
 NETWORK_PREFIX = "mock-analyzer-"
 
 
@@ -74,9 +74,9 @@ class AnalyzerNetworkManager:
         subnet_id = self._next_subnet
         self._next_subnet += 1
 
-        subnet = f"172.21.{subnet_id}.0/24"
-        analyzer_ip = f"172.21.{subnet_id}.{ANALYZER_IP_SUFFIX}"
-        bridge_ip = f"172.21.{subnet_id}.{BRIDGE_IP_SUFFIX}"
+        subnet = f"10.42.{subnet_id}.0/24"
+        analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"
+        bridge_ip = f"10.42.{subnet_id}.{BRIDGE_IP_SUFFIX}"
         network_name = f"{NETWORK_PREFIX}{name}"
 
         network_created = False

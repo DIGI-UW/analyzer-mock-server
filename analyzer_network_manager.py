@@ -92,29 +92,49 @@ class AnalyzerNetworkManager:
         bridge_ip = f"10.42.{subnet_id}.{BRIDGE_IP_SUFFIX}"
         network_name = f"{NETWORK_PREFIX}{name}"
 
-        network_created = False
         try:
-            # Create network
             import docker.types
-            ipam_pool = docker.types.IPAMPool(subnet=subnet)
-            ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
-            network = self.docker.networks.create(
-                network_name, driver="bridge", ipam=ipam_config
-            )
-            network_created = True
-            logger.info("Created network %s (subnet %s)", network_name, subnet)
+            network = None
 
-            # Connect mock container
+            # Try to create network, or reuse existing (idempotent)
+            try:
+                ipam_pool = docker.types.IPAMPool(subnet=subnet)
+                ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
+                network = self.docker.networks.create(
+                    network_name, driver="bridge", ipam=ipam_config
+                )
+                logger.info("Created network %s (subnet %s)", network_name, subnet)
+            except Exception as create_err:
+                if "Conflict" in str(create_err) or "already exists" in str(create_err):
+                    # Reuse existing Docker network (e.g., left over from previous run)
+                    network = self.docker.networks.get(network_name)
+                    logger.info("Reusing existing network %s", network_name)
+                else:
+                    raise
+
+            # Connect mock container (skip if already connected)
             if self._mock_container:
-                network.connect(self._mock_container, ipv4_address=analyzer_ip)
-                logger.info("Connected mock (%s) to %s at %s",
-                            self._mock_container, network_name, analyzer_ip)
+                try:
+                    network.connect(self._mock_container, ipv4_address=analyzer_ip)
+                    logger.info("Connected mock (%s) to %s at %s",
+                                self._mock_container, network_name, analyzer_ip)
+                except Exception as conn_err:
+                    if "already" in str(conn_err).lower():
+                        logger.info("Mock already connected to %s", network_name)
+                    else:
+                        raise
 
-            # Connect bridge container
+            # Connect bridge container (skip if already connected)
             if self._bridge_container:
-                network.connect(self._bridge_container, ipv4_address=bridge_ip)
-                logger.info("Connected bridge (%s) to %s at %s",
-                            self._bridge_container, network_name, bridge_ip)
+                try:
+                    network.connect(self._bridge_container, ipv4_address=bridge_ip)
+                    logger.info("Connected bridge (%s) to %s at %s",
+                                self._bridge_container, network_name, bridge_ip)
+                except Exception as conn_err:
+                    if "already" in str(conn_err).lower():
+                        logger.info("Bridge already connected to %s", network_name)
+                    else:
+                        raise
 
             result = {
                 "name": name,
@@ -129,20 +149,21 @@ class AnalyzerNetworkManager:
 
         except Exception as e:
             logger.error("Failed to create analyzer network %s: %s", name, e)
-            if network_created:
-                self._cleanup_network(network_name)
             raise
 
     def remove_analyzer(self, name: str) -> bool:
         """Remove an analyzer's Docker network.
 
-        Returns True if removed, False if not found.
+        Handles both cached and orphaned networks (e.g., from a previous
+        mock process that didn't clean up). Returns True if removed.
         """
-        if name not in self._analyzers:
-            return False
+        if name in self._analyzers:
+            info = self._analyzers.pop(name)
+            network_name = info["network"]
+            return self._cleanup_network(network_name)
 
-        info = self._analyzers.pop(name)
-        network_name = info["network"]
+        # Try to remove orphaned Docker network (not in cache but may exist)
+        network_name = f"{NETWORK_PREFIX}{name}"
         return self._cleanup_network(network_name)
 
     def list_analyzers(self) -> List[dict]:

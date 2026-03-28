@@ -414,7 +414,16 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             result = mgr.create_analyzer(name, template, port)
             self._send_json(201, result)
         except Exception as e:
-            self._send_json(500, {"error": str(e)})
+            error_str = str(e)
+            if "Conflict" in error_str or "already exists" in error_str:
+                # Network exists — return the existing analyzer info if cached
+                existing = mgr._analyzers.get(name)
+                if existing:
+                    self._send_json(200, existing)
+                else:
+                    self._send_json(409, {"error": error_str})
+            else:
+                self._send_json(500, {"error": error_str})
 
     # ── Helpers ──────────────────────────────────────────────────
 

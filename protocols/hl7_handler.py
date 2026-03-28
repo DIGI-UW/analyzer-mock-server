@@ -9,12 +9,14 @@ Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE,
 """
 
 import itertools
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
 # Atomic counter for sequential sample IDs — never resets, always unique.
 # Each template gets its own counter via _sample_counters dict.
 _sample_counters: Dict[str, itertools.count] = {}
+logger = logging.getLogger(__name__)
 
 
 MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)

@@ -429,7 +429,13 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
     def _extract_name(self, prefix: str) -> Optional[str]:
         name = self.path.split(prefix)[-1].split("?")[0].strip("/")
-        return name if name else None
+        if not name:
+            return None
+        # Reject path traversal and separator-based names up front.
+        # Template names are expected to be simple slugs (letters/numbers/_/-).
+        if not re.match(r"^[A-Za-z0-9_-]+$", name):
+            return None
+        return name
 
     # Sentinels for body parse failures (distinct from "no body")
     _JSON_PARSE_ERROR = object()

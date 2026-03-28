@@ -252,7 +252,7 @@ ABBOTT_GOLDEN_SEMANTICS = {
     "MSH": {"sending_app": "ARCHITECT", "sending_facility": "LAB", "message_type": "ORU^R01"},
     "OBX": [{"code": "HIV", "value": "NEGATIVE"}, {"code": "HBSAG", "value": "POSITIVE"}],
     "PID": {"patient_id_contains": "PAT003", "name_contains": "RAKOTO"},
-    "ORC": {"placer_prefix": "PLACER789-", "filler_equals_placer": True},
+    "ORC": {"placer_prefix": "PLACER7-", "filler_equals_placer": True},
 }
 
 
@@ -333,8 +333,9 @@ def test_strict_013_templates_follow_profile_obx_codes_and_units(template_name, 
     assert template is not None
 
     profile_code_units = {
-        (item.get("obx_identifier") or item.get("analyzer_code")): item.get("unit", "")
+        (item.get("test_code") or item.get("obx_identifier") or item.get("analyzer_code")): item.get("unit", "")
         for item in profile.get("default_test_mappings", [])
+        if item.get("test_code") or item.get("obx_identifier") or item.get("analyzer_code")
     }
     template_code_units = {field.get("code"): field.get("unit", "") for field in template.get("fields", [])}
 

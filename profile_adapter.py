@@ -92,7 +92,7 @@ def load_strict_013_profile_template(template_name: str) -> Optional[Dict[str, A
 
     fields = []
     for mapping in profile.get("default_test_mappings", []):
-        code = mapping.get("obx_identifier") or mapping.get("analyzer_code")
+        code = mapping.get("test_code") or mapping.get("obx_identifier") or mapping.get("analyzer_code")
         if not code:
             continue
         field = {

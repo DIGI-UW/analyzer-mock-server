@@ -37,16 +37,15 @@ import sys
 import time
 import logging
 import argparse
-import urllib.request
-import urllib.error
 from typing import Optional, Dict, List, Any
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
 
 from protocols.astm_handler import generate_astm_message, ASTMHandler
 from protocols.hl7_handler import HL7Handler, generate_oru_r01
+from protocols.mllp_listener import MLLPProtocolHandler
 from protocols.serial_handler import SerialHandler, send_astm_over_serial
 from protocols.file_handler import FileHandler
+from push import push_hl7_http, push_astm_to_destination
+from api import start_api_server
 
 # Optional: template loader for HL7 --hl7 push and /simulate/hl7 API (Abbott, etc.)
 try:
@@ -840,29 +839,72 @@ class ASTMMockServer:
             except socket.timeout:
                 continue
 
+    def _resolve_protocol_for_port(self, port: int) -> str:
+        """Determine protocol type for a port by checking its template.
+
+        Returns 'HL7' or 'ASTM' (default). Both are equal citizens —
+        the template's protocol.type field determines the handler.
+        """
+        template_name = self.port_to_template.get(port)
+        if template_name:
+            template = _load_template(template_name)
+            if template:
+                proto = template.get("protocol", {}).get("type", "").upper()
+                if proto == "HL7":
+                    return "HL7"
+        return "ASTM"
+
     def _start_multi_port(self):
-        """Multi-port mode: one socket per port, template per port."""
+        """Multi-port mode: one socket per port, protocol-aware handler dispatch.
+
+        Each port maps to a template. The template's protocol.type determines
+        which handler serves connections on that port:
+          - ASTM → ASTMProtocolHandler (ENQ/ACK framing)
+          - HL7  → MLLPProtocolHandler (VT/FS framing + HL7 ACK)
+        """
+        # Pre-resolve protocol per port for logging and dispatch
+        port_protocols = {}
         for port in self.ports:
+            proto = self._resolve_protocol_for_port(port)
+            port_protocols[port] = proto
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('0.0.0.0', port))
             sock.listen(MAX_CONNECTIONS)
             sock.setblocking(False)
             self.server_sockets.append(sock)
-        logger.info("ASTM Mock Server started on ports %s (port-to-template)", self.ports)
+
+        astm_ports = [p for p, proto in port_protocols.items() if proto == "ASTM"]
+        hl7_ports = [p for p, proto in port_protocols.items() if proto == "HL7"]
+        logger.info("Mock Server started on %d ports (ASTM: %s, HL7/MLLP: %s)",
+                     len(self.ports), astm_ports or "none", hl7_ports or "none")
         logger.info("Response delay: %sms", self.response_delay_ms)
+
         while self.running:
             try:
                 readable, _, _ = select.select(self.server_sockets, [], [], 1.0)
                 for sock in readable:
                     conn, addr = sock.accept()
                     local_port = sock.getsockname()[1]
-                    handler = ASTMProtocolHandler(
-                        conn, addr, self.fields_config, self.response_delay_ms,
-                        astm_template=None,
-                        local_port=local_port,
-                        port_to_template=self.port_to_template
-                    )
+                    proto = port_protocols.get(local_port, "ASTM")
+
+                    if proto == "HL7":
+                        template_name = self.port_to_template.get(local_port)
+                        template = _load_template(template_name) if template_name else None
+                        handler = MLLPProtocolHandler(
+                            conn, addr,
+                            template=template,
+                            template_name=template_name,
+                            response_delay_ms=self.response_delay_ms,
+                        )
+                    else:
+                        handler = ASTMProtocolHandler(
+                            conn, addr, self.fields_config, self.response_delay_ms,
+                            astm_template=None,
+                            local_port=local_port,
+                            port_to_template=self.port_to_template
+                        )
+
                     thread = threading.Thread(target=handler.handle, daemon=True)
                     thread.start()
                     self.client_threads.append(thread)
@@ -881,435 +923,6 @@ class ASTMMockServer:
                 pass
         self.server_sockets.clear()
         logger.info("ASTM Mock Server stopped")
-
-
-class PushAPIHandler(BaseHTTPRequestHandler):
-    """HTTP API handler for triggering pushes."""
-
-    fields_config = {}
-    openelis_url = None
-    template_loader = None
-
-    def _send_json(self, code: int, obj: Dict):
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(obj, indent=2).encode("utf-8"))
-
-    def do_POST(self):
-        """Handle POST requests to trigger pushes."""
-        if self.path == '/push' or self.path.startswith('/push?'):
-            self.handle_push_request()
-        elif HAS_HL7_SIM and self.path.startswith('/simulate/hl7/'):
-            self.handle_simulate_hl7_post()
-        elif self.path.startswith('/simulate/astm/'):
-            self.handle_simulate_astm_post()
-        elif self.path.startswith("/simulate/file/"):
-            template_name = self.path.split("/simulate/file/")[-1].split("?")[0].strip("/")
-            if not template_name:
-                self.send_error(400, "Missing template name")
-                return
-            length = int(self.headers.get("Content-Length", 0))
-            params = {}
-            if length > 0:
-                try:
-                    params = json.loads(self.rfile.read(length).decode("utf-8"))
-                except json.JSONDecodeError:
-                    self._send_json(400, {"status": "error", "message": "Invalid JSON body"})
-                    return
-            code, obj = file_simulate_post(template_name, params)
-            self._send_json(code, obj)
-        else:
-            self.send_error(404, "Not Found")
-
-    def do_GET(self):
-        """Handle GET requests for health check and info."""
-        if self.path == '/health' or self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            endpoints = {
-                "POST /push": "Trigger a push to OpenELIS (query: template, count)",
-                "GET /health": "Health check",
-                "GET /simulate/astm/<template>": "Generate ASTM message from template",
-                "POST /simulate/astm/<template>": "Generate + push ASTM (body: destination, count)",
-                "GET /simulate/file/<template>": "Generate FILE payload from template",
-                "POST /simulate/file/<template>": "Generate + optionally write FILE payload",
-            }
-            if HAS_HL7_SIM:
-                endpoints["GET /simulate/hl7/<template>"] = "Generate HL7 ORU^R01"
-                endpoints["POST /simulate/hl7/<template>"] = "Generate + push HL7 (body: count, destination)"
-            response = {
-                "status": "ok",
-                "service": "ASTM Mock Server Push API",
-                "endpoints": endpoints
-            }
-            self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
-        elif HAS_HL7_SIM and self.path.startswith('/simulate/hl7/'):
-            self.handle_simulate_hl7_get()
-        elif self.path.startswith('/simulate/astm/'):
-            self.handle_simulate_astm_get()
-        elif self.path.startswith("/simulate/file/"):
-            template_name = self.path.split("/simulate/file/")[-1].split("?")[0].strip("/")
-            if not template_name:
-                self.send_error(400, "Missing template name")
-                return
-            code, obj = file_simulate_get(template_name)
-            self._send_json(code, obj)
-        else:
-            self.send_error(404, "Not Found")
-    
-    def handle_push_request(self):
-        """Handle push trigger request.
-
-        Supports both legacy (analyzer_type from fields.json) and template-driven
-        modes. When a `template` parameter is provided, uses ASTMHandler.generate()
-        for spec-compliant ASTM message generation.
-
-        Query/body params:
-            template: ASTM template name (e.g., genexpert_astm) — uses template mode
-            analyzer_type: Legacy analyzer type from fields.json (default: HEMATOLOGY)
-            count: Number of messages to push (default: 1)
-            destination: Override push URL (supports tcp:// for bridge routing)
-        """
-        client_addr = self.address_string()
-        try:
-            logger.info(f"[API] Push request received from {client_addr}: {self.path}")
-
-            # Parse query parameters
-            parsed_path = urlparse(self.path)
-            query_params = parse_qs(parsed_path.query)
-
-            # Get parameters from query string
-            template_name = query_params.get('template', [None])[0]
-            analyzer_type = query_params.get('analyzer_type', ['HEMATOLOGY'])[0].upper()
-            count = int(query_params.get('count', ['1'])[0])
-            destination = query_params.get('destination', [None])[0]
-
-            # Read request body if present (JSON) — overrides query params
-            content_length = int(self.headers.get('Content-Length', 0))
-            request_body = {}
-            if content_length > 0:
-                body_data = self.rfile.read(content_length)
-                try:
-                    request_body = json.loads(body_data.decode('utf-8'))
-                    logger.debug(f"[API] Request body: {json.dumps(request_body)}")
-                    template_name = request_body.get('template', template_name)
-                    analyzer_type = request_body.get('analyzer_type', analyzer_type).upper()
-                    count = int(request_body.get('count', count))
-                    destination = request_body.get('destination', destination)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"[API] Failed to parse JSON body: {e}")
-
-            push_target = destination or self.openelis_url
-
-            # Generate and push messages
-            results = []
-            success_count = 0
-
-            if template_name:
-                # Template-driven mode — uses ASTMHandler for spec-compliant messages
-                logger.info(f"[API] Template mode: {template_name}, count={count}")
-                if not self.template_loader:
-                    self.send_response(500)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Template loader not available"}).encode('utf-8'))
-                    return
-                try:
-                    template = self.template_loader.load_template(template_name)
-                except FileNotFoundError:
-                    self.send_response(404)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": f"Template not found: {template_name}"}).encode('utf-8'))
-                    return
-                handler = ASTMHandler()
-                for i in range(count):
-                    logger.debug(f"[API] Generating template message {i+1}/{count}")
-                    message = handler.generate(template, use_seed=True)
-                    if message:
-                        logger.debug(f"[API] Pushing message {i+1}/{count} to {push_target}")
-                        success = _push_astm_to_destination(push_target, message)
-                        results.append({
-                            "message_number": i + 1,
-                            "success": success,
-                            "template": template_name
-                        })
-                        if success:
-                            success_count += 1
-                    else:
-                        results.append({"message_number": i + 1, "success": False, "error": "Generation failed"})
-            else:
-                # Legacy mode — uses fields.json
-                logger.info(f"[API] Legacy mode: analyzer_type={analyzer_type}, count={count}")
-                for i in range(count):
-                    logger.debug(f"[API] Generating message {i+1}/{count}")
-                    message = generate_astm_message(
-                        analyzer_type=analyzer_type,
-                        fields_config=self.fields_config
-                    )
-
-                    if message:
-                        logger.debug(f"[API] Pushing message {i+1}/{count} to {push_target}")
-                        success = _push_astm_to_destination(push_target, message)
-                        results.append({
-                            "message_number": i + 1,
-                            "success": success,
-                            "analyzer_type": analyzer_type
-                        })
-                        if success:
-                            success_count += 1
-                    else:
-                        logger.error(f"[API] Failed to generate message {i+1}/{count}")
-                        results.append({
-                            "message_number": i + 1,
-                            "success": False,
-                            "error": "Failed to generate message"
-                        })
-            
-            # Send response
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            
-            response = {
-                "status": "completed",
-                "total": count,
-                "successful": success_count,
-                "failed": count - success_count,
-                "results": results
-            }
-            
-            logger.info(f"[API] Push request completed: {success_count}/{count} successful")
-            self.wfile.write(json.dumps(response, indent=2).encode('utf-8'))
-            
-        except Exception as e:
-            logger.error(f"[API] Error handling push request from {client_addr}: {e}", exc_info=True)
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            error_response = {
-                "status": "error",
-                "message": str(e)
-            }
-            self.wfile.write(json.dumps(error_response, indent=2).encode('utf-8'))
-    
-    def _get_hl7_analyzer_from_path(self) -> Optional[str]:
-        """Extract analyzer template name from path /simulate/hl7/<analyzer>."""
-        prefix = '/simulate/hl7/'
-        if not self.path.startswith(prefix):
-            return None
-        name = self.path[len(prefix):].split('?')[0].strip('/')
-        return name if name else None
-
-    def handle_simulate_hl7_get(self):
-        """GET /simulate/hl7/<analyzer>: generate one HL7 message and return as text/plain."""
-        analyzer = self._get_hl7_analyzer_from_path()
-        if not analyzer or not self.template_loader:
-            self.send_error(404, "Not Found")
-            return
-        try:
-            template = self.template_loader.load_template(analyzer)
-            if template.get('protocol', {}).get('type') != 'HL7':
-                self.send_error(400, "Template is not HL7 protocol")
-                return
-            message = generate_oru_r01(template, deterministic=True)
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(message.encode('utf-8'))
-        except FileNotFoundError:
-            self.send_error(404, f"Template not found: {analyzer}")
-        except Exception as e:
-            logger.exception("HL7 simulate GET failed")
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-    def handle_simulate_hl7_post(self):
-        """POST /simulate/hl7/<analyzer>: generate HL7 message(s), optionally push to destination."""
-        analyzer = self._get_hl7_analyzer_from_path()
-        if not analyzer or not self.template_loader:
-            self.send_error(404, "Not Found")
-            return
-        try:
-            template = self.template_loader.load_template(analyzer)
-            if template.get('protocol', {}).get('type') != 'HL7':
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "error", "message": "Template is not HL7 protocol"}).encode('utf-8'))
-                return
-            count = 1
-            destination = None
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                try:
-                    body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                except json.JSONDecodeError:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Invalid JSON body"}).encode('utf-8'))
-                    return
-                raw_count = body.get('count', 1)
-                try:
-                    count = int(raw_count)
-                except (TypeError, ValueError):
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be an integer"}).encode('utf-8'))
-                    return
-                if count < 1 or count > 1000:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Parameter 'count' must be between 1 and 1000"}).encode('utf-8'))
-                    return
-                destination = body.get('destination')
-            results = []
-            success_count = 0
-            for i in range(count):
-                message = generate_oru_r01(template, deterministic=True)
-                pushed = False
-                if destination:
-                    pushed = _push_hl7_to_destination(destination, message)
-                    if pushed:
-                        success_count += 1
-                results.append({
-                    "message_number": i + 1,
-                    "pushed": pushed,
-                    "preview": message.split('\r')[0][:80] + "..."
-                })
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "completed",
-                "analyzer": analyzer,
-                "count": count,
-                "pushed": success_count if destination else None,
-                "results": results
-            }, indent=2).encode('utf-8'))
-        except FileNotFoundError:
-            self.send_error(404, f"Template not found: {analyzer}")
-        except Exception as e:
-            logger.exception("HL7 simulate POST failed")
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-    def _get_astm_template_from_path(self) -> Optional[str]:
-        """Extract ASTM template name from path /simulate/astm/<template>."""
-        prefix = '/simulate/astm/'
-        if not self.path.startswith(prefix):
-            return None
-        name = self.path[len(prefix):].split('?')[0].strip('/')
-        return name if name else None
-
-    def handle_simulate_astm_get(self):
-        """GET /simulate/astm/<template>: generate one ASTM message and return as text/plain."""
-        template_name = self._get_astm_template_from_path()
-        if not template_name or not self.template_loader:
-            self.send_error(404, "Not Found")
-            return
-        try:
-            template = self.template_loader.load_template(template_name)
-            if template.get('protocol', {}).get('type') != 'ASTM':
-                self.send_error(400, "Template is not ASTM protocol")
-                return
-            message = ASTMHandler().generate(template, use_seed=True)
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(message.encode('utf-8'))
-        except FileNotFoundError:
-            self.send_error(404, f"Template not found: {template_name}")
-        except Exception as e:
-            logger.exception("ASTM simulate GET failed")
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-    def handle_simulate_astm_post(self):
-        """POST /simulate/astm/<template>: generate ASTM message(s), optionally push.
-
-        Body JSON:
-            destination: URL (http/https) or TCP address (tcp://host:port)
-            count: Number of messages (1-100, default 1)
-        """
-        template_name = self._get_astm_template_from_path()
-        if not template_name or not self.template_loader:
-            self.send_error(404, "Not Found")
-            return
-        try:
-            template = self.template_loader.load_template(template_name)
-            if template.get('protocol', {}).get('type') != 'ASTM':
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "error", "message": "Template is not ASTM protocol"}).encode('utf-8'))
-                return
-
-            count = 1
-            destination = None
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                try:
-                    body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                except json.JSONDecodeError:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Invalid JSON body"}).encode('utf-8'))
-                    return
-                count = min(max(int(body.get('count', 1)), 1), 100)
-                destination = body.get('destination')
-
-            results = []
-            success_count = 0
-            handler = ASTMHandler()
-            for i in range(count):
-                message = handler.generate(template, use_seed=True)
-                pushed = False
-                if destination:
-                    pushed = _push_astm_to_destination(destination, message)
-                    if pushed:
-                        success_count += 1
-                results.append({
-                    "message_number": i + 1,
-                    "pushed": pushed,
-                    "preview": message.split('\n')[0][:80] + "..."
-                })
-
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "completed",
-                "template": template_name,
-                "count": count,
-                "pushed": success_count if destination else None,
-                "destination": destination,
-                "results": results
-            }, indent=2).encode('utf-8'))
-        except FileNotFoundError:
-            self.send_error(404, f"Template not found: {template_name}")
-        except Exception as e:
-            logger.exception("ASTM simulate POST failed")
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-    def log_message(self, format, *args):
-        """Override to use our logger instead of default."""
-        logger.info(f"{self.address_string()} - {format % args}")
 
 
 def _load_template(analyzer: str) -> Optional[Dict]:
@@ -1336,17 +949,23 @@ def _load_template(analyzer: str) -> Optional[Dict]:
 
 
 def _load_port_templates(default_port: int) -> Dict[int, str]:
-    """Load port-to-template mapping from config file or ASTM_PORT_TEMPLATES env.
+    """Load port-to-template mapping from config or env.
 
     Returns a dict mapping port (int) to template name (str). Used for
-    request-based template selection: each connection port maps to one template.
-    If ASTM_PORT_TEMPLATES is set, it replaces config (use "{}" to force fallback).
-    If no config and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
+    protocol-aware dispatch: each port maps to a template, and the template's
+    protocol.type (ASTM or HL7) determines the connection handler.
+
+    Env vars (checked in order):
+      PORT_TEMPLATES          — protocol-agnostic (preferred)
+      ASTM_PORT_TEMPLATES     — backward-compatible alias
+
+    If no env var and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
     """
     base = os.path.dirname(os.path.abspath(__file__))
     port_to_template: Dict[int, str] = {}
 
-    env_json = os.environ.get("ASTM_PORT_TEMPLATES")
+    # PORT_TEMPLATES is the preferred env var; ASTM_PORT_TEMPLATES is kept for compat
+    env_json = os.environ.get("PORT_TEMPLATES") or os.environ.get("ASTM_PORT_TEMPLATES")
     if env_json is not None:
         try:
             raw = json.loads(env_json)
@@ -1379,715 +998,6 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
 
     return port_to_template
 
-
-def _safe_file_output_path(
-    target_dir: str,
-    filename: Optional[str],
-    template_name: str,
-    default_pattern: str,
-) -> Optional[str]:
-    """Join target_dir with a safe basename-only filename; reject path traversal."""
-    try:
-        base = os.path.realpath(os.path.expanduser(target_dir))
-        os.makedirs(base, exist_ok=True)
-        base = os.path.realpath(base)
-        raw = (filename or "").strip()
-        name = os.path.basename(raw) if raw else ""
-        if not name:
-            token = uuid.uuid4().hex[:8]
-            if "%" in default_pattern:
-                name = default_pattern % token
-            elif "*" in default_pattern:
-                name = default_pattern.replace("*", token)
-            else:
-                name = f"sim_{template_name}_{token}.csv"
-        if not name or name in (".", ".."):
-            return None
-        out = os.path.realpath(os.path.join(base, name))
-        if os.path.commonpath([base, out]) != base:
-            return None
-        return out
-    except (ValueError, OSError) as e:
-        logger.warning("Invalid or unusable output path under %s: %s", target_dir, e)
-        return None
-
-
-_SAFE_TEMPLATE_NAME = re.compile(r'^[A-Za-z0-9_\-]+$')
-
-
-def file_simulate_get(template_name: str) -> tuple:
-    """Shared FILE simulate GET — returns (http_status, response_dict)."""
-    if not _SAFE_TEMPLATE_NAME.match(template_name):
-        return 400, {"status": "error", "message": "Invalid template name (alphanumeric, _, - only)"}
-    template = _load_template(template_name)
-    if not template:
-        return 404, {"status": "error", "message": f"Template not found: {template_name}"}
-    if template.get("protocol", {}).get("type") != "FILE":
-        return 400, {"status": "error", "message": "Template is not FILE protocol"}
-    try:
-        content = FileHandler().generate(template)
-        return 200, {"status": "generated", "template": template_name, "content": content}
-    except Exception as e:
-        logger.exception("FILE simulate GET failed for %s", template_name)
-        return 500, {"status": "error", "message": str(e)}
-
-
-def file_simulate_post(template_name: str, params) -> tuple:
-    """Shared FILE simulate POST — returns (http_status, response_dict)."""
-    if not _SAFE_TEMPLATE_NAME.match(template_name):
-        return 400, {"status": "error", "message": "Invalid template name (alphanumeric, _, - only)"}
-    if not isinstance(params, dict):
-        return 400, {"status": "error", "message": "Request body must be a JSON object"}
-    template = _load_template(template_name)
-    if not template:
-        return 404, {"status": "error", "message": f"Template not found: {template_name}"}
-    if template.get("protocol", {}).get("type") != "FILE":
-        return 400, {"status": "error", "message": "Template is not FILE protocol"}
-    try:
-        fhandler = FileHandler()
-        content = fhandler.generate(template)
-        target_dir = params.get("target_dir")
-        filename = params.get("filename")
-        written_path = None
-        if target_dir:
-            default_pattern = (template.get("identification") or {}).get("file_pattern", "sim_%s.csv")
-            out_path = _safe_file_output_path(target_dir, filename, template_name, default_pattern)
-            if not out_path:
-                return 400, {
-                    "status": "error",
-                    "message": "Invalid target_dir or filename (use basename only; no path traversal)",
-                }
-            written_path = fhandler.write_text_to_path(out_path, content)
-            if written_path is None:
-                return 500, {"status": "error", "message": "Failed to write file to target_dir"}
-        return 200, {
-            "status": "completed",
-            "template": template_name,
-            "written_path": written_path,
-            "content": content,
-        }
-    except Exception as e:
-        logger.exception("FILE simulate POST failed for %s", template_name)
-        return 500, {"status": "error", "message": str(e)}
-
-
-class SimulateAPIHandler(BaseHTTPRequestHandler):
-    """HTTP API for /simulate/{protocol}/{template} (M4 CI/CD).
-
-    Supports both HL7 and ASTM template-driven message generation and push.
-    """
-
-    def do_GET(self):
-        if self.path == "/health" or self.path == "/":
-            self._send_json(200, {
-                "status": "ok",
-                "service": "Multi-Protocol Analyzer Simulator",
-                "endpoints": {
-                    "GET /health": "Health check",
-                    "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
-                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count)",
-                    "GET /simulate/astm/{template}": "Generate ASTM message from template",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count)",
-                    "GET /simulate/file/{template}": "Generate FILE payload from template",
-                    "POST /simulate/file/{template}": "Generate + optionally write FILE payload (body: target_dir, filename)",
-                },
-            })
-            return
-        if self.path.startswith("/simulate/hl7/"):
-            analyzer = self._extract_name("/simulate/hl7/")
-            if not analyzer:
-                self._send_json(400, {"status": "error", "message": "Missing analyzer"})
-                return
-            parsed = urlparse(self.path)
-            qs = parse_qs(parsed.query)
-            params = {
-                "patient_id": (qs.get("patientId") or qs.get("patient_id") or [None])[0],
-                "sample_id": (qs.get("sampleId") or qs.get("sample_id") or [None])[0],
-            }
-            self._handle_simulate_hl7(analyzer, params)
-            return
-        if self.path.startswith("/simulate/astm/"):
-            template_name = self._extract_name("/simulate/astm/")
-            if not template_name:
-                self._send_json(400, {"status": "error", "message": "Missing template name"})
-                return
-            self._handle_simulate_astm_get(template_name)
-            return
-        if self.path.startswith("/simulate/file/"):
-            template_name = self._extract_name("/simulate/file/")
-            if not template_name:
-                self._send_json(400, {"status": "error", "message": "Missing template name"})
-                return
-            self._handle_simulate_file_get(template_name)
-            return
-        self.send_error(404, "Not Found")
-
-    def do_POST(self):
-        if self.path.startswith("/simulate/hl7/"):
-            analyzer = self._extract_name("/simulate/hl7/")
-            if not analyzer:
-                self._send_json(400, {"status": "error", "message": "Missing analyzer"})
-                return
-            length = int(self.headers.get("Content-Length", 0))
-            params = {}
-            if length > 0:
-                try:
-                    params = json.loads(self.rfile.read(length).decode("utf-8"))
-                except json.JSONDecodeError:
-                    pass
-            kwargs = {
-                "patient_id": params.get("patientId") or params.get("patient_id"),
-                "sample_id": params.get("sampleId") or params.get("sample_id"),
-                "tests": params.get("tests"),
-                "destination": params.get("destination"),
-                "count": params.get("count", 1),
-            }
-            self._handle_simulate_hl7(analyzer, kwargs)
-            return
-        if self.path.startswith("/simulate/astm/"):
-            template_name = self._extract_name("/simulate/astm/")
-            if not template_name:
-                self._send_json(400, {"status": "error", "message": "Missing template name"})
-                return
-            self._handle_simulate_astm_post(template_name)
-            return
-        if self.path.startswith("/simulate/file/"):
-            template_name = self._extract_name("/simulate/file/")
-            if not template_name:
-                self._send_json(400, {"status": "error", "message": "Missing template name"})
-                return
-            self._handle_simulate_file_post(template_name)
-            return
-        self.send_error(404, "Not Found")
-
-    def _extract_name(self, prefix: str) -> Optional[str]:
-        """Extract template/analyzer name from URL path after prefix."""
-        name = self.path.split(prefix)[-1].split("?")[0].strip("/")
-        return name if name else None
-
-    def _handle_simulate_hl7(self, analyzer: str, kwargs: Dict):
-        template = _load_template(analyzer)
-        if not template:
-            self._send_json(404, {"status": "error", "message": f"Template not found: {analyzer}"})
-            return
-        try:
-            destination = kwargs.get("destination")
-            raw_count = kwargs.get("count", 1)
-            try:
-                count = int(raw_count)
-            except (TypeError, ValueError):
-                self._send_json(400, {"status": "error", "message": "Parameter 'count' must be an integer"})
-                return
-            if count < 1 or count > 1000:
-                self._send_json(400, {"status": "error", "message": "Parameter 'count' must be between 1 and 1000"})
-                return
-
-            generation_kwargs = {k: v for k, v in kwargs.items() if k in ("patient_id", "sample_id", "tests") and v is not None}
-            results = []
-            pushed_count = 0
-            first_message = None
-            for i in range(count):
-                msg = HL7Handler().generate(template, **generation_kwargs)
-                if first_message is None:
-                    first_message = msg
-                pushed = False
-                if destination:
-                    pushed = _push_hl7_to_destination(destination, msg)
-                    if pushed:
-                        pushed_count += 1
-                results.append({
-                    "message_number": i + 1,
-                    "pushed": pushed,
-                    "preview": msg.split("\r")[0][:80] + "...",
-                })
-
-            if destination or count > 1:
-                self._send_json(200, {
-                    "status": "completed",
-                    "analyzer": analyzer,
-                    "count": count,
-                    "destination": destination,
-                    "pushed": pushed_count if destination else None,
-                    "results": results,
-                })
-                return
-
-            msg = first_message or HL7Handler().generate(template, **generation_kwargs)
-            msg_id = "MSG-" + msg.split("ORU^R01|")[-1].split("|")[0] if "ORU^R01|" in msg else "MSG-UNK"
-            self._send_json(200, {"status": "sent", "messageId": msg_id, "message": msg})
-        except Exception as e:
-            logger.exception("HL7 simulate failed for %s", analyzer)
-            self._send_json(500, {"status": "error", "message": str(e)})
-
-    def _handle_simulate_astm_get(self, template_name: str):
-        """GET /simulate/astm/{template}: generate one ASTM message."""
-        template = _load_template(template_name)
-        if not template:
-            self._send_json(404, {"status": "error", "message": f"Template not found: {template_name}"})
-            return
-        if template.get('protocol', {}).get('type') != 'ASTM':
-            self._send_json(400, {"status": "error", "message": "Template is not ASTM protocol"})
-            return
-        try:
-            msg = ASTMHandler().generate(template, use_seed=True)
-            self._send_json(200, {"status": "generated", "template": template_name, "message": msg})
-        except Exception as e:
-            logger.exception("ASTM simulate GET failed for %s", template_name)
-            self._send_json(500, {"status": "error", "message": str(e)})
-
-    def _handle_simulate_astm_post(self, template_name: str):
-        """POST /simulate/astm/{template}: generate + optionally push ASTM messages.
-
-        Body JSON:
-            destination: URL (http/https) or TCP address (tcp://host:port) to push to
-            count: Number of messages to generate (1-100, default 1)
-        """
-        template = _load_template(template_name)
-        if not template:
-            self._send_json(404, {"status": "error", "message": f"Template not found: {template_name}"})
-            return
-        if template.get('protocol', {}).get('type') != 'ASTM':
-            self._send_json(400, {"status": "error", "message": "Template is not ASTM protocol"})
-            return
-
-        # Parse body
-        length = int(self.headers.get("Content-Length", 0))
-        params = {}
-        if length > 0:
-            try:
-                params = json.loads(self.rfile.read(length).decode("utf-8"))
-            except json.JSONDecodeError:
-                self._send_json(400, {"status": "error", "message": "Invalid JSON body"})
-                return
-
-        count = min(max(int(params.get("count", 1)), 1), 100)
-        destination = params.get("destination")
-
-        results = []
-        success_count = 0
-        handler = ASTMHandler()
-        for i in range(count):
-            msg = handler.generate(template, use_seed=True)
-            pushed = False
-            if destination:
-                pushed = _push_astm_to_destination(destination, msg)
-                if pushed:
-                    success_count += 1
-            results.append({
-                "message_number": i + 1,
-                "pushed": pushed,
-                "preview": msg.split('\n')[0][:80] + "..." if msg else ""
-            })
-
-        self._send_json(200, {
-            "status": "completed",
-            "template": template_name,
-            "count": count,
-            "pushed": success_count if destination else None,
-            "destination": destination,
-            "results": results
-        })
-
-    def _handle_simulate_file_get(self, template_name: str):
-        """GET /simulate/file/{template}: generate one FILE payload."""
-        code, obj = file_simulate_get(template_name)
-        self._send_json(code, obj)
-
-    def _handle_simulate_file_post(self, template_name: str):
-        """POST /simulate/file/{template}: generate + optionally write FILE payload."""
-        length = int(self.headers.get("Content-Length", 0))
-        params = {}
-        if length > 0:
-            try:
-                params = json.loads(self.rfile.read(length).decode("utf-8"))
-            except json.JSONDecodeError:
-                self._send_json(400, {"status": "error", "message": "Invalid JSON body"})
-                return
-        code, obj = file_simulate_post(template_name, params)
-        self._send_json(code, obj)
-
-    def _send_json(self, code: int, obj: Dict):
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(obj, indent=2).encode("utf-8"))
-
-    def log_message(self, format, *args):
-        logger.info("%s - %s", self.address_string(), format % args)
-
-
-def _push_astm_to_destination(destination: str, astm_message: str) -> bool:
-    """Route an ASTM push to the correct transport based on destination URL.
-
-    Supports:
-        tcp://host:port  — Raw ASTM TCP with ENQ/ACK framing (bridge integration)
-        http(s)://...    — HTTP POST to OpenELIS /analyzer/astm endpoint
-    """
-    if destination.startswith("tcp://"):
-        # Parse tcp://host:port
-        addr = destination[len("tcp://"):]
-        if ":" not in addr:
-            logger.error(f"[PUSH] Invalid TCP destination (missing port): {destination}")
-            return False
-        host, port_str = addr.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            logger.error(f"[PUSH] Invalid TCP port: {port_str}")
-            return False
-        return push_astm_tcp(host, port, astm_message)
-    else:
-        # HTTP push (same as legacy push_to_openelis)
-        return push_to_openelis(destination, astm_message)
-
-
-def start_simulate_api_server(port: int):
-    """Start HTTP API for /simulate/{protocol}/{template} (CI/CD)."""
-    server = HTTPServer(("0.0.0.0", port), SimulateAPIHandler)
-    logger.info("Simulate API server started on port %s", port)
-    logger.info("  GET  /simulate/hl7/{template} - Generate HL7 ORU^R01")
-    logger.info("  POST /simulate/hl7/{template} - Generate + optional push HL7 (destination, count)")
-    logger.info("  GET  /simulate/astm/{template} - Generate ASTM message")
-    logger.info("  POST /simulate/astm/{template} - Generate + push ASTM")
-    logger.info("  GET  /health - Health check")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Simulate API stopped")
-        server.shutdown()
-
-
-def start_push_api_server(api_port: int, openelis_url: str, fields_config: Dict):
-    """Start HTTP API server for triggering pushes."""
-    PushAPIHandler.fields_config = fields_config
-    PushAPIHandler.openelis_url = openelis_url
-    # Always init template loader — needed for both HL7 and ASTM template simulation
-    try:
-        PushAPIHandler.template_loader = TemplateLoader()
-    except Exception as e:
-        logger.warning("Template simulation disabled: could not init TemplateLoader: %s", e)
-        PushAPIHandler.template_loader = None
-
-    server = HTTPServer(('0.0.0.0', api_port), PushAPIHandler)
-    logger.info(f"Push API server started on port {api_port}")
-    logger.info(f"  POST /push - Trigger push (query: template, count, destination)")
-    logger.info(f"  GET/POST /simulate/astm/<template> - ASTM template simulation")
-    if HAS_HL7_SIM:
-        logger.info(f"  GET/POST /simulate/hl7/<template> - HL7 template simulation")
-    logger.info(f"  GET /health - Health check")
-    
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Push API server stopped")
-        server.shutdown()
-
-
-def push_to_openelis(openelis_url: str, astm_message: str, timeout: int = 30) -> bool:
-    """
-    Push an ASTM message to OpenELIS via HTTP POST.
-    
-    Args:
-        openelis_url: Base URL for OpenELIS (e.g., "https://localhost:8443")
-        astm_message: Complete ASTM message as string
-        timeout: Request timeout in seconds
-    
-    Returns:
-        True if push succeeded, False otherwise
-    """
-    endpoint = f"{openelis_url}/api/OpenELIS-Global/analyzer/astm"
-    
-    try:
-        message_lines = astm_message.strip().split('\n')
-        message_type = "unknown"
-        if message_lines:
-            first_line = message_lines[0]
-            if first_line.startswith('H|'):
-                # Try to extract analyzer info from header
-                parts = first_line.split('|')
-                if len(parts) >= 5:
-                    analyzer_info = parts[4] if parts[4] else "Unknown"
-                    message_type = f"ASTM message from {analyzer_info}"
-        
-        logger.info(f"[PUSH] Pushing ASTM message to {endpoint}")
-        logger.info(f"[PUSH] Message type: {message_type}, size: {len(astm_message)} bytes, lines: {len(message_lines)}")
-        logger.debug(f"[PUSH] Message preview (first 300 chars): {astm_message[:300]}...")
-        
-        # Create HTTP request
-        req = urllib.request.Request(
-            endpoint,
-            data=astm_message.encode('utf-8'),
-            headers={
-                'Content-Type': 'text/plain; charset=utf-8',
-            },
-            method='POST'
-        )
-        
-        # Disable SSL verification for development (OpenELIS uses self-signed certs)
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        # Send request
-        start_time = time.time()
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
-            elapsed_time = time.time() - start_time
-            status_code = response.getcode()
-            response_body = response.read().decode('utf-8')
-            
-            if status_code == 200:
-                logger.info(f"[PUSH] ✓ Push successful (HTTP {status_code}) in {elapsed_time:.2f}s")
-                if response_body:
-                    logger.debug(f"[PUSH] Response body: {response_body[:200]}")
-                return True
-            else:
-                logger.error(f"[PUSH] ✗ Push failed: HTTP {status_code}")
-                if response_body:
-                    logger.error(f"[PUSH] Response: {response_body[:500]}")
-                return False
-                
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8') if e.fp else "No error details"
-        logger.error(f"[PUSH] ✗ HTTP error {e.code}: {e.reason}")
-        logger.error(f"[PUSH] Error response: {error_body[:500]}")
-        return False
-    except urllib.error.URLError as e:
-        logger.error(f"[PUSH] ✗ URL error: {e.reason}")
-        return False
-    except Exception as e:
-        logger.error(f"[PUSH] ✗ Push failed with exception: {e}", exc_info=True)
-        return False
-
-
-def push_hl7_to_openelis(openelis_url: str, hl7_message: str, timeout: int = 30) -> bool:
-    """
-    Push an HL7 ORU^R01 message to OpenELIS.
-
-    Args:
-        openelis_url: Base URL for OpenELIS (e.g. https://localhost:8443) or full HL7 endpoint URL.
-        hl7_message: Complete HL7 message string (segment terminator \\r).
-        timeout: Request timeout in seconds.
-
-    Returns:
-        True if push succeeded, False otherwise.
-    """
-    if openelis_url.rstrip('/').endswith('/hl7') or '/analyzer/' in openelis_url:
-        endpoint = openelis_url if openelis_url.startswith('http') else f"https://{openelis_url}"
-    else:
-        endpoint = f"{openelis_url.rstrip('/')}/api/OpenELIS-Global/analyzer/hl7"
-
-    try:
-        logger.info(f"[PUSH-HL7] Pushing ORU^R01 to {endpoint}")
-        req = urllib.request.Request(
-            endpoint,
-            data=hl7_message.encode('utf-8'),
-            headers={'Content-Type': 'text/plain; charset=utf-8'},
-            method='POST'
-        )
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
-            if response.getcode() == 200:
-                logger.info("[PUSH-HL7] Push successful")
-                return True
-            logger.error(f"[PUSH-HL7] Push failed: HTTP {response.getcode()}")
-            return False
-    except Exception as e:
-        logger.error(f"[PUSH-HL7] Push failed: {e}", exc_info=True)
-        return False
-
-
-def _send_astm_session(sock, records: list, session_label: str = "") -> bool:
-    """Send one ASTM session (ENQ → framed records → EOT) over an open socket.
-
-    A session corresponds to one complete H…L message. Each record becomes one
-    ASTM frame with CLSI LIS1-A framing:
-        [STX] [FrameNum] [Content] [ETX|ETB] [Checksum] [CR] [LF]
-
-    Frame numbers cycle 1-7,0,1-7,0,… Intermediate frames use ETB; the final
-    frame (L record) uses ETX.  Checksum covers FrameNum + Content + terminator.
-
-    Returns True if all frames were ACKed, False otherwise.
-    """
-    tag = f"[PUSH-TCP{' ' + session_label if session_label else ''}]"
-
-    # Establish: ENQ → ACK
-    sock.sendall(ENQ)
-    response = sock.recv(1)
-    if response != ACK:
-        logger.error(f"{tag} ENQ not ACKed, got: {response.hex() if response else 'none'}")
-        return False
-    logger.debug(f"{tag} ENQ acknowledged, sending {len(records)} frames")
-
-    for i, record in enumerate(records):
-        frame_number = (i + 1) % 8
-        # Append CR to record content so the bridge's getMessage() (which
-        # joins frames with no separator) produces CR-delimited text that
-        # BufferedReader.readLine() in OpenELIS can split into lines.
-        content_bytes = (record.strip() + '\r').encode('ascii', errors='replace')
-        frame_num_bytes = str(frame_number).encode()
-        is_last = (i == len(records) - 1)
-        terminator = ETX if is_last else ETB
-
-        # Checksum: sum of bytes from frame_num through terminator, mod 256
-        checksum_data = frame_num_bytes + content_bytes + terminator
-        checksum = sum(checksum_data) % 256
-        checksum_str = f'{checksum:02X}'.encode()
-
-        frame = STX + frame_num_bytes + content_bytes + terminator + checksum_str + CR + LF
-        sock.sendall(frame)
-
-        # Wait for frame ACK
-        ack = sock.recv(1)
-        if ack == EOT:
-            logger.info(f"{tag} Receiver sent EOT (interrupt) at frame {i+1}")
-            return False
-        if ack != ACK:
-            logger.warning(f"{tag} Frame {i+1}/{len(records)} NAKed: {ack.hex() if ack else 'none'}")
-            return False
-        logger.debug(f"{tag} Frame {i+1}/{len(records)} ACKed (FN={frame_number})")
-
-    # Terminate session
-    sock.sendall(EOT)
-    logger.info(f"{tag} Session complete — {len(records)} frames sent")
-    return True
-
-
-def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30) -> bool:
-    """
-    Push an HL7 message over MLLP and require positive application ACK.
-    """
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        payload = VT + hl7_message.encode("utf-8") + FS + CR
-        sock.sendall(payload)
-
-        ack = b""
-        while not ack.endswith(FS + CR):
-            chunk = sock.recv(4096)
-            if not chunk:
-                logger.error("[PUSH-HL7-MLLP] Peer closed before MLLP terminator from %s:%s", host, port)
-                return False
-            ack += chunk
-        ack_text = ack.replace(VT, b"").replace(FS + CR, b"").decode("utf-8", errors="replace")
-        if "MSA|AA|" in ack_text:
-            logger.info("[PUSH-HL7-MLLP] Positive ACK received from %s:%s", host, port)
-            return True
-        logger.error("[PUSH-HL7-MLLP] Negative/invalid ACK from %s:%s: %s", host, port, ack_text[:200])
-        return False
-    except Exception as e:
-        logger.error(f"[PUSH-HL7-MLLP] Push failed: {e}", exc_info=True)
-        return False
-    finally:
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-
-def _push_hl7_to_destination(destination: str, hl7_message: str) -> bool:
-    """
-    Route HL7 push by destination scheme.
-
-    Supports:
-        mllp://host:port
-        http(s)://...
-    """
-    if destination.startswith("mllp://"):
-        addr = destination[len("mllp://"):]
-        if ":" not in addr:
-            logger.error(f"[PUSH-HL7] Invalid MLLP destination (missing port): {destination}")
-            return False
-        host, port_str = addr.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            logger.error(f"[PUSH-HL7] Invalid MLLP port: {port_str}")
-            return False
-        return push_hl7_mllp(host, port, hl7_message)
-    return push_hl7_to_openelis(destination, hl7_message)
-
-
-def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) -> bool:
-    """
-    Push an ASTM message via raw ASTM TCP (ENQ/ACK framing) to a bridge or LIS.
-
-    Simulates a real analyzer sending results: connects via TCP, performs
-    CLSI LIS1-A framing (ENQ → ACK → STX frames → EOT), then disconnects.
-
-    If the message contains multiple H…L sessions (e.g. patient + QC), each
-    session is sent as a separate ENQ/ACK/EOT exchange on the same connection
-    (per CLSI LIS1-A §7: one session per complete message).
-
-    Args:
-        host: Target hostname or IP (e.g., "openelis-analyzer-bridge")
-        port: Target ASTM listen port (e.g., 12001)
-        astm_message: Complete ASTM message as string (H|...\nP|...\nR|...\nL|...)
-        timeout: Socket timeout in seconds
-
-    Returns:
-        True if all sessions were ACKed, False otherwise.
-    """
-    logger.info(f"[PUSH-TCP] Connecting to {host}:{port} for ASTM TCP push")
-
-    # Split into individual H…L sessions (each starts with H record)
-    all_records = [r for r in astm_message.strip().split('\n') if r.strip()]
-    sessions = []
-    current = []
-    for record in all_records:
-        if record.strip().startswith('H|') and current:
-            sessions.append(current)
-            current = []
-        current.append(record)
-    if current:
-        sessions.append(current)
-
-    logger.info(f"[PUSH-TCP] Message has {len(sessions)} session(s), {len(all_records)} total records")
-
-    # Each session uses its own TCP connection (bridge closes the receive
-    # thread after EOT, so a second ENQ on the same socket gets no response).
-    for idx, session_records in enumerate(sessions):
-        label = f"S{idx+1}/{len(sessions)}" if len(sessions) > 1 else ""
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect((host, port))
-            logger.info(f"[PUSH-TCP] Connected to {host}:{port} for session {idx+1}/{len(sessions)}")
-
-            if not _send_astm_session(sock, session_records, label):
-                return False
-
-        except socket.timeout:
-            logger.error(f"[PUSH-TCP] Timeout connecting to {host}:{port}")
-            return False
-        except ConnectionRefusedError:
-            logger.error(f"[PUSH-TCP] Connection refused by {host}:{port}")
-            return False
-        except Exception as e:
-            logger.error(f"[PUSH-TCP] Push failed: {e}", exc_info=True)
-            return False
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-
-        # Brief pause between sessions so bridge can accept the next connection
-        if idx < len(sessions) - 1:
-            import time
-            time.sleep(0.5)
-
-    logger.info(f"[PUSH-TCP] All {len(sessions)} session(s) sent to {host}:{port}")
-    return True
 
 
 def main():
@@ -2290,13 +1200,13 @@ def main():
                 while True:
                     total_sent += 1
                     msg = generate_oru_r01(template, deterministic=True)
-                    if push_hl7_to_openelis(args.push, msg):
+                    if push_hl7_http(args.push, msg):
                         success_count += 1
                     time.sleep(args.push_interval)
             else:
                 for i in range(args.push_count):
                     msg = generate_oru_r01(template, deterministic=True)
-                    if push_hl7_to_openelis(args.push, msg):
+                    if push_hl7_http(args.push, msg):
                         success_count += 1
                     total_sent += 1
                     if i < args.push_count - 1:
@@ -2382,7 +1292,7 @@ def main():
                         logger.error("Failed to generate message")
                         time.sleep(args.push_interval)
                         continue
-                    if _push_astm_to_destination(args.push, message):
+                    if push_astm_to_destination(args.push, message):
                         success_count += 1
                     else:
                         logger.warning(f"Push #{total_pushed} failed")
@@ -2398,7 +1308,7 @@ def main():
                 if not message:
                     logger.error("Failed to generate message")
                     continue
-                if _push_astm_to_destination(args.push, message):
+                if push_astm_to_destination(args.push, message):
                     success_count += 1
                 else:
                     logger.warning(f"Push {i+1} failed")
@@ -2414,54 +1324,16 @@ def main():
         print("=" * 60)
         return 0 if success_count == total_pushed else 1
     
-    # API server mode: Start HTTP API for triggering pushes
-    if args.api_port:
-        if not args.push:
-            logger.error("--api-port requires --push URL to be specified")
-            return 1
-        
-        # Load fields configuration
-        fields_config = {}
-        fields_file = os.path.join(os.path.dirname(__file__), 'fields.json')
-        if os.path.exists(fields_file):
-            try:
-                with open(fields_file, 'r') as f:
-                    fields_config = json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading fields.json: {e}")
-                return 1
-        
-        if not fields_config:
-            logger.error("No fields configuration available")
-            return 1
-        
-        print("=" * 60)
-        print("  ASTM Mock Server - API Mode")
-        print("=" * 60)
-        print(f"  API Port: {args.api_port}")
-        print(f"  OpenELIS URL: {args.push}")
-        print(f"  Default Analyzer Type: {args.analyzer_type}")
-        print("=" * 60)
-        print("  Endpoints:")
-        print(f"    POST http://localhost:{args.api_port}/push")
-        print(f"    GET  http://localhost:{args.api_port}/health")
-        print("=" * 60)
-        print("  Press Ctrl+C to stop")
-        print("=" * 60)
-        print()
-        
-        start_push_api_server(args.api_port, args.push, fields_config)
-        return 0
-    
-    # Start simulate API in background thread if requested
-    if getattr(args, 'simulate_api_port', None):
+    # Start unified API server in background thread if requested
+    api_port = getattr(args, 'simulate_api_port', None) or getattr(args, 'api_port', None)
+    if api_port:
         api_thread = threading.Thread(
-            target=start_simulate_api_server,
-            args=(args.simulate_api_port,),
+            target=start_api_server,
+            args=(api_port,),
             daemon=True,
         )
         api_thread.start()
-        logger.info("Simulate API started on port %s (background)", args.simulate_api_port)
+        logger.info("API server started on port %s (background)", api_port)
 
     # Server mode: Listen for connections
     print("=" * 60)
@@ -2474,8 +1346,8 @@ def main():
         print(f"  Port: {args.port}")
     print(f"  Analyzer Type: {args.analyzer_type}")
     print(f"  Response Delay: {args.response_delay}ms")
-    if getattr(args, 'simulate_api_port', None):
-        print(f"  Simulate API: {args.simulate_api_port}")
+    if api_port:
+        print(f"  API Server: {api_port}")
     print("=" * 60)
     print("  Press Ctrl+C to stop")
     print("=" * 60)

@@ -5,6 +5,7 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T072–T073.
 Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
+import itertools
 import logging
 import random
 import uuid
@@ -12,6 +13,28 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from .base_handler import BaseHandler
+
+# Sequential sample ID generator — shared with HL7 handler pattern.
+_astm_sample_counters: Dict[str, itertools.count] = {}
+
+
+MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
+
+
+def _next_astm_sample_id(prefix: str, timestamp: Optional[datetime] = None) -> str:
+    """Generate a unique sequential sample ID for ASTM messages.
+    Total length capped at 20 chars (OE DB constraint).
+    """
+    if timestamp is None:
+        timestamp = datetime.now()
+    if prefix not in _astm_sample_counters:
+        _astm_sample_counters[prefix] = itertools.count(1)
+    seq = next(_astm_sample_counters[prefix])
+    sid = f"{prefix}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+    if len(sid) > MAX_SAMPLE_ID_LEN:
+        max_prefix = MAX_SAMPLE_ID_LEN - 13
+        sid = f"{prefix[:max_prefix]}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+    return sid
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +452,13 @@ class ASTMHandler(BaseHandler):
         test_sample = template.get("testSample", {})
 
         patient_id = kwargs.get("patient_id") or test_patient.get("id")
-        sample_id = kwargs.get("sample_id") or test_sample.get("id")
+        # Generate unique sequential sample ID (like a real analyzer)
+        explicit_sample_id = kwargs.get("sample_id")
+        if explicit_sample_id:
+            sample_id = explicit_sample_id
+        else:
+            prefix = test_sample.get("id", "SAMPLE")
+            sample_id = _next_astm_sample_id(prefix)
         patient_name = kwargs.get("patient_name") or test_patient.get("name")
         patient_dob = kwargs.get("patient_dob") or test_patient.get("dob")
         patient_sex = kwargs.get("patient_sex") or test_patient.get("sex")

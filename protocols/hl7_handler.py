@@ -8,8 +8,38 @@ Template identification.hl7_sending_app -> MSH-3, hl7_sending_facility -> MSH-4.
 Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE, NM for NUMERIC).
 """
 
+import itertools
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
+
+# Atomic counter for sequential sample IDs — never resets, always unique.
+# Each template gets its own counter via _sample_counters dict.
+_sample_counters: Dict[str, itertools.count] = {}
+logger = logging.getLogger(__name__)
+
+
+MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
+
+
+def _next_sample_id(prefix: str, timestamp: datetime) -> str:
+    """Generate a unique sequential sample ID like a real analyzer would.
+
+    Format: {PREFIX}-{YYYYMMDD}-{NNN} e.g., HARN-BC-20260326-001
+    Counter is per-prefix and never resets (timestamp makes it unique across restarts).
+    Total length capped at 20 chars (OE DB constraint).
+    """
+    if prefix not in _sample_counters:
+        _sample_counters[prefix] = itertools.count(1)
+    seq = next(_sample_counters[prefix])
+    sid = f"{prefix}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+    if len(sid) > MAX_SAMPLE_ID_LEN:
+        # Truncate prefix to fit — suffix is 13 chars (-YYYYMMDD-NNN)
+        max_prefix = MAX_SAMPLE_ID_LEN - 13
+        sid = f"{prefix[:max_prefix]}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
+        logger.warning("Sample ID prefix '%s' too long, truncated to '%s' (max %d chars)",
+                        prefix, prefix[:max_prefix], MAX_SAMPLE_ID_LEN)
+    return sid
 
 
 def generate_oru_r01(
@@ -59,13 +89,15 @@ def generate_oru_r01(
     ts = timestamp.strftime("%Y%m%d%H%M%S")
     if message_control_id is None:
         message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
-    # Use sample_id as placer_order_id if not explicitly provided (sample ID = accession number)
+    # Generate unique sequential sample ID like a real analyzer would.
+    # Template testSample.id is the prefix; full ID includes date + sequence.
     if sample_id is None:
-        sample_id = test_sample.get("id", "SAMPLE001")
+        prefix = test_sample.get("id", "SAMPLE")
+        sample_id = _next_sample_id(prefix, timestamp)
     if placer_order_id is None:
         placer_order_id = sample_id
     if filler_order_id is None:
-        filler_order_id = "FILLER012"
+        filler_order_id = sample_id  # OE's HL7 reader uses OBR-3 (filler) as accession
     if patient_id is None:
         patient_id = test_patient.get("id", "PAT001")
 

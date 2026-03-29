@@ -412,7 +412,6 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         try:
             result = mgr.create_analyzer(name, template, port)
-            self._send_json(201, result)
         except Exception as e:
             error_str = str(e)
             if "Conflict" in error_str or "already exists" in error_str:
@@ -424,6 +423,9 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(409, {"error": error_str})
             else:
                 self._send_json(500, {"error": error_str})
+            return
+
+        self._send_json(201, result)
 
     # ── Helpers ──────────────────────────────────────────────────
 
@@ -455,10 +457,16 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return self._JSON_PARSE_ERROR
 
     def _send_json(self, code: int, obj):
+        payload = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(json.dumps(obj, indent=2).encode("utf-8"))
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            logger.warning("Client disconnected while sending JSON response: %s", exc)
 
     def log_message(self, format, *args):
         logger.info("%s - %s", self.address_string(), format % args)

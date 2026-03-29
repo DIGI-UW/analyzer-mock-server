@@ -94,6 +94,33 @@ class TestAnalyzersAPI(unittest.TestCase):
         conn.close()
         return status, data
 
+    def test_send_json_flushes_after_write(self):
+        class RecordingWFile:
+            def __init__(self):
+                self.events = []
+                self.payload = b""
+
+            def write(self, data):
+                self.events.append("write")
+                self.payload += data
+
+            def flush(self):
+                self.events.append("flush")
+
+        handler = SimulateAPIHandler.__new__(SimulateAPIHandler)
+        handler.wfile = RecordingWFile()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        handler._send_json(201, {"name": "my-analyzer", "ip": "172.20.0.3"})
+
+        self.assertEqual(handler.wfile.events, ["write", "flush"])
+        self.assertEqual(
+            json.loads(handler.wfile.payload.decode("utf-8")),
+            {"name": "my-analyzer", "ip": "172.20.0.3"},
+        )
+
     # ------------------------------------------------------------------
     # GET /analyzers
     # ------------------------------------------------------------------

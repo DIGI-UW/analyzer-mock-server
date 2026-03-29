@@ -465,6 +465,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(payload)
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError) as exc:
             logger.warning("Client disconnected while sending JSON response: %s", exc)
 

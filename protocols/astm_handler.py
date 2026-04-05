@@ -21,20 +21,17 @@ _astm_sample_counters: Dict[str, itertools.count] = {}
 MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
 
 
-def _next_astm_sample_id(prefix: str, timestamp: Optional[datetime] = None) -> str:
-    """Generate a unique sequential sample ID for ASTM messages.
-    Total length capped at 20 chars (OE DB constraint).
+def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -> str:
+    """Generate a valid SiteYearNum accession number for ASTM messages.
+
+    Format: DEV0126{LANE}{SEQ:011d} e.g., DEV01261000000000001
+    Matches the harness site prefix (DEV01) + 2-digit year (26).
+    Total length: exactly 20 chars (OE SiteYearNum requirement).
     """
-    if timestamp is None:
-        timestamp = datetime.now()
-    if prefix not in _astm_sample_counters:
-        _astm_sample_counters[prefix] = itertools.count(1)
-    seq = next(_astm_sample_counters[prefix])
-    sid = f"{prefix}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
-    if len(sid) > MAX_SAMPLE_ID_LEN:
-        max_prefix = MAX_SAMPLE_ID_LEN - 13
-        sid = f"{prefix[:max_prefix]}-{timestamp.strftime('%Y%m%d')}-{seq:03d}"
-    return sid
+    if lane_code not in _astm_sample_counters:
+        _astm_sample_counters[lane_code] = itertools.count(1)
+    seq = next(_astm_sample_counters[lane_code])
+    return f"DEV0126{lane_code}{seq:011d}"
 
 logger = logging.getLogger(__name__)
 

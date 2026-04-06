@@ -252,7 +252,7 @@ ABBOTT_GOLDEN_SEMANTICS = {
     "MSH": {"sending_app": "ARCHITECT", "sending_facility": "LAB", "message_type": "ORU^R01"},
     "OBX": [{"code": "HIV", "value": "NEGATIVE"}, {"code": "HBSAG", "value": "POSITIVE"}],
     "PID": {"patient_id_contains": "PAT003", "name_contains": "RAKOTO"},
-    "ORC": {"placer_prefix": "PLACER7-", "filler_equals_placer": True},
+    "ORC": {"placer_prefix": "DEV01264300", "filler_equals_placer": True},
 }
 
 

@@ -1,0 +1,40 @@
+{
+  "analyzer": {
+    "name": "Thermo Multiskan FC",
+    "model": "Multiskan FC",
+    "manufacturer": "Thermo Fisher",
+    "category": "IMMUNOASSAY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "CSV-1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "multiskan*.csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": ";",
+    "has_header": true,
+    "column_mapping": {
+      "sample_id": "SampleID",
+      "test_code": "TestCode",
+      "result": "Abs"
+    }
+  },
+  "fixture": {
+    "file": "fixtures/multiskan-fc/results.csv",
+    "format": "CSV",
+    "delimiter": ";",
+    "skipRows": 0,
+    "column_mapping": {
+      "sampleId": "SampleID",
+      "result": "Abs",
+      "testCode": "TestCode"
+    }
+  },
+  "fields": [
+    { "name": "HIV ELISA", "code": "HIV ELISA", "type": "NUMERIC", "unit": "S/CO" }
+  ]
+}

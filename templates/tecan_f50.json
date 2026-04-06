@@ -1,0 +1,40 @@
+{
+  "analyzer": {
+    "name": "Tecan Infinite F50",
+    "model": "Infinite F50",
+    "manufacturer": "Tecan",
+    "category": "IMMUNOASSAY"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "CSV-1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "tecan*.csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": ",",
+    "has_header": true,
+    "column_mapping": {
+      "sample_id": "SampleID",
+      "test_code": "TestCode",
+      "result": "OD_450"
+    }
+  },
+  "fixture": {
+    "file": "fixtures/tecan-f50/results.csv",
+    "format": "CSV",
+    "delimiter": ",",
+    "skipRows": 0,
+    "column_mapping": {
+      "sampleId": "SampleID",
+      "result": "OD_450",
+      "testCode": "TestCode"
+    }
+  },
+  "fields": [
+    { "name": "HIV ELISA", "code": "HIV ELISA", "type": "NUMERIC", "unit": "S/CO" }
+  ]
+}

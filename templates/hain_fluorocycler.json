@@ -57,7 +57,8 @@
       "sampleId": "SampleID",
       "result": "CP",
       "testCode": "TargetName"
-    }
+    },
+    "testCodeFilter": "VIH-1"
   },
   "testSamples": [
     {"sampleId": "FLX-001", "position": "A01", "result": "Detected", "interpretation": "Positive"},

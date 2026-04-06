@@ -28,7 +28,8 @@
       "sampleId": "Sample Name",
       "result": "Quantity Mean",
       "testCode": "Target Name"
-    }
+    },
+    "testCodeFilter": "VIH-1"
   },
   "fields": [
     { "name": "VIH-1", "code": "VIH-1", "type": "NUMERIC", "unit": "copies/mL" },

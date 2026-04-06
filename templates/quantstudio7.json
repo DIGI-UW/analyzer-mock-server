@@ -29,7 +29,8 @@
       "sampleId": "Sample Name",
       "result": "Quantity Mean",
       "testCode": "Target Name"
-    }
+    },
+    "testCodeFilter": "VIH-1"
   },
   "fields": [
     { "name": "SARS-CoV-2", "code": "SARS2", "type": "NUMERIC", "unit": "Ct" },

@@ -46,15 +46,21 @@ def parse_fixture(fixture_path: str, fixture_config: Dict[str, Any]) -> List[Dic
     """
     fmt = (fixture_config.get("format") or "CSV").upper()
     col_map = fixture_config.get("column_mapping", {})
+    test_code_filter = fixture_config.get("testCodeFilter")
 
     if fmt == "CSV":
-        return _parse_csv(fixture_path, col_map, fixture_config)
+        results = _parse_csv(fixture_path, col_map, fixture_config)
     elif fmt == "XLSX":
-        return _parse_xlsx(fixture_path, col_map)
+        results = _parse_xlsx(fixture_path, col_map)
     elif fmt == "XLS":
-        return _parse_xls(fixture_path, col_map)
+        results = _parse_xls(fixture_path, col_map)
     else:
         raise ValueError(f"Unsupported fixture format: {fmt}")
+
+    if test_code_filter:
+        results = [r for r in results if r.get("testCode") == test_code_filter]
+
+    return results
 
 
 def _parse_csv(

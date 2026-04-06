@@ -316,7 +316,12 @@ class TestFileSimulateAPI(unittest.TestCase):
 
         self.assertEqual(resp.status, 200)
         self.assertEqual(body.get("status"), "generated")
-        self.assertIn("Sample Name", body.get("content", ""))
+        # Fixture-backed templates return metadata; synthetic return content
+        if "metadata" in body:
+            self.assertIn("results", body["metadata"])
+            self.assertGreater(len(body["metadata"]["results"]), 0)
+        else:
+            self.assertIn("Sample Name", body.get("content", ""))
 
     def test_post_simulate_file_write_target_dir(self):
         with tempfile.TemporaryDirectory() as tmpdir:

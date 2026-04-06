@@ -1,0 +1,42 @@
+{
+  "analyzer": {
+    "name": "Wondfo Finecare FS-205",
+    "model": "FS-205",
+    "manufacturer": "Wondfo Biotech",
+    "category": "POCT"
+  },
+  "protocol": {
+    "type": "FILE",
+    "version": "CSV-1.0",
+    "transport": "FILE"
+  },
+  "identification": {
+    "file_pattern": "wondfo*.csv"
+  },
+  "file_config": {
+    "format": "CSV",
+    "delimiter": ",",
+    "has_header": true,
+    "skipRows": 1,
+    "column_mapping": {
+      "sample_id": "Sample Number",
+      "test_code": "Test Name",
+      "result": "Result"
+    }
+  },
+  "fixture": {
+    "file": "fixtures/wondfo-finecare/results.csv",
+    "format": "CSV",
+    "delimiter": ",",
+    "skipRows": 1,
+    "column_mapping": {
+      "sampleId": "Sample Number",
+      "result": "Result",
+      "testCode": "Test Name"
+    }
+  },
+  "fields": [
+    { "name": "TSH", "code": "TSH", "type": "NUMERIC", "unit": "mIU/L", "normalRange": "0.3-4.2" },
+    { "name": "β-hCG", "code": "β-hCG", "type": "NUMERIC", "unit": "mIU/mL" }
+  ]
+}

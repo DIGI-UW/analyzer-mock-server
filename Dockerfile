@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py *.json ./
 COPY protocols/ ./protocols/
 COPY templates/ ./templates/
+COPY fixtures/ ./fixtures/
 COPY config/ ./config/
 
 # Default port

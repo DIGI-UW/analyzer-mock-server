@@ -1,7 +1,7 @@
 {
   "analyzer": {
-    "name": "QuantStudio 7 Flex",
-    "model": "7 Flex",
+    "name": "QuantStudio 5",
+    "model": "QS5",
     "manufacturer": "Thermo Fisher"
   },
   "protocol": {
@@ -10,21 +10,20 @@
     "transport": "FILE"
   },
   "identification": {
-    "file_pattern": "QS7_*.csv"
+    "file_pattern": "QS5_*.xls"
   },
   "file_config": {
-    "format": "CSV",
-    "delimiter": "\t",
+    "format": "EXCEL",
     "has_header": true,
     "column_mapping": {
       "sample_id": "Sample Name",
-      "test_code": "Target",
-      "result": "Ct"
+      "test_code": "Target Name",
+      "result": "Quantity Mean"
     }
   },
   "fixture": {
-    "file": "fixtures/quantstudio7/results.xlsx",
-    "format": "XLSX",
+    "file": "fixtures/quantstudio5/results.xls",
+    "format": "XLS",
     "column_mapping": {
       "sampleId": "Sample Name",
       "result": "Quantity Mean",
@@ -32,7 +31,7 @@
     }
   },
   "fields": [
-    { "name": "SARS-CoV-2", "code": "SARS2", "type": "NUMERIC", "unit": "Ct" },
-    { "name": "Internal Control", "code": "IC", "type": "NUMERIC", "unit": "Ct" }
+    { "name": "VIH-1", "code": "VIH-1", "type": "NUMERIC", "unit": "copies/mL" },
+    { "name": "Internal Control", "code": "IC", "type": "NUMERIC", "unit": "" }
   ]
 }

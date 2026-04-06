@@ -13,10 +13,14 @@ import json
 import logging
 import os
 import re
+import shutil
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from typing import Dict, Optional
 from urllib.parse import urlparse, parse_qs
+
+from fixture_parser import parse_fixture
 
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
@@ -50,7 +54,6 @@ def _load_template(analyzer: str) -> Optional[Dict]:
 
 def _safe_file_output_path(target_dir, filename, template_name, default_pattern):
     """Construct safe file output path, stripping path traversal to basename."""
-    import uuid
     if not target_dir or not os.path.isdir(target_dir):
         return None
     if filename:
@@ -343,8 +346,23 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Template is not FILE protocol"})
             return
         try:
-            content = FileHandler().generate(template)
-            self._send_json(200, {"status": "generated", "template": template_name, "content": content})
+            fixture_cfg = template.get("fixture")
+            if fixture_cfg:
+                fixture_path = os.path.join(os.path.dirname(__file__), fixture_cfg["file"])
+                metadata_results = parse_fixture(fixture_path, fixture_cfg)
+                self._send_json(200, {
+                    "status": "generated",
+                    "template": template_name,
+                    "metadata": {
+                        "analyzerName": template.get("analyzer", {}).get("name", template_name),
+                        "format": fixture_cfg.get("format", "CSV"),
+                        "fixture": fixture_cfg["file"],
+                        "results": metadata_results,
+                    },
+                })
+            else:
+                content = FileHandler().generate(template)
+                self._send_json(200, {"status": "generated", "template": template_name, "content": content})
         except Exception as e:
             logger.exception("FILE GET failed for %s", template_name)
             self._send_json(500, {"error": str(e)})
@@ -362,29 +380,82 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Invalid JSON body"})
             return
         params = body or {}
-        try:
-            content = FileHandler().generate(template)
-            target_dir = params.get("target_dir")
-            written_path = None
-            if target_dir:
-                default_pattern = (template.get("identification") or {}).get("file_pattern", "sim_%s.csv")
-                out_path = _safe_file_output_path(target_dir, params.get("filename"), template_name, default_pattern)
-                if not out_path:
-                    self._send_json(400, {"error": "Invalid target_dir or filename"})
-                    return
-                written_path = FileHandler().write_text_to_path(out_path, content)
-                if written_path is None:
-                    self._send_json(500, {"error": "Failed to write file"})
-                    return
-            self._send_json(200, {
-                "status": "completed",
-                "template": template_name,
-                "written_path": written_path,
-                "content": content,
-            })
-        except Exception as e:
-            logger.exception("FILE POST failed for %s", template_name)
-            self._send_json(500, {"error": str(e)})
+        target_dir = params.get("target_dir")
+
+        fixture_cfg = template.get("fixture")
+        if fixture_cfg:
+            # Fixture-based: copy real file + return parsed metadata
+            try:
+                self._handle_fixture_file_post(template_name, template, fixture_cfg, target_dir, params)
+            except Exception as e:
+                logger.exception("Fixture FILE POST failed for %s", template_name)
+                self._send_json(500, {"error": str(e)})
+        else:
+            # Fallback: synthetic generation (legacy templates without fixture section)
+            try:
+                content = FileHandler().generate(template)
+                written_path = None
+                if target_dir:
+                    default_pattern = (template.get("identification") or {}).get("file_pattern", "sim_%s.csv")
+                    out_path = _safe_file_output_path(target_dir, params.get("filename"), template_name, default_pattern)
+                    if not out_path:
+                        self._send_json(400, {"error": "Invalid target_dir or filename"})
+                        return
+                    written_path = FileHandler().write_text_to_path(out_path, content)
+                    if written_path is None:
+                        self._send_json(500, {"error": "Failed to write file"})
+                        return
+                self._send_json(200, {
+                    "status": "completed",
+                    "template": template_name,
+                    "written_path": written_path,
+                    "content": content,
+                })
+            except Exception as e:
+                logger.exception("FILE POST failed for %s", template_name)
+                self._send_json(500, {"error": str(e)})
+
+    def _handle_fixture_file_post(self, template_name, template, fixture_cfg, target_dir, params):
+        """Copy a real fixture file to target_dir and return parsed metadata."""
+        fixture_rel = fixture_cfg["file"]
+        fixture_path = os.path.join(os.path.dirname(__file__), fixture_rel)
+        if not os.path.isfile(fixture_path):
+            self._send_json(404, {"error": f"Fixture file not found: {fixture_rel}"})
+            return
+
+        # Parse metadata from the fixture
+        metadata_results = parse_fixture(fixture_path, fixture_cfg)
+
+        written_path = None
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+            ext = os.path.splitext(fixture_path)[1]
+            filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
+            out_path = os.path.join(target_dir, os.path.basename(filename))
+
+            # Copy the real file (preserving binary format for .xls/.xlsx)
+            shutil.copy2(fixture_path, out_path)
+
+            # Append unique timestamp to prevent bridge hash-based dedup across test runs
+            if ext.lower() in ('.csv', '.tsv', '.txt'):
+                import time
+                with open(out_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n{int(time.time() * 1000)}")
+
+            written_path = out_path
+            logger.info("Dropped fixture %s to %s (%d results)", fixture_rel, out_path, len(metadata_results))
+
+        self._send_json(200, {
+            "status": "completed",
+            "template": template_name,
+            "written_path": written_path,
+            "metadata": {
+                "analyzerName": template.get("analyzer", {}).get("name", template_name),
+                "format": fixture_cfg.get("format", "CSV"),
+                "fixture": fixture_rel,
+                "results": metadata_results,
+            },
+        })
 
     def _handle_create_analyzer(self):
         mgr = self._get_network_manager()

@@ -50,6 +50,15 @@
       "possibleValues": ["Positive", "Negative", "Invalid"]
     }
   ],
+  "fixture": {
+    "file": "fixtures/fluorocycler-xt/results.xlsx",
+    "format": "XLSX",
+    "column_mapping": {
+      "sampleId": "SampleID",
+      "result": "CP",
+      "testCode": "TargetName"
+    }
+  },
   "testSamples": [
     {"sampleId": "FLX-001", "position": "A01", "result": "Detected", "interpretation": "Positive"},
     {"sampleId": "FLX-002", "position": "B05", "result": "Not Detected", "interpretation": "Negative"}

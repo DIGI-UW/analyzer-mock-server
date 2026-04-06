@@ -39,7 +39,6 @@ def parse_fixture(fixture_path: str, fixture_config: Dict[str, Any]) -> List[Dic
             - column_mapping: { "sampleId": "<header>", "result": "<header>", "testCode": "<header>" }
             - delimiter: str (CSV only, default ",")
             - skipRows: int (CSV only, default 0)
-            - control_prefixes: list (optional override)
 
     Returns:
         List of dicts: [{"sampleId": "...", "result": "...", "testCode": "..."}, ...]

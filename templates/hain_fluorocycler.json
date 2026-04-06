@@ -20,34 +20,56 @@
     "extension": ".csv"
   },
   "file_config": {
-    "format": "CSV",
-    "delimiter": ";",
+    "format": "XLSX",
     "has_header": true,
     "column_mapping": {
-      "sample_id": "Sample ID",
-      "test_code": "Assay",
-      "result": "Result",
-      "interpretation": "Interpretation"
+      "sample_id": "SampleID",
+      "test_code": "TargetName",
+      "result": "CP"
     }
   },
   "columns": [
-    {"index": 0, "name": "Position", "description": "Well position (e.g., A01)"},
-    {"index": 1, "name": "Sample ID", "description": "Sample/accession number"},
-    {"index": 2, "name": "Result", "description": "Detected/Not Detected"},
-    {"index": 3, "name": "Interpretation", "description": "Positive/Negative/Invalid"}
+    {
+      "index": 0,
+      "name": "Position",
+      "description": "Well position (e.g., A01)"
+    },
+    {
+      "index": 1,
+      "name": "Sample ID",
+      "description": "Sample/accession number"
+    },
+    {
+      "index": 2,
+      "name": "Result",
+      "description": "Detected/Not Detected"
+    },
+    {
+      "index": 3,
+      "name": "Interpretation",
+      "description": "Positive/Negative/Invalid"
+    }
   ],
   "fields": [
     {
       "code": "RESULT",
       "name": "FluoroCycler XT Result",
       "type": "QUALITATIVE",
-      "possibleValues": ["Detected", "Not Detected", "Invalid"]
+      "possibleValues": [
+        "Detected",
+        "Not Detected",
+        "Invalid"
+      ]
     },
     {
       "code": "INTERPRETATION",
       "name": "FluoroCycler XT Interpretation",
       "type": "QUALITATIVE",
-      "possibleValues": ["Positive", "Negative", "Invalid"]
+      "possibleValues": [
+        "Positive",
+        "Negative",
+        "Invalid"
+      ]
     }
   ],
   "fixture": {
@@ -61,7 +83,17 @@
     "testCodeFilter": "VIH-1"
   },
   "testSamples": [
-    {"sampleId": "FLX-001", "position": "A01", "result": "Detected", "interpretation": "Positive"},
-    {"sampleId": "FLX-002", "position": "B05", "result": "Not Detected", "interpretation": "Negative"}
+    {
+      "sampleId": "FLX-001",
+      "position": "A01",
+      "result": "Detected",
+      "interpretation": "Positive"
+    },
+    {
+      "sampleId": "FLX-002",
+      "position": "B05",
+      "result": "Not Detected",
+      "interpretation": "Negative"
+    }
   ]
 }

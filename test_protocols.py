@@ -281,16 +281,16 @@ class TestFileHandler(unittest.TestCase):
         t = _load_template("quantstudio7")
         csv = FileHandler().generate(t, sample_id="S001")
         self.assertIn("Sample Name", csv)
-        self.assertIn("Target", csv)
-        self.assertIn("Ct", csv)
+        self.assertIn("Target Name", csv)
+        self.assertIn("Quantity Mean", csv)
         self.assertIn("S001", csv)
 
     def test_generate_hain_fluorocycler(self):
         t = _load_template("hain_fluorocycler")
         csv = FileHandler().generate(t)
-        self.assertIn("Sample ID", csv)
-        self.assertIn("Assay", csv)
-        self.assertIn("Result", csv)
+        self.assertIn("SampleID", csv)
+        self.assertIn("TargetName", csv)
+        self.assertIn("CP", csv)
 
 
 class TestFileSimulateAPI(unittest.TestCase):

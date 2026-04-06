@@ -428,10 +428,17 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
         written_path = None
         if target_dir:
-            os.makedirs(target_dir, exist_ok=True)
+            # Validate target_dir: resolve to real path to prevent path traversal.
+            # Only allow output under /data/analyzer-imports (Docker) or /tmp (tests).
+            resolved_dir = os.path.realpath(target_dir)
+            allowed_roots = ["/data/analyzer-imports", "/tmp"]
+            if not any(resolved_dir.startswith(root) for root in allowed_roots):
+                self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
+                return
+            os.makedirs(resolved_dir, exist_ok=True)
             ext = os.path.splitext(fixture_path)[1]
             filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
-            out_path = os.path.join(target_dir, os.path.basename(filename))
+            out_path = os.path.join(resolved_dir, os.path.basename(filename))
 
             # Copy the real file (preserving binary format for .xls/.xlsx)
             shutil.copy2(fixture_path, out_path)

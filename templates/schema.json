@@ -317,7 +317,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Sample/Accession ID"
+          "description": "For HL7/ASTM generators this must be a 2-digit lane code; generated outputs must be valid SiteYearNum accessions"
         },
         "type": {
           "type": "string",
@@ -333,7 +333,7 @@
         "properties": {
           "sampleId": {
             "type": "string",
-            "description": "Sample/Accession ID"
+            "description": "Sample/Accession ID; runtime outputs must be valid SiteYearNum accessions"
           },
           "position": {
             "type": "string",

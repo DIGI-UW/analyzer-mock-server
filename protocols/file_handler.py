@@ -12,9 +12,18 @@ import random
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .accession import validate_accession
 from .base_handler import BaseHandler
 
 logger = logging.getLogger(__name__)
+
+_file_sample_sequence = 0
+
+
+def _next_file_sample_id() -> str:
+    global _file_sample_sequence
+    _file_sample_sequence += 1
+    return validate_accession(f"DEV012699{_file_sample_sequence:011d}", "FILE generated accession")
 
 
 def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -86,7 +95,7 @@ class FileHandler(BaseHandler):
             w.writerow(header)
 
         for i in range(sample_count):
-            sid = sample_id or f"S{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+            sid = validate_accession(sample_id, "FILE sample_id override") if sample_id else _next_file_sample_id()
             for f in fields:
                 w.writerow([sid, f.get("code", f.get("name")), _random_value(f), ts])
 

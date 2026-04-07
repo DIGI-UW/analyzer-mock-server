@@ -172,7 +172,7 @@
         "dob": "19900620"
     },
     "testSample": {
-        "id": "SAMPLE-2026-0002",
+        "id": "61",
         "type": "CBC^Complete Blood Count"
     },
     "qc_controls": [

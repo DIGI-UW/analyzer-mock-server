@@ -10,6 +10,7 @@ import unittest
 import tempfile
 import threading
 import http.client
+from copy import deepcopy
 from http.server import HTTPServer
 
 from protocols.astm_handler import ASTMHandler
@@ -29,14 +30,14 @@ def _load_template(name: str):
 class TestASTMHandler(unittest.TestCase):
     def test_generate_mindray_bc5380(self):
         t = _load_template("mindray_bc5380")
-        msg = ASTMHandler().generate(t, patient_id="P001", sample_id="S001")
+        msg = ASTMHandler().generate(t, patient_id="P001", sample_id="DEV01264000000000001")
         self.assertIn("H|", msg)
         self.assertIn("P|", msg)
         self.assertIn("O|", msg)
         self.assertIn("R|", msg)
         self.assertIn("L|", msg)
         self.assertIn("P001", msg)
-        self.assertIn("S001", msg)
+        self.assertIn("DEV01264000000000001", msg)
 
     def test_generate_horiba_pentra60(self):
         t = _load_template("horiba_pentra60")
@@ -130,6 +131,19 @@ class TestASTMGeneXpert(unittest.TestCase):
         fields = o.split("|")
         self.assertEqual(len(fields), 26)
 
+    def test_default_template_generates_valid_siteyearnum_accession(self):
+        msg = self._generate()
+        o = self._segments(msg, "O")[0]
+        sample_id = o.split("|")[2].split("^")[0]
+        self.assertRegex(sample_id, r"^DEV01\d{15}$")
+        self.assertEqual(len(sample_id), 20)
+
+    def test_invalid_template_sample_seed_fails_loudly(self):
+        invalid = deepcopy(self.template)
+        invalid["testSample"]["id"] = "SPECIMEN-GX-001"
+        with self.assertRaisesRegex(ValueError, "2-digit lane code"):
+            self.handler.generate(invalid, use_seed=True)
+
     # --- R-record: 7-component test ID ---
 
     def test_r_record_8_component_test_id(self):
@@ -202,7 +216,7 @@ class TestASTMGeneXpert(unittest.TestCase):
         o_records = self._segments(msg, "O")
         qc_o_fields = o_records[1].split("|")
         # O.3 should contain QC specimen ID
-        self.assertIn("QC-MTB-CTRL-001", qc_o_fields[2])
+        self.assertIn("DEV01261000000000999", qc_o_fields[2])
 
     def test_qc_includes_all_template_fields(self):
         msg = self._generate()
@@ -251,7 +265,7 @@ class TestASTMGeneXpert(unittest.TestCase):
 class TestHL7Handler(unittest.TestCase):
     def test_generate_mindray_bc5380(self):
         t = _load_template("mindray_bc5380")
-        msg = HL7Handler().generate(t, patient_id="P001", sample_id="S001")
+        msg = HL7Handler().generate(t, patient_id="P001", sample_id="DEV01264000000000001")
         self.assertIn("MSH|", msg)
         self.assertIn("ORU^R01", msg)
         self.assertIn("PID|", msg)
@@ -259,7 +273,19 @@ class TestHL7Handler(unittest.TestCase):
         self.assertIn("OBX|", msg)
         self.assertIn("MINDRAY", msg)
         self.assertIn("P001", msg)
-        self.assertIn("S001", msg)
+        self.assertIn("DEV01264000000000001", msg)
+
+    def test_invalid_hl7_template_sample_seed_fails_loudly(self):
+        t = _load_template("mindray_bc5380")
+        invalid = deepcopy(t)
+        invalid["testSample"]["id"] = "PLACER-INVALID"
+        with self.assertRaisesRegex(ValueError, "2-digit lane code"):
+            HL7Handler().generate(invalid)
+
+    def test_invalid_hl7_sample_override_fails_loudly(self):
+        t = _load_template("mindray_bc5380")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            HL7Handler().generate(t, sample_id="S001")
 
     def test_generate_sysmex_xn(self):
         t = _load_template("sysmex_xn")
@@ -279,11 +305,11 @@ class TestSerialHandler(unittest.TestCase):
 class TestFileHandler(unittest.TestCase):
     def test_generate_quantstudio7(self):
         t = _load_template("quantstudio7")
-        csv = FileHandler().generate(t, sample_id="S001")
+        csv = FileHandler().generate(t, sample_id="DEV01262000000000001")
         self.assertIn("Sample Name", csv)
         self.assertIn("Target Name", csv)
         self.assertIn("Quantity Mean", csv)
-        self.assertIn("S001", csv)
+        self.assertIn("DEV01262000000000001", csv)
 
     def test_generate_hain_fluorocycler(self):
         t = _load_template("hain_fluorocycler")
@@ -291,6 +317,12 @@ class TestFileHandler(unittest.TestCase):
         self.assertIn("SampleID", csv)
         self.assertIn("TargetName", csv)
         self.assertIn("CP", csv)
+        self.assertRegex(csv, r"DEV01\d{15}")
+
+    def test_invalid_file_sample_override_fails_loudly(self):
+        t = _load_template("quantstudio7")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            FileHandler().generate(t, sample_id="S001")
 
 
 class TestFileSimulateAPI(unittest.TestCase):

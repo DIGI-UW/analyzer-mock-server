@@ -5,20 +5,17 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T072–T073.
 Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
-import itertools
 import logging
 import random
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from .accession import next_site_year_num, validate_accession
 from .base_handler import BaseHandler
 
 # Sequential sample ID generator — shared with HL7 handler pattern.
-_astm_sample_counters: Dict[str, itertools.count] = {}
-
-
-MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
+_astm_sample_counters: Dict[str, Any] = {}
 
 
 def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -> str:
@@ -28,10 +25,7 @@ def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -
     Matches the harness site prefix (DEV01) + 2-digit year (26).
     Total length: exactly 20 chars (OE SiteYearNum requirement).
     """
-    if lane_code not in _astm_sample_counters:
-        _astm_sample_counters[lane_code] = itertools.count(1)
-    seq = next(_astm_sample_counters[lane_code])
-    return f"DEV0126{lane_code}{seq:011d}"
+    return next_site_year_num(_astm_sample_counters, lane_code, "ASTM template testSample.id")
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +174,8 @@ def _build_astm_message(
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
     if not sample_id:
-        sample_id = f"SAMPLE-{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+        raise ValueError("ASTM sample_id is required and must be a valid SiteYearNum accession")
+    sample_id = validate_accession(sample_id, "ASTM sample_id")
     if not patient_name:
         first_names = ["John", "Mary", "James", "Sarah", "Robert", "Emily"]
         last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones"]
@@ -300,7 +295,7 @@ def _build_qc_message(
     if not qc_config:
         return ""
 
-    qc_id = qc_config.get("id", f"QC-{random.randint(1000, 9999)}")
+    qc_id = validate_accession(qc_config.get("id"), "ASTM qcSample.id")
     action_code = qc_config.get("actionCode", "Q")
 
     # Build QC-specific field overrides
@@ -360,62 +355,10 @@ def _build_qc_astm_message(
             3.5 = exactly 3.5 SD above target (triggers 1₃ₛ rejection).
             SD is estimated as a percentage of target (5% hematology, 10% molecular).
     """
-    # SD estimates as percentage of mean, matching generate_analyzer_sql.py
-    SD_PCT = {
-        "HEMATOLOGY": 0.05, "CHEMISTRY": 0.05,
-        "MOLECULAR": 0.10, "COAGULATION": 0.08, "IMMUNOLOGY": 0.10,
-    }
-    sd_pct = SD_PCT.get(category, 0.05)
-
-    now = datetime.now()
-    timestamp = now.strftime("%Y%m%d%H%M%S")
-    qc_sample_id = f"QC-{timestamp}"
-
-    segments = [
-        f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}",
-        f"P|1||QC-CTRL-001|QC^Control||U|19000101",
-        f"O|1|{qc_sample_id}^LAB|QC^QC Panel||{timestamp}",
-    ]
-
-    seq = 1
-    for field in fields:
-        code = field.get("code", "")
-        ctrl = qc_controls.get(code)
-        if not ctrl:
-            continue
-
-        lot    = ctrl.get("lot_number", f"LOT-{code}-N")
-        level  = ctrl.get("level", "N")
-        target = ctrl.get("target")
-        if target is None:
-            target = field.get("seedValue") or _generate_value(field, use_seed=True)
-        unit         = field.get("unit", "")
-        normal_range = field.get("normalRange", "")
-
-        # Apply deviation or realistic scatter
-        sd = target * sd_pct if target else 0
-        if deviation is not None and target:
-            # Fixed deviation: shift by exactly N standard deviations
-            value = round(target + (deviation * sd), 2)
-        elif target and sd > 0:
-            # Normal operation: random scatter within ~±1.5 SD (realistic instrument noise)
-            value = round(random.gauss(target, sd), 2)
-        else:
-            value = target
-
-        # Clamp to 0 — physical measurements can't be negative
-        if isinstance(value, (int, float)) and value < 0:
-            value = 0.0
-
-        segments.append(f"R|{seq}|^^^{code}|{value}|{unit}|{normal_range}|N||F|{timestamp}")
-        segments.append(f"Q|{seq}|{code}^{lot}^{level}|{value}|{unit}|{timestamp}")
-        seq += 1
-
-    if seq == 1:
-        raise ValueError("No fields matched any qc_controls entry — check field_code values")
-
-    segments.append("L|1|N")
-    return "\n".join(segments) + "\n"
+    raise ValueError(
+        "_build_qc_astm_message requires a valid SiteYearNum accession path; "
+        "use templates with qcSample.id set to a valid accession"
+    )
 
 
 class ASTMHandler(BaseHandler):

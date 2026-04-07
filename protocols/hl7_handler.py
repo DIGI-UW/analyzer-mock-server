@@ -75,7 +75,7 @@ def generate_oru_r01(
         message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
     # testSample.id is a 2-digit lane code; sequence is minted per lane.
     if sample_id is None:
-        lane_code = test_sample.get("id")
+        lane_code = test_sample.get("id") or "00"
         sample_id = _next_sample_id(lane_code)
     else:
         sample_id = validate_accession(sample_id, "HL7 sample_id override")

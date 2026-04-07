@@ -1,3 +1,11 @@
+"""SiteYearNum accession validation and per-lane minting for the mock server.
+
+Emitted accessions match ``^DEV01\\d{15}$`` (20 characters). Lane codes are two
+decimal digits; minted IDs use ``DEV0126{lane}{seq:011d}``. Conventional lanes:
+``00`` default when no template lane is set; ``98`` ASTM ``qc_controls`` path;
+``99`` FILE handler auto-mint.
+"""
+
 import itertools
 import re
 from typing import Dict

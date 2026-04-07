@@ -39,6 +39,11 @@ class TestASTMHandler(unittest.TestCase):
         self.assertIn("P001", msg)
         self.assertIn("DEV01264000000000001", msg)
 
+    def test_generate_rejects_invalid_explicit_sample_id(self):
+        t = _load_template("mindray_bc5380")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            ASTMHandler().generate(t, sample_id="S001-BAD")
+
     def test_generate_horiba_pentra60(self):
         t = _load_template("horiba_pentra60")
         msg = ASTMHandler().generate(t)
@@ -247,6 +252,19 @@ class TestASTMGeneXpert(unittest.TestCase):
             "Mindray template should not have proactive_enq"
         )
 
+    def test_generate_qc_controls_emits_valid_accession_and_o12_q(self):
+        """qc_controls path must emit SiteYearNum on O.3 and O.12=Q (GenericASTM index 11)."""
+        t = _load_template("genexpert_astm")
+        msg = ASTMHandler().generate_qc(t)
+        lines = [ln.strip() for ln in msg.strip().split("\n") if ln.startswith("O|")]
+        self.assertTrue(lines, "expected at least one O-record")
+        o_fields = lines[0].split("|")
+        self.assertGreaterEqual(len(o_fields), 12, "O-record must pad to O.12 for QC action code")
+        self.assertEqual(o_fields[11], "Q", "O.12 must be Q for QC (0-based index 11)")
+        acc = o_fields[2].split("^")[0]
+        self.assertRegex(acc, r"^DEV01\d{15}$")
+        self.assertEqual(len(acc), 20)
+
     # --- use_seed determinism ---
 
     def test_seed_produces_deterministic_output(self):
@@ -287,11 +305,37 @@ class TestHL7Handler(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
             HL7Handler().generate(t, sample_id="S001")
 
+    def test_hl7_mints_valid_accession_when_test_sample_missing(self):
+        """If testSample is absent, default lane 00 must produce a valid SiteYearNum."""
+        minimal = {
+            "protocol": {"type": "HL7", "version": "2.5.1"},
+            "identification": {"hl7_sending_app": "TEST", "hl7_sending_facility": "LAB"},
+            "fields": [{"code": "GLU", "name": "Glucose", "type": "NUMERIC", "seedValue": 5.0, "unit": "mmol/L"}],
+        }
+        msg = HL7Handler().generate(minimal)
+        self.assertIn("ORC|", msg)
+        self.assertIn("OBR|", msg)
+        for line in msg.split("\r"):
+            if line.startswith("OBR|"):
+                obr = line.split("|")
+                filler = obr[3].split("^")[0] if len(obr) > 3 else ""
+                self.assertRegex(filler, r"^DEV01\d{15}$")
+                self.assertEqual(len(filler), 20)
+                break
+        else:
+            self.fail("expected OBR segment")
+
     def test_generate_sysmex_xn(self):
         t = _load_template("sysmex_xn")
         msg = HL7Handler().generate(t)
         self.assertIn("MSH|", msg)
         self.assertIn("SYSMEX", msg)
+
+    def test_generate_genexpert_hl7_template(self):
+        t = _load_template("genexpert")
+        msg = HL7Handler().generate(t)
+        self.assertIn("GENEXPERT", msg)
+        self.assertRegex(msg, r"DEV01\d{15}")
 
 
 class TestSerialHandler(unittest.TestCase):

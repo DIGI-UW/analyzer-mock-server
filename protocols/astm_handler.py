@@ -369,10 +369,13 @@ def _build_qc_astm_message(
     timestamp = now.strftime("%Y%m%d%H%M%S")
     qc_sample_id = _next_astm_sample_id("98", now)
 
+    # O-record matches GenericASTM: O.3 = specimen/accession (first ^ component), O.12 = Q (index 11).
+    # Same padding pattern as OE GenericASTMIntegrationTest (26-field O with Q at index 11).
+    o_qc = f"O|1|{qc_sample_id}|||||||||Q|||||||||||||"
     segments = [
         f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}",
-        f"P|1||QC-CTRL-001|QC^Control||U|19000101",
-        f"O|1|{qc_sample_id}^LAB|QC^QC Panel||{timestamp}",
+        f"P|1||QCCTRL001|QC^Control||U|19000101",
+        o_qc,
     ]
 
     seq = 1
@@ -450,7 +453,7 @@ class ASTMHandler(BaseHandler):
         # Generate unique sequential sample ID (like a real analyzer)
         explicit_sample_id = kwargs.get("sample_id")
         if explicit_sample_id:
-            sample_id = explicit_sample_id
+            sample_id = validate_accession(explicit_sample_id, "ASTM sample_id override")
         else:
             lane_code = test_sample.get("id") or "00"
             sample_id = _next_astm_sample_id(lane_code)

@@ -21,15 +21,8 @@ _sample_counters: Dict[str, itertools.count] = {}
 logger = logging.getLogger(__name__)
 
 
-def _next_sample_id(lane_code: str, timestamp: datetime) -> str:
-    """Generate a valid SiteYearNum accession number.
-
-    Format: DEV0126{LANE}{SEQ:011d} e.g., DEV01264000000000001
-    where DEV01 is the harness site prefix, 26 is the 2-digit year,
-    LANE is a 2-digit lane code, and SEQ is an 11-digit zero-padded sequence.
-    Total length: exactly 20 chars (OE SiteYearNum requirement).
-    Counter is per-lane and never resets.
-    """
+def _next_sample_id(lane_code: str) -> str:
+    """Mint a SiteYearNum accession from a 2-digit lane code (see protocols/accession.py)."""
     return next_site_year_num(_sample_counters, lane_code, "HL7 template testSample.id")
 
 
@@ -80,11 +73,10 @@ def generate_oru_r01(
     ts = timestamp.strftime("%Y%m%d%H%M%S")
     if message_control_id is None:
         message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
-    # Generate unique sequential sample ID like a real analyzer would.
-    # Template testSample.id is the prefix; full ID includes date + sequence.
+    # testSample.id is a 2-digit lane code; sequence is minted per lane.
     if sample_id is None:
-        prefix = test_sample.get("id")
-        sample_id = _next_sample_id(prefix, timestamp)
+        lane_code = test_sample.get("id")
+        sample_id = _next_sample_id(lane_code)
     else:
         sample_id = validate_accession(sample_id, "HL7 sample_id override")
     if placer_order_id is None:

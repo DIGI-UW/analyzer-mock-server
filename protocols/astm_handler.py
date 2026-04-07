@@ -174,7 +174,8 @@ def _build_astm_message(
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
     if not sample_id:
-        raise ValueError("ASTM sample_id is required and must be a valid SiteYearNum accession")
+        # Legacy generate_astm_message() and similar call paths omit sample_id; mint a valid accession.
+        sample_id = _next_astm_sample_id("00", now)
     sample_id = validate_accession(sample_id, "ASTM sample_id")
     if not patient_name:
         first_names = ["John", "Mary", "James", "Sarah", "Robert", "Emily"]
@@ -355,10 +356,64 @@ def _build_qc_astm_message(
             3.5 = exactly 3.5 SD above target (triggers 1₃ₛ rejection).
             SD is estimated as a percentage of target (5% hematology, 10% molecular).
     """
-    raise ValueError(
-        "_build_qc_astm_message requires a valid SiteYearNum accession path; "
-        "use templates with qcSample.id set to a valid accession"
-    )
+    SD_PCT = {
+        "HEMATOLOGY": 0.05,
+        "CHEMISTRY": 0.05,
+        "MOLECULAR": 0.10,
+        "COAGULATION": 0.08,
+        "IMMUNOLOGY": 0.10,
+    }
+    sd_pct = SD_PCT.get(category, 0.05)
+
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d%H%M%S")
+    qc_sample_id = _next_astm_sample_id("98", now)
+
+    segments = [
+        f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}",
+        f"P|1||QC-CTRL-001|QC^Control||U|19000101",
+        f"O|1|{qc_sample_id}^LAB|QC^QC Panel||{timestamp}",
+    ]
+
+    seq = 1
+    for field in fields:
+        code = field.get("code", "")
+        ctrl = qc_controls.get(code)
+        if not ctrl:
+            continue
+
+        lot = ctrl.get("lot_number", f"LOT-{code}-N")
+        level = ctrl.get("level", "N")
+        target = ctrl.get("target")
+        if target is None:
+            target = field.get("seedValue") or _generate_value(field, use_seed=True)
+        unit = field.get("unit", "")
+        normal_range = field.get("normalRange", "")
+
+        try:
+            target_num = float(target)
+        except (TypeError, ValueError):
+            target_num = 0.0
+        sd = abs(target_num) * sd_pct if target_num else 0.0
+        if deviation is not None and target_num:
+            value = round(target_num + (deviation * sd), 2)
+        elif target_num and sd > 0:
+            value = round(random.gauss(target_num, sd), 2)
+        else:
+            value = target
+
+        if isinstance(value, (int, float)) and value < 0:
+            value = 0.0
+
+        segments.append(f"R|{seq}|^^^{code}|{value}|{unit}|{normal_range}|N||F|{timestamp}")
+        segments.append(f"Q|{seq}|{code}^{lot}^{level}|{value}|{unit}|{timestamp}")
+        seq += 1
+
+    if seq == 1:
+        raise ValueError("No fields matched any qc_controls entry — check field_code values")
+
+    segments.append("L|1|N")
+    return "\n".join(segments) + "\n"
 
 
 class ASTMHandler(BaseHandler):
@@ -397,8 +452,8 @@ class ASTMHandler(BaseHandler):
         if explicit_sample_id:
             sample_id = explicit_sample_id
         else:
-            prefix = test_sample.get("id", "SAMPLE")
-            sample_id = _next_astm_sample_id(prefix)
+            lane_code = test_sample.get("id") or "00"
+            sample_id = _next_astm_sample_id(lane_code)
         patient_name = kwargs.get("patient_name") or test_patient.get("name")
         patient_dob = kwargs.get("patient_dob") or test_patient.get("dob")
         patient_sex = kwargs.get("patient_sex") or test_patient.get("sex")

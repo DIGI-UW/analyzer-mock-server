@@ -6,9 +6,11 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T083–T086.
 
 import csv
 import io
+import itertools
 import logging
 import os
 import random
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -17,13 +19,14 @@ from .base_handler import BaseHandler
 
 logger = logging.getLogger(__name__)
 
-_file_sample_sequence = 0
+_file_sample_lock = threading.Lock()
+_file_sample_counter = itertools.count(1)
 
 
 def _next_file_sample_id() -> str:
-    global _file_sample_sequence
-    _file_sample_sequence += 1
-    return validate_accession(f"DEV012699{_file_sample_sequence:011d}", "FILE generated accession")
+    with _file_sample_lock:
+        n = next(_file_sample_counter)
+    return validate_accession(f"DEV012699{n:011d}", "FILE generated accession")
 
 
 def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:

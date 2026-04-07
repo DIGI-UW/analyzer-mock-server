@@ -28,8 +28,7 @@ def validate_lane_code(lane_code: str, context: str) -> str:
 
 def next_site_year_num(counter_map: Dict[str, itertools.count], lane_code: str, context: str) -> str:
     lane = validate_lane_code(lane_code, context)
-    if lane not in counter_map:
-        counter_map[lane] = itertools.count(1)
-    seq = next(counter_map[lane])
+    counter = counter_map.setdefault(lane, itertools.count(1))
+    seq = next(counter)
     sample_id = f"DEV0126{lane}{seq:011d}"
     return validate_accession(sample_id, f"{context} generated accession")

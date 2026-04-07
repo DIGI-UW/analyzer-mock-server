@@ -52,7 +52,7 @@ Templates enable the mock server to generate protocol-specific messages with **e
     "dob": "19850315"
   },
   "testSample": {
-    "id": "SAMPLE-2026-0001",
+    "id": "60",
     "type": "CBC^Complete Blood Count"
   }
 }
@@ -60,16 +60,22 @@ Templates enable the mock server to generate protocol-specific messages with **e
 
 ## Usage
 
-### Generate Deterministic Message
+### Generate Deterministic ASTM Message (supported path)
 
 ```bash
-python template_generator.py --template horiba_pentra60 --deterministic
+python server.py --simulate-api-port 8081
+curl "http://localhost:8081/simulate/astm/horiba_pentra60"
 ```
 
-### Generate Random Values Within Normal Ranges
+### Generate Random Values Within Normal Ranges (library path)
 
 ```bash
-python template_generator.py --template horiba_micros60 --random
+python - <<'PY'
+from server import _load_template
+from protocols.astm_handler import ASTMHandler
+template = _load_template("horiba_micros60")
+print(ASTMHandler().generate(template, use_seed=False))
+PY
 ```
 
 ### List Available Templates
@@ -135,8 +141,10 @@ Templates are validated against `schema.json` which enforces:
 Templates power the E2E testing workflow:
 
 ```bash
-# 1. Generate deterministic ASTM message
-python template_generator.py --template horiba_pentra60 --deterministic > /tmp/test.astm
+# 1. Generate deterministic ASTM message via simulate API
+python server.py --simulate-api-port 8081
+curl -s "http://localhost:8081/simulate/astm/horiba_pentra60" | \
+python -c "import sys, json; print(json.load(sys.stdin)['message'])" > /tmp/test.astm
 
 # 2. Send to OpenELIS ASTM endpoint
 curl -X POST https://localhost/api/OpenELIS-Global/analyzer/astm \

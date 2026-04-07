@@ -61,7 +61,7 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile server.py template_loader.py template_generator.py profile_adapter.py
+          python -m py_compile server.py template_loader.py profile_adapter.py
           python -m py_compile protocols/*.py
-          python -m py_compile hl7_generator.py generate_file.py
+          python -m py_compile generate_file.py
           echo "All Python files have valid syntax"

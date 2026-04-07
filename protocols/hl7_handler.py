@@ -13,32 +13,17 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from .accession import next_site_year_num, validate_accession
+
 # Atomic counter for sequential sample IDs — never resets, always unique.
 # Each template gets its own counter via _sample_counters dict.
 _sample_counters: Dict[str, itertools.count] = {}
 logger = logging.getLogger(__name__)
 
 
-MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
-
-
-def _next_sample_id(lane_code: str, timestamp: datetime) -> str:
-    """Generate a valid SiteYearNum accession number.
-
-    Format: DEV0126{LANE}{SEQ:011d} e.g., DEV01264000000000001
-    where DEV01 is the harness site prefix, 26 is the 2-digit year,
-    LANE is a 2-digit lane code, and SEQ is an 11-digit zero-padded sequence.
-    Total length: exactly 20 chars (OE SiteYearNum requirement).
-    Counter is per-lane and never resets.
-    """
-    if lane_code not in _sample_counters:
-        _sample_counters[lane_code] = itertools.count(1)
-    seq = next(_sample_counters[lane_code])
-    sid = f"DEV0126{lane_code}{seq:011d}"
-    if len(sid) != MAX_SAMPLE_ID_LEN:
-        logger.warning("Generated sample ID '%s' has unexpected length %d (expected %d)",
-                        sid, len(sid), MAX_SAMPLE_ID_LEN)
-    return sid
+def _next_sample_id(lane_code: str) -> str:
+    """Mint a SiteYearNum accession from a 2-digit lane code (see protocols/accession.py)."""
+    return next_site_year_num(_sample_counters, lane_code, "HL7 template testSample.id")
 
 
 def generate_oru_r01(
@@ -88,11 +73,12 @@ def generate_oru_r01(
     ts = timestamp.strftime("%Y%m%d%H%M%S")
     if message_control_id is None:
         message_control_id = f"SIM{timestamp.strftime('%Y%m%d%H%M%S')}"
-    # Generate unique sequential sample ID like a real analyzer would.
-    # Template testSample.id is the prefix; full ID includes date + sequence.
+    # testSample.id is a 2-digit lane code; sequence is minted per lane.
     if sample_id is None:
-        prefix = test_sample.get("id", "SAMPLE")
-        sample_id = _next_sample_id(prefix, timestamp)
+        lane_code = test_sample.get("id") or "00"
+        sample_id = _next_sample_id(lane_code)
+    else:
+        sample_id = validate_accession(sample_id, "HL7 sample_id override")
     if placer_order_id is None:
         placer_order_id = sample_id
     if filler_order_id is None:

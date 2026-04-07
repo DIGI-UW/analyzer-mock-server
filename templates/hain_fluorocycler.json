@@ -84,13 +84,13 @@
   },
   "testSamples": [
     {
-      "sampleId": "FLX-001",
+      "sampleId": "DEV01267100000000001",
       "position": "A01",
       "result": "Detected",
       "interpretation": "Positive"
     },
     {
-      "sampleId": "FLX-002",
+      "sampleId": "DEV01267100000000002",
       "position": "B05",
       "result": "Not Detected",
       "interpretation": "Negative"

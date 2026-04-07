@@ -10,6 +10,7 @@ import unittest
 import tempfile
 import threading
 import http.client
+from copy import deepcopy
 from http.server import HTTPServer
 
 from protocols.astm_handler import ASTMHandler
@@ -29,14 +30,19 @@ def _load_template(name: str):
 class TestASTMHandler(unittest.TestCase):
     def test_generate_mindray_bc5380(self):
         t = _load_template("mindray_bc5380")
-        msg = ASTMHandler().generate(t, patient_id="P001", sample_id="S001")
+        msg = ASTMHandler().generate(t, patient_id="P001", sample_id="DEV01264000000000001")
         self.assertIn("H|", msg)
         self.assertIn("P|", msg)
         self.assertIn("O|", msg)
         self.assertIn("R|", msg)
         self.assertIn("L|", msg)
         self.assertIn("P001", msg)
-        self.assertIn("S001", msg)
+        self.assertIn("DEV01264000000000001", msg)
+
+    def test_generate_rejects_invalid_explicit_sample_id(self):
+        t = _load_template("mindray_bc5380")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            ASTMHandler().generate(t, sample_id="S001-BAD")
 
     def test_generate_horiba_pentra60(self):
         t = _load_template("horiba_pentra60")
@@ -130,6 +136,19 @@ class TestASTMGeneXpert(unittest.TestCase):
         fields = o.split("|")
         self.assertEqual(len(fields), 26)
 
+    def test_default_template_generates_valid_siteyearnum_accession(self):
+        msg = self._generate()
+        o = self._segments(msg, "O")[0]
+        sample_id = o.split("|")[2].split("^")[0]
+        self.assertRegex(sample_id, r"^DEV01\d{15}$")
+        self.assertEqual(len(sample_id), 20)
+
+    def test_invalid_template_sample_seed_fails_loudly(self):
+        invalid = deepcopy(self.template)
+        invalid["testSample"]["id"] = "SPECIMEN-GX-001"
+        with self.assertRaisesRegex(ValueError, "2-digit lane code"):
+            self.handler.generate(invalid, use_seed=True)
+
     # --- R-record: 7-component test ID ---
 
     def test_r_record_8_component_test_id(self):
@@ -202,7 +221,7 @@ class TestASTMGeneXpert(unittest.TestCase):
         o_records = self._segments(msg, "O")
         qc_o_fields = o_records[1].split("|")
         # O.3 should contain QC specimen ID
-        self.assertIn("QC-MTB-CTRL-001", qc_o_fields[2])
+        self.assertIn("DEV01261000000000999", qc_o_fields[2])
 
     def test_qc_includes_all_template_fields(self):
         msg = self._generate()
@@ -233,6 +252,19 @@ class TestASTMGeneXpert(unittest.TestCase):
             "Mindray template should not have proactive_enq"
         )
 
+    def test_generate_qc_controls_emits_valid_accession_and_o12_q(self):
+        """qc_controls path must emit SiteYearNum on O.3 and O.12=Q (GenericASTM index 11)."""
+        t = _load_template("genexpert_astm")
+        msg = ASTMHandler().generate_qc(t)
+        lines = [ln.strip() for ln in msg.strip().split("\n") if ln.startswith("O|")]
+        self.assertTrue(lines, "expected at least one O-record")
+        o_fields = lines[0].split("|")
+        self.assertGreaterEqual(len(o_fields), 12, "O-record must pad to O.12 for QC action code")
+        self.assertEqual(o_fields[11], "Q", "O.12 must be Q for QC (0-based index 11)")
+        acc = o_fields[2].split("^")[0]
+        self.assertRegex(acc, r"^DEV01\d{15}$")
+        self.assertEqual(len(acc), 20)
+
     # --- use_seed determinism ---
 
     def test_seed_produces_deterministic_output(self):
@@ -251,7 +283,7 @@ class TestASTMGeneXpert(unittest.TestCase):
 class TestHL7Handler(unittest.TestCase):
     def test_generate_mindray_bc5380(self):
         t = _load_template("mindray_bc5380")
-        msg = HL7Handler().generate(t, patient_id="P001", sample_id="S001")
+        msg = HL7Handler().generate(t, patient_id="P001", sample_id="DEV01264000000000001")
         self.assertIn("MSH|", msg)
         self.assertIn("ORU^R01", msg)
         self.assertIn("PID|", msg)
@@ -259,13 +291,51 @@ class TestHL7Handler(unittest.TestCase):
         self.assertIn("OBX|", msg)
         self.assertIn("MINDRAY", msg)
         self.assertIn("P001", msg)
-        self.assertIn("S001", msg)
+        self.assertIn("DEV01264000000000001", msg)
+
+    def test_invalid_hl7_template_sample_seed_fails_loudly(self):
+        t = _load_template("mindray_bc5380")
+        invalid = deepcopy(t)
+        invalid["testSample"]["id"] = "PLACER-INVALID"
+        with self.assertRaisesRegex(ValueError, "2-digit lane code"):
+            HL7Handler().generate(invalid)
+
+    def test_invalid_hl7_sample_override_fails_loudly(self):
+        t = _load_template("mindray_bc5380")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            HL7Handler().generate(t, sample_id="S001")
+
+    def test_hl7_mints_valid_accession_when_test_sample_missing(self):
+        """If testSample is absent, default lane 00 must produce a valid SiteYearNum."""
+        minimal = {
+            "protocol": {"type": "HL7", "version": "2.5.1"},
+            "identification": {"hl7_sending_app": "TEST", "hl7_sending_facility": "LAB"},
+            "fields": [{"code": "GLU", "name": "Glucose", "type": "NUMERIC", "seedValue": 5.0, "unit": "mmol/L"}],
+        }
+        msg = HL7Handler().generate(minimal)
+        self.assertIn("ORC|", msg)
+        self.assertIn("OBR|", msg)
+        for line in msg.split("\r"):
+            if line.startswith("OBR|"):
+                obr = line.split("|")
+                filler = obr[3].split("^")[0] if len(obr) > 3 else ""
+                self.assertRegex(filler, r"^DEV01\d{15}$")
+                self.assertEqual(len(filler), 20)
+                break
+        else:
+            self.fail("expected OBR segment")
 
     def test_generate_sysmex_xn(self):
         t = _load_template("sysmex_xn")
         msg = HL7Handler().generate(t)
         self.assertIn("MSH|", msg)
         self.assertIn("SYSMEX", msg)
+
+    def test_generate_genexpert_hl7_template(self):
+        t = _load_template("genexpert")
+        msg = HL7Handler().generate(t)
+        self.assertIn("GENEXPERT", msg)
+        self.assertRegex(msg, r"DEV01\d{15}")
 
 
 class TestSerialHandler(unittest.TestCase):
@@ -279,11 +349,11 @@ class TestSerialHandler(unittest.TestCase):
 class TestFileHandler(unittest.TestCase):
     def test_generate_quantstudio7(self):
         t = _load_template("quantstudio7")
-        csv = FileHandler().generate(t, sample_id="S001")
+        csv = FileHandler().generate(t, sample_id="DEV01262000000000001")
         self.assertIn("Sample Name", csv)
         self.assertIn("Target Name", csv)
         self.assertIn("Quantity Mean", csv)
-        self.assertIn("S001", csv)
+        self.assertIn("DEV01262000000000001", csv)
 
     def test_generate_hain_fluorocycler(self):
         t = _load_template("hain_fluorocycler")
@@ -291,6 +361,12 @@ class TestFileHandler(unittest.TestCase):
         self.assertIn("SampleID", csv)
         self.assertIn("TargetName", csv)
         self.assertIn("CP", csv)
+        self.assertRegex(csv, r"DEV01\d{15}")
+
+    def test_invalid_file_sample_override_fails_loudly(self):
+        t = _load_template("quantstudio7")
+        with self.assertRaisesRegex(ValueError, "valid SiteYearNum accession"):
+            FileHandler().generate(t, sample_id="S001")
 
 
 class TestFileSimulateAPI(unittest.TestCase):

@@ -17,20 +17,21 @@
     "format": "CSV",
     "delimiter": ";",
     "has_header": true,
+    "skipRows": 1,
     "column_mapping": {
       "sample_id": "SampleID",
       "test_code": "TestCode",
-      "result": "Abs"
+      "result": "Absorbance"
     }
   },
   "fixture": {
     "file": "fixtures/multiskan-fc/results.csv",
     "format": "CSV",
     "delimiter": ";",
-    "skipRows": 0,
+    "skipRows": 1,
     "column_mapping": {
       "sampleId": "SampleID",
-      "result": "Abs",
+      "result": "Absorbance",
       "testCode": "TestCode"
     }
   },

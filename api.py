@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -489,7 +490,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "name must be alphanumeric/dash/underscore only"})
             return
         try:
-            result = mgr.create_analyzer(name, template, port)
+            # Connecting the current mock container to a new Docker network can
+            # tear down the in-flight HTTP socket. Return the API response first,
+            # then attach the mock container asynchronously.
+            result = mgr.create_analyzer(name, template, port, connect_mock=False)
         except Exception as e:
             error_str = str(e)
             if "Conflict" in error_str or "already exists" in error_str:
@@ -504,6 +508,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(201, result)
+        threading.Thread(
+            target=mgr.connect_mock_to_analyzer,
+            args=(name,),
+            daemon=True,
+        ).start()
 
     # ── Helpers ──────────────────────────────────────────────────
 

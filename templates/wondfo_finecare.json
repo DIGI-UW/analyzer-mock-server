@@ -15,7 +15,7 @@
   },
   "file_config": {
     "format": "CSV",
-    "delimiter": ",",
+    "delimiter": ";",
     "has_header": true,
     "skipRows": 1,
     "column_mapping": {
@@ -27,7 +27,7 @@
   "fixture": {
     "file": "fixtures/wondfo-finecare/results.csv",
     "format": "CSV",
-    "delimiter": ",",
+    "delimiter": ";",
     "skipRows": 1,
     "column_mapping": {
       "sampleId": "Sample Number",

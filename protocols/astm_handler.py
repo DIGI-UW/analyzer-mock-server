@@ -6,8 +6,11 @@ Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
 import itertools
+import json
 import logging
+import os
 import random
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -34,6 +37,24 @@ def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -
     return f"DEV0126{lane_code}{seq:011d}"
 
 logger = logging.getLogger(__name__)
+
+
+# region agent log
+def _debug_log(message: str, data: Dict[str, Any], hypothesis_id: str) -> None:
+    try:
+        with open("/home/ubuntu/openelis-madagascar-distro/.cursor/debug-0246c3.log", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "sessionId": "0246c3",
+                "runId": "mock-postfix",
+                "hypothesisId": hypothesis_id,
+                "location": "OpenELIS-Global-2/tools/analyzer-mock-server/protocols/astm_handler.py",
+                "message": message,
+                "data": data,
+                "timestamp": int(time.time() * 1000),
+            }) + "\n")
+    except Exception:
+        pass
+# endregion
 
 STX = b"\x02"
 ETX = b"\x03"
@@ -454,8 +475,20 @@ class ASTMHandler(BaseHandler):
         if explicit_sample_id:
             sample_id = explicit_sample_id
         else:
-            prefix = test_sample.get("id", "SAMPLE")
-            sample_id = _next_astm_sample_id(prefix)
+            lane_code = str(test_sample.get("id", "10"))
+            sample_id = _next_astm_sample_id(lane_code)
+        # region agent log
+        _debug_log(
+            "astm sample id selected",
+            {
+                "explicitSampleId": explicit_sample_id,
+                "templateSampleId": test_sample.get("id"),
+                "generatedSampleId": sample_id,
+                "hasDash": "-" in sample_id,
+            },
+            "P1",
+        )
+        # endregion
         patient_name = kwargs.get("patient_name") or test_patient.get("name")
         patient_dob = kwargs.get("patient_dob") or test_patient.get("dob")
         patient_sex = kwargs.get("patient_sex") or test_patient.get("sex")

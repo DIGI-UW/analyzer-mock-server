@@ -29,6 +29,7 @@ def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -
 
 logger = logging.getLogger(__name__)
 
+
 STX = b"\x02"
 ETX = b"\x03"
 CR = b"\x0D"

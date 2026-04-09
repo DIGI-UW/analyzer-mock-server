@@ -66,7 +66,37 @@ class AnalyzerNetworkManager:
                 raise
         return self._docker
 
-    def create_analyzer(self, name: str, template_name: str, port: int = 0) -> dict:
+    def _select_subnet_id(self, name: str) -> int:
+        """Choose a stable subnet id, skipping any already in use."""
+        normalized = name.lower()
+        for key, subnet_id in FIXED_SUBNETS.items():
+            if key in normalized:
+                return subnet_id
+
+        subnet_id = self._next_dynamic_subnet
+        while self._subnet_in_use(subnet_id):
+            subnet_id += 1
+        self._next_dynamic_subnet = subnet_id + 1
+        return subnet_id
+
+    def _subnet_in_use(self, subnet_id: int) -> bool:
+        target = f"10.42.{subnet_id}.0/24"
+        try:
+            for network in self.docker.networks.list():
+                config = network.attrs.get("IPAM", {}).get("Config", [])
+                if any(entry.get("Subnet") == target for entry in config):
+                    return True
+        except Exception as err:
+            logger.warning("Failed to inspect existing Docker subnets: %s", err)
+        return False
+
+    def create_analyzer(
+        self,
+        name: str,
+        template_name: str,
+        port: int = 0,
+        connect_mock: bool = True,
+    ) -> dict:
         """Create a Docker network for a mock analyzer.
 
         Args:
@@ -80,12 +110,7 @@ class AnalyzerNetworkManager:
         if name in self._analyzers:
             return self._analyzers[name]
 
-        # Use fixed subnet if defined, otherwise allocate dynamically
-        if name in FIXED_SUBNETS:
-            subnet_id = FIXED_SUBNETS[name]
-        else:
-            subnet_id = self._next_dynamic_subnet
-            self._next_dynamic_subnet += 1
+        subnet_id = self._select_subnet_id(name)
 
         subnet = f"10.42.{subnet_id}.0/24"
         analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"
@@ -113,7 +138,7 @@ class AnalyzerNetworkManager:
                     raise
 
             # Connect mock container (skip if already connected)
-            if self._mock_container:
+            if connect_mock and self._mock_container:
                 try:
                     network.connect(self._mock_container, ipv4_address=analyzer_ip)
                     logger.info("Connected mock (%s) to %s at %s",
@@ -150,6 +175,34 @@ class AnalyzerNetworkManager:
         except Exception as e:
             logger.error("Failed to create analyzer network %s: %s", name, e)
             raise
+
+    def connect_mock_to_analyzer(self, name: str) -> bool:
+        """Attach the running mock container to an existing analyzer network."""
+        info = self._analyzers.get(name)
+        if not info or not self._mock_container:
+            return False
+
+        try:
+            network = self.docker.networks.get(info["network"])
+            network.connect(self._mock_container, ipv4_address=info["ip"])
+            logger.info(
+                "Connected mock (%s) to %s at %s",
+                self._mock_container,
+                info["network"],
+                info["ip"],
+            )
+            return True
+        except Exception as conn_err:
+            if "already" in str(conn_err).lower():
+                logger.info("Mock already connected to %s", info["network"])
+                return True
+            logger.warning(
+                "Failed to connect mock (%s) to %s: %s",
+                self._mock_container,
+                info["network"],
+                conn_err,
+            )
+            return False
 
     def remove_analyzer(self, name: str) -> bool:
         """Remove an analyzer's Docker network.

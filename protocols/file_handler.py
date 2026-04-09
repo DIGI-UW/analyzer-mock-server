@@ -6,15 +6,27 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T083–T086.
 
 import csv
 import io
+import itertools
 import logging
 import os
 import random
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .accession import validate_accession
 from .base_handler import BaseHandler
 
 logger = logging.getLogger(__name__)
+
+_file_sample_lock = threading.Lock()
+_file_sample_counter = itertools.count(1)
+
+
+def _next_file_sample_id() -> str:
+    with _file_sample_lock:
+        n = next(_file_sample_counter)
+    return validate_accession(f"DEV012699{n:011d}", "FILE generated accession")
 
 
 def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -86,7 +98,7 @@ class FileHandler(BaseHandler):
             w.writerow(header)
 
         for i in range(sample_count):
-            sid = sample_id or f"S{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+            sid = validate_accession(sample_id, "FILE sample_id override") if sample_id else _next_file_sample_id()
             for f in fields:
                 w.writerow([sid, f.get("code", f.get("name")), _random_value(f), ts])
 

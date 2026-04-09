@@ -5,23 +5,17 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T072–T073.
 Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
-import itertools
-import json
 import logging
-import os
 import random
-import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from .accession import next_site_year_num, validate_accession
 from .base_handler import BaseHandler
 
 # Sequential sample ID generator — shared with HL7 handler pattern.
-_astm_sample_counters: Dict[str, itertools.count] = {}
-
-
-MAX_SAMPLE_ID_LEN = 20  # OE analyzer_results.accession_number is varchar(20)
+_astm_sample_counters: Dict[str, Any] = {}
 
 
 def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -> str:
@@ -31,30 +25,10 @@ def _next_astm_sample_id(lane_code: str, timestamp: Optional[datetime] = None) -
     Matches the harness site prefix (DEV01) + 2-digit year (26).
     Total length: exactly 20 chars (OE SiteYearNum requirement).
     """
-    if lane_code not in _astm_sample_counters:
-        _astm_sample_counters[lane_code] = itertools.count(1)
-    seq = next(_astm_sample_counters[lane_code])
-    return f"DEV0126{lane_code}{seq:011d}"
+    return next_site_year_num(_astm_sample_counters, lane_code, "ASTM template testSample.id")
 
 logger = logging.getLogger(__name__)
 
-
-# region agent log
-def _debug_log(message: str, data: Dict[str, Any], hypothesis_id: str) -> None:
-    try:
-        with open("/home/ubuntu/openelis-madagascar-distro/.cursor/debug-0246c3.log", "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "sessionId": "0246c3",
-                "runId": "mock-postfix",
-                "hypothesisId": hypothesis_id,
-                "location": "OpenELIS-Global-2/tools/analyzer-mock-server/protocols/astm_handler.py",
-                "message": message,
-                "data": data,
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-# endregion
 
 STX = b"\x02"
 ETX = b"\x03"
@@ -201,7 +175,9 @@ def _build_astm_message(
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
     if not sample_id:
-        sample_id = f"SAMPLE-{now.strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+        # Legacy generate_astm_message() and similar call paths omit sample_id; mint a valid accession.
+        sample_id = _next_astm_sample_id("00", now)
+    sample_id = validate_accession(sample_id, "ASTM sample_id")
     if not patient_name:
         first_names = ["John", "Mary", "James", "Sarah", "Robert", "Emily"]
         last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones"]
@@ -321,7 +297,7 @@ def _build_qc_message(
     if not qc_config:
         return ""
 
-    qc_id = qc_config.get("id", f"QC-{random.randint(1000, 9999)}")
+    qc_id = validate_accession(qc_config.get("id"), "ASTM qcSample.id")
     action_code = qc_config.get("actionCode", "Q")
 
     # Build QC-specific field overrides
@@ -381,21 +357,26 @@ def _build_qc_astm_message(
             3.5 = exactly 3.5 SD above target (triggers 1₃ₛ rejection).
             SD is estimated as a percentage of target (5% hematology, 10% molecular).
     """
-    # SD estimates as percentage of mean, matching generate_analyzer_sql.py
     SD_PCT = {
-        "HEMATOLOGY": 0.05, "CHEMISTRY": 0.05,
-        "MOLECULAR": 0.10, "COAGULATION": 0.08, "IMMUNOLOGY": 0.10,
+        "HEMATOLOGY": 0.05,
+        "CHEMISTRY": 0.05,
+        "MOLECULAR": 0.10,
+        "COAGULATION": 0.08,
+        "IMMUNOLOGY": 0.10,
     }
     sd_pct = SD_PCT.get(category, 0.05)
 
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d%H%M%S")
-    qc_sample_id = f"QC-{timestamp}"
+    qc_sample_id = _next_astm_sample_id("98", now)
 
+    # O-record matches GenericASTM: O.3 = specimen/accession (first ^ component), O.12 = Q (index 11).
+    # Same padding pattern as OE GenericASTMIntegrationTest (26-field O with Q at index 11).
+    o_qc = f"O|1|{qc_sample_id}|||||||||Q|||||||||||||"
     segments = [
         f"H|\\^&|||{analyzer_name}|||||||LIS2-A2|{timestamp}",
-        f"P|1||QC-CTRL-001|QC^Control||U|19000101",
-        f"O|1|{qc_sample_id}^LAB|QC^QC Panel||{timestamp}",
+        f"P|1||QCCTRL001|QC^Control||U|19000101",
+        o_qc,
     ]
 
     seq = 1
@@ -405,26 +386,26 @@ def _build_qc_astm_message(
         if not ctrl:
             continue
 
-        lot    = ctrl.get("lot_number", f"LOT-{code}-N")
-        level  = ctrl.get("level", "N")
+        lot = ctrl.get("lot_number", f"LOT-{code}-N")
+        level = ctrl.get("level", "N")
         target = ctrl.get("target")
         if target is None:
             target = field.get("seedValue") or _generate_value(field, use_seed=True)
-        unit         = field.get("unit", "")
+        unit = field.get("unit", "")
         normal_range = field.get("normalRange", "")
 
-        # Apply deviation or realistic scatter
-        sd = target * sd_pct if target else 0
-        if deviation is not None and target:
-            # Fixed deviation: shift by exactly N standard deviations
-            value = round(target + (deviation * sd), 2)
-        elif target and sd > 0:
-            # Normal operation: random scatter within ~±1.5 SD (realistic instrument noise)
-            value = round(random.gauss(target, sd), 2)
+        try:
+            target_num = float(target)
+        except (TypeError, ValueError):
+            target_num = 0.0
+        sd = abs(target_num) * sd_pct if target_num else 0.0
+        if deviation is not None and target_num:
+            value = round(target_num + (deviation * sd), 2)
+        elif target_num and sd > 0:
+            value = round(random.gauss(target_num, sd), 2)
         else:
             value = target
 
-        # Clamp to 0 — physical measurements can't be negative
         if isinstance(value, (int, float)) and value < 0:
             value = 0.0
 
@@ -473,22 +454,10 @@ class ASTMHandler(BaseHandler):
         # Generate unique sequential sample ID (like a real analyzer)
         explicit_sample_id = kwargs.get("sample_id")
         if explicit_sample_id:
-            sample_id = explicit_sample_id
+            sample_id = validate_accession(explicit_sample_id, "ASTM sample_id override")
         else:
-            lane_code = str(test_sample.get("id", "10"))
+            lane_code = test_sample.get("id") or "00"
             sample_id = _next_astm_sample_id(lane_code)
-        # region agent log
-        _debug_log(
-            "astm sample id selected",
-            {
-                "explicitSampleId": explicit_sample_id,
-                "templateSampleId": test_sample.get("id"),
-                "generatedSampleId": sample_id,
-                "hasDash": "-" in sample_id,
-            },
-            "P1",
-        )
-        # endregion
         patient_name = kwargs.get("patient_name") or test_patient.get("name")
         patient_dob = kwargs.get("patient_dob") or test_patient.get("dob")
         patient_sex = kwargs.get("patient_sex") or test_patient.get("sex")

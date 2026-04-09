@@ -349,10 +349,12 @@ python server.py --push tcp://localhost:12000 --template horiba_pentra60 --qc --
 
 ### ASTM QC Message Structure
 
+`generate_qc` / `--qc` mints a **SiteYearNum** specimen ID on lane `98`, pads the O-record so **O.12 = Q** (GenericASTM), and emits R+Q pairs. Patient line below uses a non-accession placeholder ID only.
+
 ```
 H|\^&|||ABX^PENTRA60^V2.0|||||||LIS2-A2|20260320150301    ← Header (analyzer ID)
-P|1||QC-CTRL-001|QC^Control||U|19000101                   ← Patient (placeholder)
-O|1|QC-20260320150301^LAB|QC^QC Panel||20260320150301      ← Order (sample ID)
+P|1||QCCTRL001|QC^Control||U|19000101                    ← Patient (not the lab accession)
+O|1|DEV01269800000000001|||||||||Q|||||||||||||           ← O.3 accession; O.12=Q
 R|1|^^^WBC|5.55|10^3/uL|4.0-10.0|N||F|20260320150301      ← Result (measurement)
 Q|1|WBC^LOT-WBC-N^N|5.55|10^3/uL|20260320150301           ← QC metadata (lot + level)
 R|2|^^^RBC|5.02|10^6/uL|4.0-5.5|N||F|20260320150301
@@ -459,6 +461,12 @@ tools/astm-mock-server/
 
 **New in M4**: The simulator now supports HL7 v2.x, RS232 serial, and file-based protocols in addition to ASTM.
 
+### Accession contract (mock)
+
+- **Emitted** specimen/accession values are **SiteYearNum**: `DEV01` + 15 digits (20 characters), validated at generation time.
+- **Templates** use `testSample.id` as a **two-digit lane code** to mint IDs (HL7/ASTM), except `qcSample.id` which must be a **full** accession string.
+- **Overrides** (`sampleId` query/body) must already be a valid SiteYearNum when provided.
+
 ### HL7 v2.x Simulation
 
 Generate HL7 ORU^R01 result messages via HTTP API:
@@ -467,13 +475,13 @@ Generate HL7 ORU^R01 result messages via HTTP API:
 # Start simulate API server
 python server.py --simulate-api-port 8081
 
-# Generate HL7 message (GET)
-curl "http://localhost:8081/simulate/hl7/mindray_bc5380?patientId=P001&sampleId=S001"
+# Generate HL7 message (GET) — sampleId must be a valid SiteYearNum if set
+curl "http://localhost:8081/simulate/hl7/mindray_bc5380?patientId=P001&sampleId=DEV01264000000000001"
 
 # Generate HL7 message (POST with JSON)
 curl -X POST http://localhost:8081/simulate/hl7/sysmex_xn \
   -H "Content-Type: application/json" \
-  -d '{"patientId":"P001","sampleId":"S001","tests":["WBC","RBC"]}'
+  -d '{"patientId":"P001","sampleId":"DEV01264000000000001","tests":["WBC","RBC"]}'
 ```
 
 **Available HL7 Templates**: `mindray_bc5380`, `sysmex_xn`, `abbott_architect_hl7`, `mindray_bs360e`, `genexpert`

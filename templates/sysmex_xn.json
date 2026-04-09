@@ -23,5 +23,15 @@
     { "name": "MCH", "code": "785-6", "type": "NUMERIC", "unit": "pg", "normalRange": "27-33" },
     { "name": "MCHC", "code": "786-4", "type": "NUMERIC", "unit": "g/dL", "normalRange": "32-36" },
     { "name": "RDW", "code": "788-0", "type": "NUMERIC", "unit": "%", "normalRange": "11.5-14.5" }
-  ]
+  ],
+  "testPatient": {
+    "id": "PAT005",
+    "name": "RAKOTO^ALAIN",
+    "sex": "M",
+    "dob": "19840115"
+  },
+  "testSample": {
+    "id": "46",
+    "type": "CBC^COMPLETE BLOOD COUNT"
+  }
 }

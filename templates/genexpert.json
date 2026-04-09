@@ -17,5 +17,15 @@
     { "name": "MTB", "code": "MTB", "type": "QUALITATIVE", "possibleValues": ["Detected", "Not Detected", "Invalid"] },
     { "name": "RIF", "code": "RIF", "type": "QUALITATIVE", "possibleValues": ["Resistant", "Sensitive", "Indeterminate"] },
     { "name": "Ct", "code": "CT", "type": "NUMERIC", "unit": "Ct" }
-  ]
+  ],
+  "testPatient": {
+    "id": "PAT-GX-HL7",
+    "name": "Rakoto^Jean^A",
+    "sex": "M",
+    "dob": "19850315"
+  },
+  "testSample": {
+    "id": "10",
+    "type": "ORH^Other"
+  }
 }

@@ -19,7 +19,7 @@ STRICT_013_OVERLAYS: Dict[str, Dict[str, Any]] = {
         "model": "BC-5380",
         "sending_facility": "BC-5380",
         "testPatient": {"id": "PAT001", "name": "DOE^JOHN", "sex": "M", "dob": "19800115"},
-        "testSample": {"id": "PLACER123", "type": "CBC^COMPLETE BLOOD COUNT"},
+        "testSample": {"id": "40", "type": "CBC^COMPLETE BLOOD COUNT"},
         "seed_values": {
             "WBC": 7.5,
             "RBC": 4.82,
@@ -40,7 +40,7 @@ STRICT_013_OVERLAYS: Dict[str, Dict[str, Any]] = {
         "model": "BS-200",
         "sending_facility": "BS-200",
         "testPatient": {"id": "PAT003", "name": "RABE^FARA", "sex": "M", "dob": "19750810"},
-        "testSample": {"id": "PLACER201", "type": "CHEM^CHEMISTRY PANEL"},
+        "testSample": {"id": "41", "type": "CHEM^CHEMISTRY PANEL"},
         "seed_values": {
             "GLU": 92,
             "CREA": 1.1,
@@ -56,7 +56,7 @@ STRICT_013_OVERLAYS: Dict[str, Dict[str, Any]] = {
         "model": "BS-300",
         "sending_facility": "BS-300",
         "testPatient": {"id": "PAT004", "name": "NIRINA^HERY", "sex": "F", "dob": "19880305"},
-        "testSample": {"id": "PLACER301", "type": "CHEM^CHEMISTRY PANEL"},
+        "testSample": {"id": "42", "type": "CHEM^CHEMISTRY PANEL"},
         "seed_values": {
             "GLU": 88,
             "CREA": 0.8,
@@ -125,7 +125,7 @@ def load_strict_013_profile_template(template_name: str) -> Optional[Dict[str, A
         },
         "fields": fields,
         "testPatient": overlay.get("testPatient", {"id": "PAT001", "name": "DOE^JANE", "sex": "F", "dob": "19860720"}),
-        "testSample": overlay.get("testSample", {"id": "PLACER001", "type": "CHEM^CHEMISTRY PANEL"}),
+        "testSample": overlay.get("testSample", {"id": "43", "type": "CHEM^CHEMISTRY PANEL"}),
     }
 
 

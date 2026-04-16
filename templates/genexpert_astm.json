@@ -26,7 +26,7 @@
         {
             "code": "MTB-RIF",
             "name": "Xpert MTB/RIF",
-            "loinc": "23826-1",
+            "loinc": "85362-2",
             "type": "QUALITATIVE",
             "possibleValues": [
                 "POSITIVE",

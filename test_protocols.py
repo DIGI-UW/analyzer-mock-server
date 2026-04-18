@@ -62,6 +62,13 @@ class TestASTMGeneXpert(unittest.TestCase):
     def _generate(self, **kwargs):
         return self.handler.generate(self.template, use_seed=True, **kwargs)
 
+    def _generate_with_qc(self, **kwargs):
+        # Template sets enable_qc=false for the Madagascar harness demo flow.
+        # QC generation code path is still covered here via a per-test override.
+        t = deepcopy(self.template)
+        t.setdefault("astm_config", {})["enable_qc"] = True
+        return self.handler.generate(t, use_seed=True, **kwargs)
+
     def _segments(self, msg, prefix):
         return [l for l in msg.strip().split("\n") if l.startswith(prefix)]
 
@@ -196,20 +203,25 @@ class TestASTMGeneXpert(unittest.TestCase):
     def test_qualitative_seed_value(self):
         msg = self._generate()
         r_lines = self._segments(msg, "R")
-        # First R-record (MTB-RIF) should have NEGATIVE seed
+        # First R-record (MTB-RIF) seed should be "NOT DETECTED" —
+        # aligns with Cepheid LIS spec 302-2261 vocabulary.
         r_fields = r_lines[0].split("|")
-        self.assertIn("NEGATIVE", r_fields[3])
+        self.assertIn("NOT DETECTED", r_fields[3])
 
     # --- QC message generation ---
+    # Template's runtime astm_config.enable_qc is false for the harness demo
+    # flow (interleaved QC trips up parts of the demo harness). These tests
+    # still cover the QC generation code path by overriding enable_qc=true
+    # on a per-test copy of the template.
 
     def test_qc_message_generated(self):
-        msg = self._generate()
+        msg = self._generate_with_qc()
         h_records = self._segments(msg, "H")
         # Should have 2 H-records: one for patient, one for QC
         self.assertEqual(len(h_records), 2, "Should generate patient + QC messages")
 
     def test_qc_action_code(self):
-        msg = self._generate()
+        msg = self._generate_with_qc()
         o_records = self._segments(msg, "O")
         # Second O-record (QC) should have Action Code "Q" at O.12
         self.assertTrue(len(o_records) >= 2, "Should have at least 2 O-records")
@@ -217,14 +229,14 @@ class TestASTMGeneXpert(unittest.TestCase):
         self.assertEqual(qc_o_fields[11], "Q")
 
     def test_qc_specimen_id(self):
-        msg = self._generate()
+        msg = self._generate_with_qc()
         o_records = self._segments(msg, "O")
         qc_o_fields = o_records[1].split("|")
         # O.3 should contain QC specimen ID
         self.assertIn("DEV01261000000000999", qc_o_fields[2])
 
     def test_qc_includes_all_template_fields(self):
-        msg = self._generate()
+        msg = self._generate_with_qc()
         # Split into patient msg and QC msg (second H starts QC)
         lines = msg.strip().split("\n")
         h_indices = [i for i, l in enumerate(lines) if l.startswith("H")]
@@ -234,6 +246,14 @@ class TestASTMGeneXpert(unittest.TestCase):
         # Template has 4 fields + 1 complementary = 5 R-records minimum
         self.assertGreaterEqual(len(qc_r_lines), 4,
                                 f"QC should include all template fields, got {len(qc_r_lines)} R-records")
+
+    def test_enable_qc_disabled_by_default_for_harness(self):
+        """Template must ship with enable_qc=false so harness demo flow
+        doesn't get interleaved QC messages it can't route."""
+        self.assertFalse(
+            self.template.get("astm_config", {}).get("enable_qc", False),
+            "genexpert_astm.json must keep enable_qc=false for the Madagascar harness demo flow",
+        )
 
     # --- proactive_enq config ---
 

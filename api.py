@@ -417,7 +417,21 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
 
     def _handle_fixture_file_post(self, template_name, template, fixture_cfg, target_dir, params):
-        """Copy a real fixture file to target_dir and return parsed metadata."""
+        """Deliver a fixture file.
+
+        Two delivery modes:
+
+        1. Bridge upload (production-parity): set ``bridge_upload.analyzer_id``
+           in the request body. The mock POSTs the fixture multipart to the
+           bridge's ``/admin/upload`` — identical to what a Madagascar lab tech
+           does via the bridge admin UI. When the file has no per-row test
+           code column, pass ``bridge_upload.test_code`` to declare it
+           (same UI field the tech fills in).
+
+        2. Watched-directory drop (legacy): set ``target_dir`` to a path
+           under ``/data/analyzer-imports``. Mock copies the fixture verbatim.
+           Preserved for tests that exercise the FileWatcher path directly.
+        """
         fixture_rel = fixture_cfg["file"]
         fixture_path = os.path.join(os.path.dirname(__file__), fixture_rel)
         if not os.path.isfile(fixture_path):
@@ -427,6 +441,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         # Parse metadata from the fixture
         metadata_results = parse_fixture(fixture_path, fixture_cfg)
 
+        # --- Mode 1: upload via bridge (production-parity) ---
+        bridge_upload = params.get("bridge_upload")
+        if bridge_upload:
+            return self._upload_fixture_to_bridge(
+                template_name, template, fixture_cfg, fixture_path, fixture_rel,
+                metadata_results, bridge_upload,
+            )
+
+        # --- Mode 2: watched-directory drop (legacy) ---
         written_path = None
         if target_dir:
             # Validate target_dir: resolve to real path to prevent path traversal.
@@ -457,6 +480,104 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "status": "completed",
             "template": template_name,
             "written_path": written_path,
+            "metadata": {
+                "analyzerName": template.get("analyzer", {}).get("name", template_name),
+                "format": fixture_cfg.get("format", "CSV"),
+                "fixture": fixture_rel,
+                "results": metadata_results,
+            },
+        })
+
+    def _upload_fixture_to_bridge(
+        self, template_name, template, fixture_cfg, fixture_path, fixture_rel,
+        metadata_results, bridge_upload,
+    ):
+        """POST the fixture to the bridge's /admin/upload endpoint.
+
+        Production-parity simulation: replays what a lab tech does in the
+        bridge admin upload UI — select analyzer, optionally declare test
+        code, upload file. The bridge's FileUploadController handles the
+        rest (including FileNameSelfDeclarationScanner for files whose
+        test code isn't declared explicitly).
+        """
+        analyzer_id = bridge_upload.get("analyzer_id")
+        if not analyzer_id:
+            self._send_json(400, {"error": "bridge_upload.analyzer_id is required"})
+            return
+        test_code = bridge_upload.get("test_code")
+        bridge_url = (bridge_upload.get("bridge_url")
+                      or os.environ.get("BRIDGE_URL")
+                      or "https://openelis-analyzer-bridge:8443")
+        bridge_user = (bridge_upload.get("bridge_user")
+                       or os.environ.get("BRIDGE_USER")
+                       or "bridge")
+        bridge_pass = (bridge_upload.get("bridge_pass")
+                       or os.environ.get("BRIDGE_PASS")
+                       or "changeme")
+
+        # Build multipart request. stdlib doesn't ship multipart encoder,
+        # so build the body manually — this matches what curl --form does.
+        import urllib.request, urllib.error, ssl, uuid as _uuid
+        boundary = f"----mock-server-{_uuid.uuid4().hex}"
+        with open(fixture_path, "rb") as f:
+            file_bytes = f.read()
+        ext = os.path.splitext(fixture_path)[1]
+        upload_filename = f"{template_name}-{_uuid.uuid4().hex[:8]}{ext}"
+
+        parts = []
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(b'Content-Disposition: form-data; name="analyzerId"\r\n\r\n')
+        parts.append(str(analyzer_id).encode() + b"\r\n")
+        if test_code:
+            parts.append(f"--{boundary}\r\n".encode())
+            parts.append(b'Content-Disposition: form-data; name="testCode"\r\n\r\n')
+            parts.append(test_code.encode() + b"\r\n")
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n".encode()
+        )
+        parts.append(file_bytes)
+        parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(parts)
+
+        upload_url = bridge_url.rstrip("/") + "/admin/upload"
+        req = urllib.request.Request(upload_url, data=body, method="POST")
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        req.add_header("Content-Length", str(len(body)))
+        import base64
+        auth = base64.b64encode(f"{bridge_user}:{bridge_pass}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+
+        # Bridge uses a self-signed cert in dev/test — accept it.
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
+                resp_body = resp.read().decode("utf-8", errors="replace")
+                resp_status = resp.status
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
+            resp_status = e.code
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Bridge upload failed for %s", template_name)
+            self._send_json(502, {"error": f"Bridge upload failed: {e}"})
+            return
+
+        logger.info(
+            "Uploaded fixture %s to bridge %s (analyzer %s, testCode=%s) — status %d",
+            fixture_rel, bridge_url, analyzer_id, test_code, resp_status,
+        )
+
+        self._send_json(200, {
+            "status": "uploaded",
+            "template": template_name,
+            "bridge_status": resp_status,
+            "bridge_response_preview": resp_body[:500],
+            "upload_filename": upload_filename,
             "metadata": {
                 "analyzerName": template.get("analyzer", {}).get("name", template_name),
                 "format": fixture_cfg.get("format", "CSV"),

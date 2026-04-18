@@ -28,10 +28,10 @@
     "file": "fixtures/multiskan-fc/results.csv",
     "format": "CSV",
     "delimiter": ";",
-    "skipRows": 1,
+    "skipRows": 0,
     "column_mapping": {
       "sampleId": "SampleID",
-      "result": "Absorbance",
+      "result": "Interpretation",
       "testCode": "TestCode"
     }
   },

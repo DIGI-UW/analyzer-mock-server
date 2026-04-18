@@ -36,7 +36,18 @@
     }
   },
   "fields": [
-    { "name": "TSH", "code": "TSH", "type": "NUMERIC", "unit": "mIU/L", "normalRange": "0.3-4.2" },
-    { "name": "β-hCG", "code": "β-hCG", "type": "NUMERIC", "unit": "mIU/mL" }
+    {
+      "name": "TSH",
+      "code": "TSH",
+      "type": "NUMERIC",
+      "unit": "mIU/L",
+      "normalRange": "0.3-4.2"
+    },
+    {
+      "name": "\u03b2-hCG",
+      "code": "\u03b2-hCG",
+      "type": "NUMERIC",
+      "unit": "mIU/mL"
+    }
   ]
 }

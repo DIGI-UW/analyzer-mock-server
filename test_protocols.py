@@ -419,6 +419,46 @@ class TestFileSimulateAPI(unittest.TestCase):
         else:
             self.assertIn("Sample Name", body.get("content", ""))
 
+    # ------------------------------------------------------------------
+    # Fixture drift guards: every FILE template whose fixture we own must
+    # still parse to non-empty metadata results. Catches mismatches between
+    # fixture column headers / delimiter / skipRows and the template's
+    # fixture.column_mapping — the exact class of bug that broke the
+    # Madagascar harness demo flow in CI.
+    # ------------------------------------------------------------------
+
+    def _assert_fixture_parses(self, template_name: str):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", f"/simulate/file/{template_name}")
+        resp = conn.getresponse()
+        body = json.loads(resp.read().decode("utf-8"))
+        conn.close()
+
+        self.assertEqual(resp.status, 200, f"{template_name}: HTTP {resp.status}")
+        self.assertEqual(body.get("status"), "generated")
+        self.assertIn("metadata", body, f"{template_name}: no metadata in response")
+        results = body["metadata"].get("results") or []
+        self.assertGreater(
+            len(results), 0,
+            f"{template_name}: parse_fixture returned 0 results — fixture/profile drift",
+        )
+        # Every returned result must carry sampleId + result at minimum
+        for r in results:
+            self.assertIn("sampleId", r, f"{template_name}: result missing sampleId: {r}")
+            self.assertIn("result", r, f"{template_name}: result missing value: {r}")
+
+    def test_fixture_parses_hain_fluorocycler(self):
+        self._assert_fixture_parses("hain_fluorocycler")
+
+    def test_fixture_parses_wondfo_finecare(self):
+        self._assert_fixture_parses("wondfo_finecare")
+
+    def test_fixture_parses_tecan_f50(self):
+        self._assert_fixture_parses("tecan_f50")
+
+    def test_fixture_parses_multiskan_fc(self):
+        self._assert_fixture_parses("multiskan_fc")
+
     def test_post_simulate_file_write_target_dir(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = json.dumps({"target_dir": tmpdir, "filename": "sim.csv"})

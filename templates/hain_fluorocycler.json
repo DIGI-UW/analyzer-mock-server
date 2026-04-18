@@ -76,11 +76,10 @@
     "file": "fixtures/fluorocycler-xt/results.xlsx",
     "format": "XLSX",
     "column_mapping": {
-      "sampleId": "SampleID",
-      "result": "CP",
-      "testCode": "TargetName"
+      "sampleId": "Sample ID",
+      "result": "Calc. Conc."
     },
-    "testCodeFilter": "VIH-1"
+    "perFileTestCode": "VIH-1"
   },
   "testSamples": [
     {

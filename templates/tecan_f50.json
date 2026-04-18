@@ -26,11 +26,11 @@
   "fixture": {
     "file": "fixtures/tecan-f50/results.csv",
     "format": "CSV",
-    "delimiter": ";",
+    "delimiter": ",",
     "skipRows": 0,
     "column_mapping": {
       "sampleId": "SampleID",
-      "result": "OD_450",
+      "result": "Interpretation",
       "testCode": "TestCode"
     }
   },

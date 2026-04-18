@@ -67,11 +67,19 @@ class AnalyzerNetworkManager:
         return self._docker
 
     def _select_subnet_id(self, name: str) -> int:
-        """Choose a stable subnet id, skipping any already in use."""
+        """Choose a stable subnet id, skipping any already in use.
+
+        FIXED_SUBNETS is matched by exact name only. Substring match would let
+        e.g. "demo-genexpert-site1" and "demo-genexpert-site2" both claim
+        subnet 20, causing Docker "Pool overlaps" errors on the second create.
+        When the fixed subnet is already in use (e.g. the caller is creating
+        a second instance of the same template), fall through to the dynamic
+        range.
+        """
         normalized = name.lower()
-        for key, subnet_id in FIXED_SUBNETS.items():
-            if key in normalized:
-                return subnet_id
+        fixed = FIXED_SUBNETS.get(normalized)
+        if fixed is not None and not self._subnet_in_use(fixed):
+            return fixed
 
         subnet_id = self._next_dynamic_subnet
         while self._subnet_in_use(subnet_id):

@@ -141,6 +141,65 @@ class TestAnalyzersAPI(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(body["name"], "my-analyzer")
 
+    def test_post_calls_create_with_connect_mock_false(self):
+        """The 201 response path creates the network synchronously but must
+        defer docker-attach so the HTTP caller doesn't wait for it."""
+        self.mock_mgr.create_analyzer.reset_mock()
+        status, _ = self._post_analyzers({"name": "async-1", "template": "t"})
+        self.assertEqual(status, 201)
+        self.mock_mgr.create_analyzer.assert_called_once()
+        _, kwargs = self.mock_mgr.create_analyzer.call_args
+        self.assertIs(kwargs.get("connect_mock"), False)
+
+    def test_post_invokes_connect_mock_after_response(self):
+        """The background thread must call connect_mock_to_analyzer(name).
+        Patch threading.Thread so the target runs synchronously and we can
+        assert on mgr.connect_mock_to_analyzer without a sleep race."""
+        self.mock_mgr.connect_mock_to_analyzer.reset_mock()
+        self.mock_mgr.connect_mock_to_analyzer.return_value = True
+
+        real_thread = threading.Thread
+
+        def _inline_thread(target=None, args=(), kwargs=None, daemon=None):
+            # Run synchronously in the current thread so the assertion below
+            # is deterministic. Return a thread-like object with start()=noop.
+            if target:
+                target(*args, **(kwargs or {}))
+            return MagicMock(start=lambda: None)
+
+        with patch("api.threading.Thread", side_effect=_inline_thread):
+            status, _ = self._post_analyzers({"name": "async-2", "template": "t"})
+
+        self.assertEqual(status, 201)
+        self.mock_mgr.connect_mock_to_analyzer.assert_called_once_with("async-2")
+        # Sanity: we patched api.threading.Thread, not the global one
+        self.assertIs(threading.Thread, real_thread)
+
+    def test_post_logs_when_connect_mock_raises(self):
+        """If connect_mock_to_analyzer raises, the error must be logged —
+        otherwise silent background failures leave analyzers created-but-
+        unreachable with no signal to the operator."""
+        self.mock_mgr.connect_mock_to_analyzer.reset_mock()
+        self.mock_mgr.connect_mock_to_analyzer.side_effect = RuntimeError(
+            "docker down"
+        )
+
+        def _inline_thread(target=None, args=(), kwargs=None, daemon=None):
+            if target:
+                target(*args, **(kwargs or {}))
+            return MagicMock(start=lambda: None)
+
+        # Patch the module logger directly (assertLogs misses cross-thread
+        # emissions from httpd's worker thread).
+        with patch("api.threading.Thread", side_effect=_inline_thread), \
+             patch("api.logger") as mock_logger:
+            status, _ = self._post_analyzers({"name": "async-3", "template": "t"})
+
+        self.assertEqual(status, 201)
+        mock_logger.exception.assert_called_once()
+        msg = mock_logger.exception.call_args[0][0]
+        self.assertIn("connect_mock_to_analyzer raised", msg)
+
     def test_post_valid_name_with_underscores_and_digits(self):
         status, _ = self._post_analyzers({"name": "analyzer_01", "template": "t"})
         self.assertEqual(status, 201)

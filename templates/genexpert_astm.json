@@ -19,22 +19,27 @@
         "receiver_id": "LIS",
         "specimen_descriptor": "ORH",
         "enable_isid": false,
-        "enable_qc": true,
+        "enable_qc": false,
         "proactive_enq": true
     },
     "fields": [
         {
             "code": "MTB-RIF",
             "name": "Xpert MTB/RIF",
-            "loinc": "23826-1",
+            "loinc": "85362-2",
             "type": "QUALITATIVE",
             "possibleValues": [
-                "POSITIVE",
-                "NEGATIVE",
+                "MTB DETECTED",
+                "NOT DETECTED",
+                "HIGH",
+                "MEDIUM",
+                "LOW",
+                "VERY LOW",
                 "INDETERMINATE",
-                "ERROR"
+                "ERROR",
+                "NO RESULT"
             ],
-            "seedQualitative": "NEGATIVE",
+            "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
         {
@@ -43,12 +48,11 @@
             "loinc": "46244-0",
             "type": "QUALITATIVE",
             "possibleValues": [
-                "Resistant",
-                "Sensitive",
-                "Indeterminate",
-                "N/A"
+                "DETECTED",
+                "NOT DETECTED",
+                "INDETERMINATE"
             ],
-            "seedQualitative": "Sensitive",
+            "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
         {
@@ -89,7 +93,7 @@
         "fields": [
             {
                 "code": "MTB-RIF",
-                "seedQualitative": "NEGATIVE"
+                "seedQualitative": "NOT DETECTED"
             }
         ]
     },

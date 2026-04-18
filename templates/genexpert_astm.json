@@ -31,13 +31,13 @@
             "possibleValues": [
                 "MTB DETECTED",
                 "NOT DETECTED",
-                "High",
-                "Medium",
-                "Low",
-                "Very Low",
-                "Indeterminate",
-                "Error",
-                "No Result"
+                "HIGH",
+                "MEDIUM",
+                "LOW",
+                "VERY LOW",
+                "INDETERMINATE",
+                "ERROR",
+                "NO RESULT"
             ],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"
@@ -50,7 +50,7 @@
             "possibleValues": [
                 "DETECTED",
                 "NOT DETECTED",
-                "Indeterminate"
+                "INDETERMINATE"
             ],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"

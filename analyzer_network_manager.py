@@ -91,7 +91,11 @@ class AnalyzerNetworkManager:
         target = f"10.42.{subnet_id}.0/24"
         try:
             for network in self.docker.networks.list():
-                config = network.attrs.get("IPAM", {}).get("Config", [])
+                # IPAM.Config can be explicitly null (not just missing) when
+                # a network was created without an address pool — `or []`
+                # handles that case so the iteration doesn't blow up with
+                # "'NoneType' object is not iterable".
+                config = network.attrs.get("IPAM", {}).get("Config") or []
                 if any(entry.get("Subnet") == target for entry in config):
                     return True
         except Exception as err:

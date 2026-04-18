@@ -508,11 +508,22 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(201, result)
-        threading.Thread(
-            target=mgr.connect_mock_to_analyzer,
-            args=(name,),
-            daemon=True,
-        ).start()
+
+        # Fire-and-forget docker attach. Wrap in a logger so failures are
+        # visible — otherwise the analyzer ends up created-but-unreachable
+        # with no signal to the caller.
+        def _connect_and_log():
+            try:
+                if not mgr.connect_mock_to_analyzer(name):
+                    logger.warning(
+                        "connect_mock_to_analyzer returned False for %s", name
+                    )
+            except Exception as err:  # noqa: BLE001 — background thread
+                logger.exception(
+                    "connect_mock_to_analyzer raised for %s: %s", name, err
+                )
+
+        threading.Thread(target=_connect_and_log, daemon=True).start()
 
     # ── Helpers ──────────────────────────────────────────────────
 

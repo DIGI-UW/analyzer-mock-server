@@ -117,7 +117,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, source_ip, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE",
                     "GET /analyzers": "List active mock analyzers",
@@ -306,6 +306,9 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         params = body or {}
         count = min(max(int(params.get("count", 1)), 1), 100)
         destination = params.get("destination")
+        source_ip = params.get("source_ip")
+        qc_mode = bool(params.get("qc"))
+        qc_deviation = params.get("qc_deviation")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
@@ -316,10 +319,20 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         handler = ASTMHandler()
 
         for i in range(count):
-            msg = handler.generate(template, **gen_kwargs)
+            if qc_mode:
+                qc_kwargs = {}
+                if qc_deviation is not None:
+                    qc_kwargs["deviation"] = float(qc_deviation)
+                try:
+                    msg = handler.generate_qc(template, **qc_kwargs)
+                except ValueError as e:
+                    self._send_json(400, {"error": str(e)})
+                    return
+            else:
+                msg = handler.generate(template, **gen_kwargs)
             pushed = False
             if destination:
-                pushed = push_astm_to_destination(destination, msg)
+                pushed = push_astm_to_destination(destination, msg, source_ip=source_ip)
                 if pushed:
                     success_count += 1
             results.append({
@@ -333,8 +346,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "status": "completed",
             "template": template_name,
             "count": count,
+            "qc": qc_mode,
             "pushed": success_count if destination else None,
             "destination": destination,
+            "source_ip": source_ip,
             "results": results,
         })
 

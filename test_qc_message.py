@@ -109,5 +109,123 @@ class QCMessageContract(unittest.TestCase):
                       f"Expected GeneXpert identifier in H-record, got: {h_records[0]}")
 
 
+class FileQCMessageContract(unittest.TestCase):
+    """Test B — FILE (QuantStudio) generate_qc emission contract.
+
+    QuantStudio FILE profile qcRules (OE side):
+      - SPECIMEN_ID_PREFIX operand=QC → row Sample Name must start with "QC-"
+      - FIELD_EQUALS targetField=QC_TASK operand=STANDARD → Task column must equal STANDARD
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from protocols.file_handler import FileHandler
+        cls.handler = FileHandler()
+        cls.template = _load_template("quantstudio5")
+
+    def _rows(self, content: str):
+        lines = [r for r in content.split("\n") if r.strip()]
+        header = lines[0].split(",")
+        return header, [dict(zip(header, line.split(","))) for line in lines[1:]]
+
+    def test_qc_rows_have_qc_sample_id_prefix(self):
+        content = self.handler.generate_qc(self.template, deviation=0)
+        _, rows = self._rows(content)
+        self.assertGreaterEqual(len(rows), 2, "Expected LPC + HPC rows")
+        for row in rows:
+            sample_name = row.get("Sample Name", "")
+            self.assertTrue(sample_name.startswith("QC-"),
+                            f"Expected QC- prefix, got: {sample_name}")
+
+    def test_qc_task_column_equals_standard(self):
+        content = self.handler.generate_qc(self.template, deviation=0)
+        _, rows = self._rows(content)
+        for row in rows:
+            self.assertEqual(row.get("Task"), "STANDARD",
+                             f"Expected Task=STANDARD, got: {row.get('Task')}")
+
+    def test_deviation_zero_emits_target_value(self):
+        # LPC target=32.0 sd=0.5 → at deviation=0, value should be 32.0.
+        content = self.handler.generate_qc(self.template, deviation=0)
+        _, rows = self._rows(content)
+        lpc = next(r for r in rows if "LPC" in r["Sample Name"])
+        self.assertAlmostEqual(float(lpc["Quantity Mean"]), 32.0, places=1)
+
+    def test_deviation_3_emits_target_plus_3_sd(self):
+        # LPC target=32.0 sd=0.5 → deviation=3.0 → 33.5 (per fixture README math)
+        content = self.handler.generate_qc(self.template, deviation=3.0)
+        _, rows = self._rows(content)
+        lpc = next(r for r in rows if "LPC" in r["Sample Name"])
+        self.assertAlmostEqual(float(lpc["Quantity Mean"]), 33.5, places=1)
+
+    def test_no_qc_controls_raises(self):
+        bad_template = {"analyzer": {"name": "X"}, "fields": [{"name": "f"}]}
+        with self.assertRaises(ValueError):
+            self.handler.generate_qc(bad_template, deviation=0)
+
+
+class HL7QCMessageContract(unittest.TestCase):
+    """Test C — HL7 (Mindray BS-200) generate_qc emission contract.
+
+    Mindray HL7 profile qcRule (OE side):
+      - SPECIMEN_ID_PREFIX operand=QC → OBR-3 (Filler/Specimen ID) must start with "QC-"
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from protocols.hl7_handler import HL7Handler
+        cls.handler = HL7Handler()
+        cls.template = _load_template("mindray_bs200")
+
+    def _segments(self, msg: str):
+        return [s for s in msg.split("\r") if s.strip()]
+
+    def test_obr_3_starts_with_qc_prefix(self):
+        msg = self.handler.generate_qc(self.template, deviation=0)
+        obr = next(s for s in self._segments(msg) if s.startswith("OBR|"))
+        fields = obr.split("|")
+        self.assertTrue(fields[3].startswith("QC-"),
+                        f"Expected OBR-3 to start with QC-, got: {fields[3]}")
+
+    def test_obx_11_is_control_status(self):
+        msg = self.handler.generate_qc(self.template, deviation=0)
+        obx_records = [s for s in self._segments(msg) if s.startswith("OBX|")]
+        self.assertGreaterEqual(len(obx_records), 1)
+        # OBX-11 is 1-indexed field 11 = 0-indexed array index 11 (after split on |).
+        for obx in obx_records:
+            fields = obx.split("|")
+            self.assertEqual(fields[11], "C",
+                             f"Expected OBX-11=C, got: {fields[11]} in {obx}")
+
+    def test_obx_3_components_carry_field_lot_level(self):
+        msg = self.handler.generate_qc(self.template, deviation=0)
+        obx = next(s for s in self._segments(msg) if s.startswith("OBX|"))
+        fields = obx.split("|")
+        # OBX-3 format: ^^^code^lot^level — components 4, 5, 6 of the ^-split.
+        components = fields[3].split("^")
+        self.assertEqual(components[3], "GLU", f"Expected field code GLU, got: {components}")
+        self.assertEqual(components[4], "LOT-GLU-N", f"Expected lot LOT-GLU-N, got: {components}")
+        self.assertEqual(components[5], "NORMAL", f"Expected level NORMAL, got: {components}")
+
+    def test_deviation_zero_emits_target_value(self):
+        # GLU target=100, sd=5 → at deviation=0, value should be 100.0.
+        msg = self.handler.generate_qc(self.template, deviation=0)
+        obx = next(s for s in self._segments(msg) if s.startswith("OBX|"))
+        fields = obx.split("|")
+        self.assertAlmostEqual(float(fields[5]), 100.0, places=1)
+
+    def test_deviation_3_5_emits_target_plus_3_5_sd(self):
+        # GLU target=100, sd=5 → deviation=3.5 → 117.5 (1₃ₛ rejection territory)
+        msg = self.handler.generate_qc(self.template, deviation=3.5)
+        obx = next(s for s in self._segments(msg) if s.startswith("OBX|"))
+        fields = obx.split("|")
+        self.assertAlmostEqual(float(fields[5]), 117.5, places=1)
+
+    def test_no_qc_controls_raises(self):
+        bad_template = {"protocol": {"type": "HL7"}, "analyzer": {"name": "X"}}
+        with self.assertRaises(ValueError):
+            self.handler.generate_qc(bad_template, deviation=0)
+
+
 if __name__ == "__main__":
     unittest.main()

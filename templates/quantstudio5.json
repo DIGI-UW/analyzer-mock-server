@@ -34,5 +34,27 @@
   "fields": [
     { "name": "VIH-1", "code": "VIH-1", "type": "NUMERIC", "unit": "copies/mL" },
     { "name": "Internal Control", "code": "IC", "type": "NUMERIC", "unit": "" }
+  ],
+  "qc_controls": [
+    {
+      "field_code": "VIH-1",
+      "lot_number": "LOT-LPC-26B",
+      "level": "LPC",
+      "level_name": "Low Positive Control",
+      "target": 32.00,
+      "sd": 0.50,
+      "unit": "Ct",
+      "task": "STANDARD"
+    },
+    {
+      "field_code": "VIH-1",
+      "lot_number": "LOT-HPC-26B",
+      "level": "HPC",
+      "level_name": "High Positive Control",
+      "target": 25.00,
+      "sd": 0.40,
+      "unit": "Ct",
+      "task": "STANDARD"
+    }
   ]
 }

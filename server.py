@@ -1056,6 +1056,16 @@ def main():
              'Examples: 0=exact target, 2.5=warning (1₂ₛ), 3.5=rejection (1₃ₛ), -3.5=below target'
     )
     parser.add_argument(
+        '--source-ip',
+        default=None,
+        metavar='IP',
+        help='Local IP to bind the outgoing TCP socket to. The mock has '
+             'multiple Docker network interfaces (one per registered '
+             'analyzer); the bridge identifies analyzers by source IP, so '
+             'multi-analyzer setups must specify this to route correctly. '
+             'Example: --source-ip 10.42.20.10 for the genexpert network.'
+    )
+    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='Print the generated ASTM message without sending it. Works with --push, --qc, --template.'
@@ -1292,7 +1302,7 @@ def main():
                         logger.error("Failed to generate message")
                         time.sleep(args.push_interval)
                         continue
-                    if push_astm_to_destination(args.push, message):
+                    if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
                         success_count += 1
                     else:
                         logger.warning(f"Push #{total_pushed} failed")
@@ -1308,7 +1318,7 @@ def main():
                 if not message:
                     logger.error("Failed to generate message")
                     continue
-                if push_astm_to_destination(args.push, message):
+                if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
                     success_count += 1
                 else:
                     logger.warning(f"Push {i+1} failed")

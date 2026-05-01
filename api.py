@@ -115,11 +115,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "endpoints": {
                     "GET /health": "Health check",
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
-                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count)",
+                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, source_ip, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
-                    "POST /simulate/file/{template}": "Generate + write FILE",
+                    "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, bridge_upload, filename, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
                     "POST /analyzers": "Create mock analyzer with unique network+IP",
                     "DELETE /analyzers/{name}": "Remove mock analyzer",
@@ -182,6 +182,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "tests": params.get("tests"),
                 "destination": params.get("destination"),
                 "count": params.get("count", 1),
+                "qc": params.get("qc"),
+                "qc_deviation": params.get("qc_deviation"),
             }
             self._handle_hl7(analyzer, kwargs)
             return
@@ -229,15 +231,28 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         try:
             destination = kwargs.get("destination")
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
+            qc_mode = bool(kwargs.get("qc"))
+            qc_deviation = kwargs.get("qc_deviation")
 
             gen_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("patient_id", "sample_id", "tests") and v is not None}
             results = []
             pushed_count = 0
             first_message = None
+            handler = HL7Handler()
 
             for i in range(count):
-                msg = HL7Handler().generate(template, **gen_kwargs)
+                if qc_mode:
+                    qc_kwargs = {}
+                    if qc_deviation is not None:
+                        qc_kwargs["deviation"] = float(qc_deviation)
+                    try:
+                        msg = handler.generate_qc(template, **qc_kwargs)
+                    except ValueError as e:
+                        self._send_json(400, {"error": str(e)})
+                        return
+                else:
+                    msg = handler.generate(template, **gen_kwargs)
                 if first_message is None:
                     first_message = msg
                 pushed = False
@@ -306,6 +321,9 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         params = body or {}
         count = min(max(int(params.get("count", 1)), 1), 100)
         destination = params.get("destination")
+        source_ip = params.get("source_ip")
+        qc_mode = bool(params.get("qc"))
+        qc_deviation = params.get("qc_deviation")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
@@ -316,10 +334,20 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         handler = ASTMHandler()
 
         for i in range(count):
-            msg = handler.generate(template, **gen_kwargs)
+            if qc_mode:
+                qc_kwargs = {}
+                if qc_deviation is not None:
+                    qc_kwargs["deviation"] = float(qc_deviation)
+                try:
+                    msg = handler.generate_qc(template, **qc_kwargs)
+                except ValueError as e:
+                    self._send_json(400, {"error": str(e)})
+                    return
+            else:
+                msg = handler.generate(template, **gen_kwargs)
             pushed = False
             if destination:
-                pushed = push_astm_to_destination(destination, msg)
+                pushed = push_astm_to_destination(destination, msg, source_ip=source_ip)
                 if pushed:
                     success_count += 1
             results.append({
@@ -333,8 +361,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "status": "completed",
             "template": template_name,
             "count": count,
+            "qc": qc_mode,
             "pushed": success_count if destination else None,
             "destination": destination,
+            "source_ip": source_ip,
             "results": results,
         })
 
@@ -382,6 +412,60 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         params = body or {}
         target_dir = params.get("target_dir")
+        qc_mode = bool(params.get("qc"))
+        qc_deviation = params.get("qc_deviation")
+
+        # QC mode: generate a synthetic CSV from template.qc_controls and either
+        # upload to the bridge (if bridge_upload set) or return content / write
+        # to target_dir. Bypasses the fixture path because QC generation is
+        # deterministic and parameterized by qc_deviation, not by a pre-baked file.
+        if qc_mode:
+            try:
+                qc_kwargs = {}
+                if qc_deviation is not None:
+                    qc_kwargs["deviation"] = float(qc_deviation)
+                content = FileHandler().generate_qc(template, **qc_kwargs)
+            except ValueError as e:
+                self._send_json(400, {"error": str(e)})
+                return
+            except Exception as e:  # noqa: BLE001
+                logger.exception("FILE QC generation failed for %s", template_name)
+                self._send_json(500, {"error": str(e)})
+                return
+
+            bridge_upload = params.get("bridge_upload")
+            if bridge_upload:
+                try:
+                    self._upload_qc_content_to_bridge(
+                        template_name, template, content, bridge_upload, qc_deviation
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("Bridge QC upload failed for %s", template_name)
+                    self._send_json(502, {"error": f"Bridge upload failed: {e}"})
+                return
+
+            written_path = None
+            if target_dir:
+                resolved_dir = os.path.realpath(target_dir)
+                allowed_roots = ["/data/analyzer-imports", "/tmp"]
+                if not any(resolved_dir.startswith(root) for root in allowed_roots):
+                    self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
+                    return
+                os.makedirs(resolved_dir, exist_ok=True)
+                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}.csv"
+                out_path = os.path.join(resolved_dir, os.path.basename(fname))
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                written_path = out_path
+            self._send_json(200, {
+                "status": "completed",
+                "template": template_name,
+                "qc": True,
+                "qc_deviation": qc_deviation,
+                "written_path": written_path,
+                "content": content,
+            })
+            return
 
         fixture_cfg = template.get("fixture")
         if fixture_cfg:
@@ -488,6 +572,37 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             },
         })
 
+    def _resolve_analyzer_id_from_name(self, name, oe_url, oe_user, oe_pass):
+        """Query OE for an analyzer ID by name. Returns the id (str) or None.
+
+        Used by the bridge-upload helpers so callers (Postman, scripts) can
+        reference analyzers by stable NAME instead of by id, which churns on
+        every harness re-seed.
+        """
+        if not name:
+            return None
+        import urllib.request, urllib.error, ssl, base64, json as _json
+        url = oe_url.rstrip("/") + "/api/OpenELIS-Global/rest/analyzer/analyzers"
+        req = urllib.request.Request(url, method="GET")
+        auth = base64.b64encode(f"{oe_user}:{oe_pass}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                payload = _json.loads(resp.read().decode("utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to resolve analyzer by name '%s' from %s: %s", name, url, e)
+            return None
+        # OE returns either a bare list or {"analyzers": [...]}; handle both.
+        analyzers = payload.get("analyzers") if isinstance(payload, dict) else payload
+        for a in analyzers if isinstance(analyzers, list) else []:
+            if a.get("name") == name:
+                return str(a.get("id"))
+        logger.warning("No analyzer found with name '%s' in OE registry", name)
+        return None
+
     def _upload_fixture_to_bridge(
         self, template_name, template, fixture_cfg, fixture_path, fixture_rel,
         metadata_results, bridge_upload,
@@ -499,11 +614,36 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         code, upload file. The bridge's FileUploadController handles the
         rest (including FileNameSelfDeclarationScanner for files whose
         test code isn't declared explicitly).
+
+        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
+        mock resolves the ID by querying OE for the analyzer matching
+        `template.analyzer.name`. This lets Postman + scripts reference the
+        analyzer by stable NAME instead of churning ID.
         """
         analyzer_id = bridge_upload.get("analyzer_id")
+        oe_url = (bridge_upload.get("oe_url")
+                  or os.environ.get("OE_URL")
+                  or "https://oe.openelis.org:8443")
+        oe_user = (bridge_upload.get("oe_user")
+                   or os.environ.get("OE_USER")
+                   or "admin")
+        oe_pass = (bridge_upload.get("oe_pass")
+                   or os.environ.get("OE_PASS")
+                   or "adminADMIN!")
         if not analyzer_id:
-            self._send_json(400, {"error": "bridge_upload.analyzer_id is required"})
-            return
+            analyzer_name = template.get("analyzer", {}).get("name") or template_name
+            analyzer_id = self._resolve_analyzer_id_from_name(
+                analyzer_name, oe_url, oe_user, oe_pass
+            )
+            if not analyzer_id:
+                self._send_json(400, {
+                    "error": (
+                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
+                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
+                        "analyzer is registered in OE."
+                    )
+                })
+                return
         test_code = bridge_upload.get("test_code")
         bridge_url = (bridge_upload.get("bridge_url")
                       or os.environ.get("BRIDGE_URL")
@@ -584,6 +724,111 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "fixture": fixture_rel,
                 "results": metadata_results,
             },
+        })
+
+    def _upload_qc_content_to_bridge(
+        self, template_name, template, content, bridge_upload, qc_deviation,
+    ):
+        """Upload mock-generated QC CSV content to the bridge's /admin/upload.
+
+        Same multipart-upload shape as _upload_fixture_to_bridge; differs only in
+        that the file body is generated in-memory (no fixture file on disk).
+
+        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
+        mock resolves the ID by querying OE for the analyzer matching
+        `template.analyzer.name`.
+        """
+        analyzer_id = bridge_upload.get("analyzer_id")
+        oe_url = (bridge_upload.get("oe_url")
+                  or os.environ.get("OE_URL")
+                  or "https://oe.openelis.org:8443")
+        oe_user = (bridge_upload.get("oe_user")
+                   or os.environ.get("OE_USER")
+                   or "admin")
+        oe_pass = (bridge_upload.get("oe_pass")
+                   or os.environ.get("OE_PASS")
+                   or "adminADMIN!")
+        if not analyzer_id:
+            analyzer_name = template.get("analyzer", {}).get("name") or template_name
+            analyzer_id = self._resolve_analyzer_id_from_name(
+                analyzer_name, oe_url, oe_user, oe_pass
+            )
+            if not analyzer_id:
+                self._send_json(400, {
+                    "error": (
+                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
+                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
+                        "analyzer is registered in OE."
+                    )
+                })
+                return
+        test_code = bridge_upload.get("test_code")
+        bridge_url = (bridge_upload.get("bridge_url")
+                      or os.environ.get("BRIDGE_URL")
+                      or "https://openelis-analyzer-bridge:8443")
+        bridge_user = (bridge_upload.get("bridge_user")
+                       or os.environ.get("BRIDGE_USER")
+                       or "bridge")
+        bridge_pass = (bridge_upload.get("bridge_pass")
+                       or os.environ.get("BRIDGE_PASS")
+                       or "changeme")
+
+        import urllib.request, urllib.error, ssl, uuid as _uuid, base64
+        boundary = f"----mock-server-qc-{_uuid.uuid4().hex}"
+        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}.csv"
+        file_bytes = content.encode("utf-8")
+
+        parts = []
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(b'Content-Disposition: form-data; name="analyzerId"\r\n\r\n')
+        parts.append(str(analyzer_id).encode() + b"\r\n")
+        if test_code:
+            parts.append(f"--{boundary}\r\n".encode())
+            parts.append(b'Content-Disposition: form-data; name="testCode"\r\n\r\n')
+            parts.append(test_code.encode() + b"\r\n")
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
+            f"Content-Type: text/csv\r\n\r\n".encode()
+        )
+        parts.append(file_bytes)
+        parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(parts)
+
+        upload_url = bridge_url.rstrip("/") + "/admin/upload"
+        req = urllib.request.Request(upload_url, data=body, method="POST")
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        req.add_header("Content-Length", str(len(body)))
+        auth = base64.b64encode(f"{bridge_user}:{bridge_pass}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
+                resp_body = resp.read().decode("utf-8", errors="replace")
+                resp_status = resp.status
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
+            resp_status = e.code
+
+        logger.info(
+            "Uploaded QC content to bridge %s (template=%s, analyzer=%s, deviation=%s) — status %d",
+            bridge_url, template_name, analyzer_id, qc_deviation, resp_status,
+        )
+
+        self._send_json(200, {
+            "status": "uploaded",
+            "template": template_name,
+            "qc": True,
+            "qc_deviation": qc_deviation,
+            "bridge_status": resp_status,
+            "bridge_response_preview": resp_body[:500],
+            "upload_filename": upload_filename,
+            "content_preview": content[:500],
         })
 
     def _handle_create_analyzer(self):

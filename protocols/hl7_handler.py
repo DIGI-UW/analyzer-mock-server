@@ -10,6 +10,7 @@ Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE,
 
 import itertools
 import logging
+import random
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -165,8 +166,124 @@ def _obx_segment(seq: int, field: Dict, deterministic: bool) -> str:
     return "|".join(parts)
 
 
+def generate_qc_oru_r01(
+    template: Dict,
+    deviation: Optional[float] = None,
+    timestamp: Optional[datetime] = None,
+    message_control_id: Optional[str] = None,
+) -> str:
+    """Generate an HL7 ORU^R01 QC message from template.qc_controls.
+
+    Convention (matches the Mindray HL7 profile's qcRule
+    `SPECIMEN_ID_PREFIX operand=QC` on the OE side):
+      - OBR-3 (Filler order / Specimen ID) = "QC-{lot}-{level}"
+      - One OBX per control entry
+      - OBX-3 components = field_code^lot_number^level
+      - OBX-5 = target + (deviation × sd) if deviation provided, else Gaussian
+      - OBX-11 = "C" (control result status, HL7 v2.5)
+      - OBR-25 = "C"
+    """
+    if template.get("protocol", {}).get("type") != "HL7":
+        raise ValueError("Template protocol type must be HL7")
+
+    qc_controls = template.get("qc_controls", [])
+    if not qc_controls:
+        raise ValueError(
+            f"Template '{template.get('analyzer', {}).get('name')}' has no qc_controls defined"
+        )
+
+    if timestamp is None:
+        timestamp = datetime.now()
+
+    identification = template.get("identification", {})
+    sending_app = identification.get("hl7_sending_app") or identification.get("msh_sender", "SIMULATOR")
+    sending_facility = identification.get("hl7_sending_facility", "LAB")
+    receiving_app = "OpenELIS"
+    receiving_facility = "LAB"
+    hl7_version = template.get("protocol", {}).get("version", "2.5.1")
+
+    ts = timestamp.strftime("%Y%m%d%H%M%S")
+    if message_control_id is None:
+        message_control_id = f"QC{timestamp.strftime('%Y%m%d%H%M%S')}"
+
+    # Use the first qc_controls entry's lot/level to derive a single QC accession.
+    primary = qc_controls[0]
+    primary_lot = primary.get("lot_number", "LOT-QC-N")
+    primary_level = primary.get("level", "N")
+    qc_specimen_id = f"QC-{primary_lot}-{primary_level}"
+
+    segments: List[str] = []
+
+    msh = "|".join([
+        "MSH", "^~\\&", sending_app, sending_facility,
+        receiving_app, receiving_facility, ts, "", "ORU^R01",
+        message_control_id, "P", hl7_version, "", "", "", "", "", "", ""
+    ])
+    segments.append(msh)
+
+    # PID for QC: minimal, no real patient
+    pid = "|".join([
+        "PID", "1", "", "QCCTRL001^^^QC", "", "QC^Control", "", "19000101", "U",
+        "", "", "", "", "", "", "", "", "", "", "", ""
+    ])
+    segments.append(pid)
+
+    orc = "|".join([
+        "ORC", "RE", qc_specimen_id, qc_specimen_id,
+        "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
+    ])
+    segments.append(orc)
+
+    # OBR-3 = QC-{lot}-{level} → matches SPECIMEN_ID_PREFIX QC qcRule.
+    # OBR-25 = "C" — Result Status: control.
+    obr = "|".join([
+        "OBR", "1", qc_specimen_id, qc_specimen_id,
+        "^^^QC^Quality Control",
+        "", "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "C", "", "", ""
+    ])
+    segments.append(obr)
+
+    for seq, ctrl in enumerate(qc_controls, start=1):
+        field_code = ctrl.get("field_code", f"QC{seq}")
+        lot = ctrl.get("lot_number", f"LOT-{field_code}-N")
+        level = ctrl.get("level", "N")
+        unit = ctrl.get("unit", "")
+        target = ctrl.get("target")
+        sd = ctrl.get("sd", 0.0)
+
+        try:
+            target_num = float(target) if target is not None else 0.0
+        except (TypeError, ValueError):
+            target_num = 0.0
+        try:
+            sd_num = float(sd)
+        except (TypeError, ValueError):
+            sd_num = 0.0
+
+        if deviation is not None:
+            value = round(target_num + (float(deviation) * sd_num), 2)
+        else:
+            value = round(random.gauss(target_num, sd_num) if sd_num else target_num, 2)
+
+        # OBX-3 = field^lot^level (matches FHIR control-level extension propagation
+        # the bridge already does for ASTM Q-segments).
+        # OBX-11 = "C" → control result status (HL7 v2.5).
+        obx_id = f"^^^{field_code}^{lot}^{level}"
+        obx = "|".join([
+            "OBX", str(seq), "NM", obx_id, "", str(value), unit, "",
+            "N", "", "", "C", "", "", "", "", ""
+        ])
+        segments.append(obx)
+
+    return "\r".join(segments) + "\r"
+
+
 class HL7Handler:
     """M4-compatible wrapper: generate(template, **kwargs) delegates to generate_oru_r01."""
 
     def generate(self, template, deterministic=True, **kwargs):
         return generate_oru_r01(template, deterministic=deterministic, **kwargs)
+
+    def generate_qc(self, template, deviation: Optional[float] = None, **kwargs) -> str:
+        """Generate an HL7 ORU^R01 QC message. Mirrors ASTMHandler.generate_qc shape."""
+        return generate_qc_oru_r01(template, deviation=deviation, **kwargs)

@@ -572,6 +572,37 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             },
         })
 
+    def _resolve_analyzer_id_from_name(self, name, oe_url, oe_user, oe_pass):
+        """Query OE for an analyzer ID by name. Returns the id (str) or None.
+
+        Used by the bridge-upload helpers so callers (Postman, scripts) can
+        reference analyzers by stable NAME instead of by id, which churns on
+        every harness re-seed.
+        """
+        if not name:
+            return None
+        import urllib.request, urllib.error, ssl, base64, json as _json
+        url = oe_url.rstrip("/") + "/api/OpenELIS-Global/rest/analyzer/analyzers"
+        req = urllib.request.Request(url, method="GET")
+        auth = base64.b64encode(f"{oe_user}:{oe_pass}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                payload = _json.loads(resp.read().decode("utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to resolve analyzer by name '%s' from %s: %s", name, url, e)
+            return None
+        # OE returns either a bare list or {"analyzers": [...]}; handle both.
+        analyzers = payload.get("analyzers") if isinstance(payload, dict) else payload
+        for a in analyzers if isinstance(analyzers, list) else []:
+            if a.get("name") == name:
+                return str(a.get("id"))
+        logger.warning("No analyzer found with name '%s' in OE registry", name)
+        return None
+
     def _upload_fixture_to_bridge(
         self, template_name, template, fixture_cfg, fixture_path, fixture_rel,
         metadata_results, bridge_upload,
@@ -583,11 +614,36 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         code, upload file. The bridge's FileUploadController handles the
         rest (including FileNameSelfDeclarationScanner for files whose
         test code isn't declared explicitly).
+
+        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
+        mock resolves the ID by querying OE for the analyzer matching
+        `template.analyzer.name`. This lets Postman + scripts reference the
+        analyzer by stable NAME instead of churning ID.
         """
         analyzer_id = bridge_upload.get("analyzer_id")
+        oe_url = (bridge_upload.get("oe_url")
+                  or os.environ.get("OE_URL")
+                  or "https://oe.openelis.org:8443")
+        oe_user = (bridge_upload.get("oe_user")
+                   or os.environ.get("OE_USER")
+                   or "admin")
+        oe_pass = (bridge_upload.get("oe_pass")
+                   or os.environ.get("OE_PASS")
+                   or "adminADMIN!")
         if not analyzer_id:
-            self._send_json(400, {"error": "bridge_upload.analyzer_id is required"})
-            return
+            analyzer_name = template.get("analyzer", {}).get("name") or template_name
+            analyzer_id = self._resolve_analyzer_id_from_name(
+                analyzer_name, oe_url, oe_user, oe_pass
+            )
+            if not analyzer_id:
+                self._send_json(400, {
+                    "error": (
+                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
+                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
+                        "analyzer is registered in OE."
+                    )
+                })
+                return
         test_code = bridge_upload.get("test_code")
         bridge_url = (bridge_upload.get("bridge_url")
                       or os.environ.get("BRIDGE_URL")
@@ -677,11 +733,35 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
         Same multipart-upload shape as _upload_fixture_to_bridge; differs only in
         that the file body is generated in-memory (no fixture file on disk).
+
+        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
+        mock resolves the ID by querying OE for the analyzer matching
+        `template.analyzer.name`.
         """
         analyzer_id = bridge_upload.get("analyzer_id")
+        oe_url = (bridge_upload.get("oe_url")
+                  or os.environ.get("OE_URL")
+                  or "https://oe.openelis.org:8443")
+        oe_user = (bridge_upload.get("oe_user")
+                   or os.environ.get("OE_USER")
+                   or "admin")
+        oe_pass = (bridge_upload.get("oe_pass")
+                   or os.environ.get("OE_PASS")
+                   or "adminADMIN!")
         if not analyzer_id:
-            self._send_json(400, {"error": "bridge_upload.analyzer_id is required"})
-            return
+            analyzer_name = template.get("analyzer", {}).get("name") or template_name
+            analyzer_id = self._resolve_analyzer_id_from_name(
+                analyzer_name, oe_url, oe_user, oe_pass
+            )
+            if not analyzer_id:
+                self._send_json(400, {
+                    "error": (
+                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
+                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
+                        "analyzer is registered in OE."
+                    )
+                })
+                return
         test_code = bridge_upload.get("test_code")
         bridge_url = (bridge_upload.get("bridge_url")
                       or os.environ.get("BRIDGE_URL")

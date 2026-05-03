@@ -235,11 +235,12 @@ def generate_qc_oru_r01(
     segments.append(orc)
 
     # OBR-3 = QC-{lot}-{level} → matches SPECIMEN_ID_PREFIX QC qcRule.
-    # OBR-25 = "C" — Result Status: control.
+    # OBR-25 = "C" — Result Status: control. Position 0 holds "OBR" (segment
+    # ID), so list index N corresponds to OBR-N.
     obr = "|".join([
         "OBR", "1", qc_specimen_id, qc_specimen_id,
         "^^^QC^Quality Control",
-        "", "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "C", "", "", ""
+        "", "", "", ts, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "C", "", "", ""
     ])
     segments.append(obr)
 

@@ -86,10 +86,18 @@ class TestSimulateAstmQcApi(unittest.TestCase):
         self.mock_push.assert_called_once()
         args, kwargs = self.mock_push.call_args
         self.assertEqual(args[0], "tcp://bridge:12001")
-        # Wire format must contain action code Q at O.12 — confirms generate_qc
-        # ran instead of the normal generate path.
+        # Wire format must have action code "Q" at O.12 (1-indexed ASTM field
+        # number; 0-indexed array idx 11 when the segment ID is field 0).
+        # Parse the O-record explicitly so a stray "|Q|" elsewhere in the
+        # payload (e.g. inside another segment) cannot false-positive.
         wire = args[1]
-        self.assertIn("|Q|", wire)
+        o_records = [ln for ln in wire.replace("\r", "\n").split("\n") if ln.startswith("O|")]
+        self.assertEqual(len(o_records), 1, f"Expected exactly one O-record, got {o_records}")
+        o_fields = o_records[0].split("|")
+        self.assertGreaterEqual(len(o_fields), 12,
+                                f"O-record has only {len(o_fields)} fields, need >=12")
+        self.assertEqual(o_fields[11], "Q",
+                         f"Expected action code Q at O.12, got {o_fields[11]!r}")
         self.assertEqual(kwargs.get("source_ip"), "10.42.20.10")
 
     def test_qc_false_uses_normal_generate_no_q_action_code(self):

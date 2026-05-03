@@ -272,6 +272,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "status": "completed",
                     "analyzer": analyzer,
                     "count": count,
+                    "qc": qc_mode,
+                    "qc_deviation": qc_deviation if qc_mode else None,
                     "destination": destination,
                     "pushed": pushed_count if destination else None,
                     "results": results,
@@ -283,6 +285,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "status": "sent",
                 "messageId": msg_id,
+                "qc": qc_mode,
+                "qc_deviation": qc_deviation if qc_mode else None,
                 "sample_id": _extract_sample_id_from_hl7(msg),
                 "message": msg,
             })

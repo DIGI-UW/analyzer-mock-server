@@ -187,6 +187,17 @@ class HL7QCMessageContract(unittest.TestCase):
         self.assertTrue(fields[3].startswith("QC-"),
                         f"Expected OBR-3 to start with QC-, got: {fields[3]}")
 
+    def test_obr_25_is_control_result_status(self):
+        # OBR-25 = "C" (Result Status: control). Pin the field position so an
+        # off-by-one in the OBR layout (extra/missing pipe) is caught here.
+        msg = self.handler.generate_qc(self.template, deviation=0)
+        obr = next(s for s in self._segments(msg) if s.startswith("OBR|"))
+        fields = obr.split("|")
+        self.assertGreaterEqual(len(fields), 26,
+                                f"OBR has only {len(fields)} fields, need >=26")
+        self.assertEqual(fields[25], "C",
+                         f"Expected OBR-25=C, got: {fields[25]!r} in {obr}")
+
     def test_obx_11_is_control_status(self):
         msg = self.handler.generate_qc(self.template, deviation=0)
         obx_records = [s for s in self._segments(msg) if s.startswith("OBX|")]

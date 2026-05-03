@@ -57,6 +57,19 @@ class TestSelectSubnetId(unittest.TestCase):
         got = self.mgr._select_subnet_id("bc5380")
         self.assertNotEqual(got, fixed)
 
+    def test_subnet_in_use_handles_explicit_null_ipam_config(self):
+        # Docker can return networks whose IPAM.Config is explicitly null
+        # (not just missing) — for example, networks created without an
+        # address pool. _subnet_in_use must treat that as an empty config
+        # and not raise "'NoneType' object is not iterable".
+        net = MagicMock()
+        net.attrs = {"IPAM": {"Config": None}}
+        self.mock_docker.networks.list.return_value = [net]
+
+        # Should not raise; should not falsely report any subnet in use.
+        for subnet_id in (FIXED_SUBNETS["bc5380"], 99):
+            self.assertFalse(self.mgr._subnet_in_use(subnet_id))
+
 
 if __name__ == "__main__":
     unittest.main()

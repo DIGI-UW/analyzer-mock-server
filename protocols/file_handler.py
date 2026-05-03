@@ -104,6 +104,69 @@ class FileHandler(BaseHandler):
 
         return buf.getvalue()
 
+    def generate_qc(self, template: Dict[str, Any], deviation: Optional[float] = None, **kwargs) -> str:
+        """Generate a CSV QC payload from the template's qc_controls section.
+
+        Each qc_controls entry produces one row whose Sample Name = "QC-{lot}-{level}"
+        and result column = target + (deviation × sd) — matching the OE-side
+        FILE profile's `qcRules`:
+            - SPECIMEN_ID_PREFIX operand=QC (sample name starts with "QC-")
+            - FIELD_EQUALS targetField=QC_TASK operand=STANDARD (Task column)
+
+        Raises ValueError if the template has no qc_controls defined.
+        """
+        if not self.validate_template(template):
+            raise ValueError("Invalid template: missing analyzer or fields")
+
+        qc_controls_list = template.get("qc_controls", [])
+        if not qc_controls_list:
+            raise ValueError(
+                f"Template '{template['analyzer'].get('name')}' has no qc_controls defined"
+            )
+
+        fcfg = template.get("file_config") or {}
+        delim = fcfg.get("delimiter", ",")
+        if (fcfg.get("format") or "CSV").upper() == "TSV":
+            delim = "\t"
+        col_map = fcfg.get("column_mapping") or {}
+        sample_col = col_map.get("sample_id", "Sample Name")
+        test_col = col_map.get("test_code", "Target Name")
+        result_col = col_map.get("result", "Quantity Mean")
+
+        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        buf = io.StringIO()
+        # Header includes Task column so FIELD_EQUALS QC_TASK=STANDARD matches.
+        w = csv.writer(buf, delimiter=delim if delim and len(delim) == 1 else ",", lineterminator="\n")
+        w.writerow([sample_col, test_col, "Task", result_col, "Timestamp"])
+
+        for ctrl in qc_controls_list:
+            field_code = ctrl.get("field_code", "")
+            lot = ctrl.get("lot_number", f"LOT-{field_code}-N")
+            level = ctrl.get("level", "N")
+            target = ctrl.get("target")
+            sd = ctrl.get("sd", 0.0)
+            task = ctrl.get("task", "STANDARD")
+
+            try:
+                target_num = float(target) if target is not None else 0.0
+            except (TypeError, ValueError):
+                target_num = 0.0
+            try:
+                sd_num = float(sd)
+            except (TypeError, ValueError):
+                sd_num = 0.0
+
+            if deviation is not None:
+                value = round(target_num + (float(deviation) * sd_num), 2)
+            else:
+                value = round(random.gauss(target_num, sd_num) if sd_num else target_num, 2)
+
+            sample_name = f"QC-{lot}-{level}"
+            w.writerow([sample_name, field_code, task, value, ts])
+
+        return buf.getvalue()
+
     def write_to_file(self, template: Dict[str, Any], path: str, **kwargs) -> Optional[str]:
         """Generate and write to path. Creates parent dirs. Returns path or None."""
         content = self.generate(template, **kwargs)

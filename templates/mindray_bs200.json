@@ -89,5 +89,16 @@
   "testSample": {
     "id": "41",
     "type": "CHEM^CHEMISTRY PANEL"
-  }
+  },
+  "qc_controls": [
+    {
+      "field_code": "GLU",
+      "lot_number": "LOT-GLU-N",
+      "level": "NORMAL",
+      "level_name": "Normal Glucose Control",
+      "target": 100.0,
+      "sd": 5.0,
+      "unit": "mg/dL"
+    }
+  ]
 }

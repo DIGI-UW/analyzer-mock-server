@@ -13,6 +13,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,12 @@ def push_hl7_to_destination(destination: str, hl7_message: str) -> bool:
     return push_hl7_http(destination, hl7_message)
 
 
-def push_astm_to_destination(destination: str, astm_message: str) -> bool:
-    """Route ASTM push by destination scheme: tcp:// or http(s)://."""
+def push_astm_to_destination(destination: str, astm_message: str,
+                              source_ip: Optional[str] = None) -> bool:
+    """Route ASTM push by destination scheme: tcp:// or http(s)://.
+
+    source_ip is forwarded to push_astm_tcp; ignored for HTTP destinations.
+    """
     if destination.startswith("tcp://"):
         addr = destination[len("tcp://"):]
         if ":" not in addr:
@@ -62,7 +67,7 @@ def push_astm_to_destination(destination: str, astm_message: str) -> bool:
         except ValueError:
             logger.error("[PUSH] Invalid TCP port: %s", port_str)
             return False
-        return push_astm_tcp(host, port, astm_message)
+        return push_astm_tcp(host, port, astm_message, source_ip=source_ip)
     return push_astm_http(destination, astm_message)
 
 
@@ -189,9 +194,21 @@ def send_astm_session(sock, records: list, session_label: str = "") -> bool:
     return True
 
 
-def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) -> bool:
-    """Push ASTM message via raw TCP with ENQ/ACK framing."""
-    logger.info("[PUSH-TCP] Connecting to %s:%s for ASTM TCP push", host, port)
+def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,
+                   source_ip: Optional[str] = None) -> bool:
+    """Push ASTM message via raw TCP with ENQ/ACK framing.
+
+    source_ip: optional local IP to bind the outgoing socket to. The mock
+    container has multiple Docker network interfaces (one per registered
+    analyzer); the bridge identifies analyzers by source IP, so QC pushes
+    must come from the right network's address. Without this binding,
+    Linux picks the route arbitrarily and QC ends up associated with the
+    wrong analyzer.
+    """
+    if source_ip:
+        logger.info("[PUSH-TCP] Connecting to %s:%s (source=%s) for ASTM TCP push", host, port, source_ip)
+    else:
+        logger.info("[PUSH-TCP] Connecting to %s:%s for ASTM TCP push", host, port)
 
     all_records = [r for r in astm_message.strip().split('\n') if r.strip()]
     sessions = []
@@ -213,6 +230,8 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30) ->
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             sock.settimeout(timeout)
+            if source_ip:
+                sock.bind((source_ip, 0))
             sock.connect((host, port))
             if not send_astm_session(sock, session_records, label):
                 return False

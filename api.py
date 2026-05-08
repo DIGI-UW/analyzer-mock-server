@@ -31,6 +31,49 @@ from push import push_hl7_to_destination, push_astm_to_destination
 logger = logging.getLogger(__name__)
 
 
+QC_DEFAULT_ASTM_TEMPLATE = "genexpert_astm"
+QC_DEFAULT_HL7_TEMPLATE = "mindray_bs200"
+QC_DEFAULT_FILE_TEMPLATE = "quantstudio5"
+
+
+def _default_qc_astm_route(template_name: str) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_ASTM_TEMPLATE:
+        return {}
+    return {
+        "destination": os.environ.get(
+            "QC_DEFAULT_ASTM_DESTINATION",
+            "tcp://openelis-analyzer-bridge:12001",
+        ),
+        "source_ip": os.environ.get("QC_DEFAULT_ASTM_SOURCE_IP", "10.42.20.10"),
+    }
+
+
+def _default_qc_hl7_route(template_name: str) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_HL7_TEMPLATE:
+        return {}
+    return {
+        "destination": os.environ.get(
+            "QC_DEFAULT_HL7_DESTINATION",
+            "mllp://openelis-analyzer-bridge:2575",
+        ),
+        "source_ip": os.environ.get("QC_DEFAULT_HL7_SOURCE_IP", "10.42.22.10"),
+    }
+
+
+def _default_qc_file_bridge_upload(template_name: str, template: Dict) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_FILE_TEMPLATE:
+        return {}
+    default_test_code = os.environ.get("QC_DEFAULT_FILE_TEST_CODE")
+    if not default_test_code:
+        controls = template.get("qc_controls") or []
+        if controls:
+            default_test_code = controls[0].get("field_code")
+    bridge_upload = {}
+    if default_test_code:
+        bridge_upload["test_code"] = default_test_code
+    return bridge_upload
+
+
 def _load_template(analyzer: str) -> Optional[Dict]:
     """Load analyzer template — profile-backed first, then local file."""
     try:
@@ -230,9 +273,14 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         try:
             destination = kwargs.get("destination")
+            source_ip = kwargs.get("source_ip")
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
+            if qc_mode and not destination:
+                defaults = _default_qc_hl7_route(analyzer)
+                destination = defaults.get("destination")
+                source_ip = source_ip or defaults.get("source_ip")
 
             gen_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("patient_id", "sample_id", "tests") and v is not None}
@@ -257,7 +305,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     first_message = msg
                 pushed = False
                 if destination:
-                    pushed = push_hl7_to_destination(destination, msg)
+                    pushed = push_hl7_to_destination(destination, msg, source_ip=source_ip)
                     if pushed:
                         pushed_count += 1
                 results.append({
@@ -328,6 +376,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         source_ip = params.get("source_ip")
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
+        if qc_mode and not destination:
+            defaults = _default_qc_astm_route(template_name)
+            destination = defaults.get("destination")
+            source_ip = source_ip or defaults.get("source_ip")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
@@ -438,6 +490,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 return
 
             bridge_upload = params.get("bridge_upload")
+            if not bridge_upload:
+                bridge_upload = _default_qc_file_bridge_upload(template_name, template)
             if bridge_upload:
                 try:
                     self._upload_qc_content_to_bridge(

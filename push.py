@@ -33,8 +33,12 @@ VT = b'\x0B'
 FS = b'\x1C'
 
 
-def push_hl7_to_destination(destination: str, hl7_message: str) -> bool:
-    """Route HL7 push by destination scheme: mllp:// or http(s)://."""
+def push_hl7_to_destination(destination: str, hl7_message: str,
+                             source_ip: Optional[str] = None) -> bool:
+    """Route HL7 push by destination scheme: mllp:// or http(s)://.
+
+    source_ip is forwarded to push_hl7_mllp; ignored for HTTP destinations.
+    """
     if destination.startswith("mllp://"):
         addr = destination[len("mllp://"):]
         if ":" not in addr:
@@ -46,7 +50,7 @@ def push_hl7_to_destination(destination: str, hl7_message: str) -> bool:
         except ValueError:
             logger.error("[PUSH-HL7] Invalid MLLP port: %s", port_str)
             return False
-        return push_hl7_mllp(host, port, hl7_message)
+        return push_hl7_mllp(host, port, hl7_message, source_ip=source_ip)
     return push_hl7_http(destination, hl7_message)
 
 
@@ -71,12 +75,23 @@ def push_astm_to_destination(destination: str, astm_message: str,
     return push_astm_http(destination, astm_message)
 
 
-def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30) -> bool:
-    """Push an HL7 message over MLLP and require positive application ACK."""
+def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
+                   source_ip: Optional[str] = None) -> bool:
+    """Push an HL7 message over MLLP and require positive application ACK.
+
+    source_ip: optional local IP to bind the outgoing socket to. The mock
+    container has multiple Docker network interfaces (one per registered
+    analyzer); the bridge identifies analyzers by source IP, so QC pushes
+    must come from the right network's address. Without this binding,
+    Linux picks the route arbitrarily and the bridge can't resolve the
+    analyzer registry entry.
+    """
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
+        if source_ip:
+            sock.bind((source_ip, 0))
         sock.connect((host, port))
         payload = VT + hl7_message.encode("utf-8") + FS + CR
         sock.sendall(payload)

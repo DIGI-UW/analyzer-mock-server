@@ -21,6 +21,7 @@
       "result": "Quantity Mean"
     }
   },
+  "qc_sample_id_pattern": "{level}-{lot}-001",
   "fixture": {
     "file": "fixtures/quantstudio5/results.xls",
     "format": "XLS",

@@ -107,11 +107,19 @@ class FileHandler(BaseHandler):
     def generate_qc(self, template: Dict[str, Any], deviation: Optional[float] = None, **kwargs) -> str:
         """Generate a CSV QC payload from the template's qc_controls section.
 
-        Each qc_controls entry produces one row whose Sample Name = "QC-{lot}-{level}"
-        and result column = target + (deviation × sd) — matching the OE-side
-        FILE profile's `qcRules`:
-            - SPECIMEN_ID_PREFIX operand=QC (sample name starts with "QC-")
-            - FIELD_EQUALS targetField=QC_TASK operand=STANDARD (Task column)
+        Each qc_controls entry produces one row. The sample-name pattern
+        defaults to ``QC-{lot}-{level}`` but can be overridden per template
+        via ``qc_sample_id_pattern`` so the generated samples align with the
+        analyzer's OE-side qcRules:
+
+            - QuantStudio profile uses ``SPECIMEN_ID_PREFIX LPC|HPC|...`` →
+              pattern should put ``{level}`` first (e.g. ``"{level}-{lot}"``)
+            - Mindray BS-200 uses ``SPECIMEN_ID_PREFIX QC`` → default pattern
+              works as-is
+
+        Pattern placeholders supported: ``{lot}`` (lot_number from qc_control),
+        ``{level}`` (level), ``{field_code}`` (field_code), ``{task}`` (task).
+        Result column = target + (deviation × sd).
 
         Raises ValueError if the template has no qc_controls defined.
         """
@@ -134,6 +142,7 @@ class FileHandler(BaseHandler):
         result_col = col_map.get("result", "Quantity Mean")
 
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
+        sample_pattern = template.get("qc_sample_id_pattern") or "QC-{lot}-{level}"
 
         buf = io.StringIO()
         # Header includes Task column so FIELD_EQUALS QC_TASK=STANDARD matches.
@@ -162,7 +171,8 @@ class FileHandler(BaseHandler):
             else:
                 value = round(random.gauss(target_num, sd_num) if sd_num else target_num, 2)
 
-            sample_name = f"QC-{lot}-{level}"
+            sample_name = sample_pattern.format(
+                lot=lot, level=level, field_code=field_code, task=task)
             w.writerow([sample_name, field_code, task, value, ts])
 
         return buf.getvalue()

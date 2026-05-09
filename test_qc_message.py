@@ -113,8 +113,13 @@ class FileQCMessageContract(unittest.TestCase):
     """Test B — FILE (QuantStudio) generate_qc emission contract.
 
     QuantStudio FILE profile qcRules (OE side):
-      - SPECIMEN_ID_PREFIX operand=QC → row Sample Name must start with "QC-"
-      - FIELD_EQUALS targetField=QC_TASK operand=STANDARD → Task column must equal STANDARD
+      - SPECIMEN_ID_PREFIX operand=LPC|HPC|CNEG|CPOS|NTC|PTC → row Sample Name
+        must start with one of those level prefixes so the bridge classifies
+        as QC AND propagates controlLevel to OE's Tier 2 lot resolver.
+      - FIELD_EQUALS targetField=QC_TASK operand=STANDARD → Task column must
+        equal STANDARD.
+    Template field ``qc_sample_id_pattern`` controls the emitted Sample Name
+    shape; for QuantStudio it is ``{level}-{lot}-001``.
     """
 
     @classmethod
@@ -124,18 +129,28 @@ class FileQCMessageContract(unittest.TestCase):
         cls.template = _load_template("quantstudio5")
 
     def _rows(self, content: str):
+        # QuantStudio template ships file_config.format=TSV → tab delimiter.
         lines = [r for r in content.split("\n") if r.strip()]
-        header = lines[0].split(",")
-        return header, [dict(zip(header, line.split(","))) for line in lines[1:]]
+        header = lines[0].split("\t")
+        return header, [dict(zip(header, line.split("\t"))) for line in lines[1:]]
 
-    def test_qc_rows_have_qc_sample_id_prefix(self):
+    def test_qc_rows_have_level_prefix(self):
         content = self.handler.generate_qc(self.template, deviation=0)
         _, rows = self._rows(content)
         self.assertGreaterEqual(len(rows), 2, "Expected LPC + HPC rows")
         for row in rows:
             sample_name = row.get("Sample Name", "")
-            self.assertTrue(sample_name.startswith("QC-"),
-                            f"Expected QC- prefix, got: {sample_name}")
+            self.assertTrue(
+                sample_name.startswith("LPC-") or sample_name.startswith("HPC-"),
+                f"Expected LPC-/HPC- prefix per QuantStudio qcRules, got: {sample_name}")
+
+    def test_qc_rows_embed_lot_number(self):
+        content = self.handler.generate_qc(self.template, deviation=0)
+        _, rows = self._rows(content)
+        for row in rows:
+            sample_name = row.get("Sample Name", "")
+            self.assertIn("LOT-", sample_name,
+                          f"Expected lot string embedded in sample name, got: {sample_name}")
 
     def test_qc_task_column_equals_standard(self):
         content = self.handler.generate_qc(self.template, deviation=0)
@@ -148,14 +163,14 @@ class FileQCMessageContract(unittest.TestCase):
         # LPC target=32.0 sd=0.5 → at deviation=0, value should be 32.0.
         content = self.handler.generate_qc(self.template, deviation=0)
         _, rows = self._rows(content)
-        lpc = next(r for r in rows if "LPC" in r["Sample Name"])
+        lpc = next(r for r in rows if r["Sample Name"].startswith("LPC-"))
         self.assertAlmostEqual(float(lpc["Quantity Mean"]), 32.0, places=1)
 
     def test_deviation_3_emits_target_plus_3_sd(self):
         # LPC target=32.0 sd=0.5 → deviation=3.0 → 33.5 (per fixture README math)
         content = self.handler.generate_qc(self.template, deviation=3.0)
         _, rows = self._rows(content)
-        lpc = next(r for r in rows if "LPC" in r["Sample Name"])
+        lpc = next(r for r in rows if r["Sample Name"].startswith("LPC-"))
         self.assertAlmostEqual(float(lpc["Quantity Mean"]), 33.5, places=1)
 
     def test_no_qc_controls_raises(self):

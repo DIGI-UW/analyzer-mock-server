@@ -13,7 +13,7 @@
     "file_pattern": "QS5_*.xls"
   },
   "file_config": {
-    "format": "TSV",
+    "format": "XLSX",
     "has_header": true,
     "column_mapping": {
       "sample_id": "Sample Name",

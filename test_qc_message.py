@@ -118,60 +118,110 @@ class FileQCMessageContract(unittest.TestCase):
         as QC AND propagates controlLevel to OE's Tier 2 lot resolver.
       - FIELD_EQUALS targetField=QC_TASK operand=STANDARD → Task column must
         equal STANDARD.
-    Template field ``qc_sample_id_pattern`` controls the emitted Sample Name
-    shape; for QuantStudio it is ``{level}-{lot}-001``.
+
+    Each test runs the same content contract against all three on-the-wire
+    formats (CSV / TSV / XLSX) so the mock guarantees parity — the bridge's
+    extension-based dispatch picks the parser, but the rows must look the
+    same regardless of format. Native QuantStudio output is .xls/.xlsx; the
+    CSV/TSV paths exist for analyzers whose native format is delimited text
+    and for diagnostic-friendly tooling.
     """
 
     @classmethod
     def setUpClass(cls):
         from protocols.file_handler import FileHandler
         cls.handler = FileHandler()
-        cls.template = _load_template("quantstudio5")
+        cls.base_template = _load_template("quantstudio5")
 
-    def _rows(self, content: str):
-        # QuantStudio template ships file_config.format=TSV → tab delimiter.
-        lines = [r for r in content.split("\n") if r.strip()]
-        header = lines[0].split("\t")
-        return header, [dict(zip(header, line.split("\t"))) for line in lines[1:]]
+    def _template(self, fmt: str):
+        """Clone the live template with a different file_config.format so the
+        same QC controls flow through every emitter."""
+        import copy
+        t = copy.deepcopy(self.base_template)
+        t.setdefault("file_config", {})["format"] = fmt
+        return t
 
-    def test_qc_rows_have_level_prefix(self):
-        content = self.handler.generate_qc(self.template, deviation=0)
-        _, rows = self._rows(content)
-        self.assertGreaterEqual(len(rows), 2, "Expected LPC + HPC rows")
+    def _rows(self, content, fmt: str):
+        """Parse generate_qc bytes into [{header: value, ...}] rows."""
+        if fmt == "XLSX":
+            from openpyxl import load_workbook
+            import io
+            wb = load_workbook(io.BytesIO(content))
+            ws = wb.active
+            data = list(ws.values)
+            header = [str(h) if h is not None else "" for h in data[0]]
+            rows = []
+            for raw in data[1:]:
+                if all(c is None or str(c).strip() == "" for c in raw):
+                    continue
+                rows.append({h: ("" if v is None else str(v)) for h, v in zip(header, raw)})
+            return header, rows
+        text = content.decode("utf-8") if isinstance(content, (bytes, bytearray)) else content
+        delim = "\t" if fmt == "TSV" else ","
+        lines = [r for r in text.split("\n") if r.strip()]
+        header = lines[0].split(delim)
+        return header, [dict(zip(header, line.split(delim))) for line in lines[1:]]
+
+    def _check_format(self, fmt: str, deviation: float, expected_lpc_value: float):
+        template = self._template(fmt)
+        content = self.handler.generate_qc(template, deviation=deviation)
+
+        # Bytes contract — generate_qc always returns bytes regardless of format.
+        self.assertIsInstance(content, (bytes, bytearray),
+                              f"generate_qc must return bytes for {fmt}")
+
+        _, rows = self._rows(content, fmt)
+        self.assertGreaterEqual(len(rows), 2, f"[{fmt}] expected LPC + HPC rows")
+
         for row in rows:
             sample_name = row.get("Sample Name", "")
             self.assertTrue(
                 sample_name.startswith("LPC-") or sample_name.startswith("HPC-"),
-                f"Expected LPC-/HPC- prefix per QuantStudio qcRules, got: {sample_name}")
-
-    def test_qc_rows_embed_lot_number(self):
-        content = self.handler.generate_qc(self.template, deviation=0)
-        _, rows = self._rows(content)
-        for row in rows:
-            sample_name = row.get("Sample Name", "")
+                f"[{fmt}] expected LPC-/HPC- prefix per QuantStudio qcRules, got: {sample_name}")
             self.assertIn("LOT-", sample_name,
-                          f"Expected lot string embedded in sample name, got: {sample_name}")
-
-    def test_qc_task_column_equals_standard(self):
-        content = self.handler.generate_qc(self.template, deviation=0)
-        _, rows = self._rows(content)
-        for row in rows:
+                          f"[{fmt}] expected lot string embedded in sample name, got: {sample_name}")
             self.assertEqual(row.get("Task"), "STANDARD",
-                             f"Expected Task=STANDARD, got: {row.get('Task')}")
+                             f"[{fmt}] expected Task=STANDARD, got: {row.get('Task')}")
 
-    def test_deviation_zero_emits_target_value(self):
+        lpc = next(r for r in rows if r["Sample Name"].startswith("LPC-"))
+        self.assertAlmostEqual(
+            float(lpc["Quantity Mean"]), expected_lpc_value, places=1,
+            msg=f"[{fmt}] LPC value mismatch")
+
+    def test_csv_format_contract(self):
         # LPC target=32.0 sd=0.5 → at deviation=0, value should be 32.0.
-        content = self.handler.generate_qc(self.template, deviation=0)
-        _, rows = self._rows(content)
-        lpc = next(r for r in rows if r["Sample Name"].startswith("LPC-"))
-        self.assertAlmostEqual(float(lpc["Quantity Mean"]), 32.0, places=1)
+        self._check_format("CSV", deviation=0, expected_lpc_value=32.0)
 
-    def test_deviation_3_emits_target_plus_3_sd(self):
-        # LPC target=32.0 sd=0.5 → deviation=3.0 → 33.5 (per fixture README math)
-        content = self.handler.generate_qc(self.template, deviation=3.0)
-        _, rows = self._rows(content)
-        lpc = next(r for r in rows if r["Sample Name"].startswith("LPC-"))
-        self.assertAlmostEqual(float(lpc["Quantity Mean"]), 33.5, places=1)
+    def test_tsv_format_contract(self):
+        self._check_format("TSV", deviation=0, expected_lpc_value=32.0)
+
+    def test_xlsx_format_contract(self):
+        # Native QuantStudio output format — what production sees.
+        self._check_format("XLSX", deviation=0, expected_lpc_value=32.0)
+
+    def test_deviation_3_emits_target_plus_3_sd_across_formats(self):
+        # LPC target=32.0 sd=0.5 → deviation=3.0 → 33.5; same value in every emitter.
+        for fmt in ("CSV", "TSV", "XLSX"):
+            with self.subTest(format=fmt):
+                self._check_format(fmt, deviation=3.0, expected_lpc_value=33.5)
+
+    def test_qc_extension_resolution(self):
+        from protocols.file_handler import FileHandler
+        self.assertEqual(FileHandler.qc_extension(self._template("CSV")), ".csv")
+        self.assertEqual(FileHandler.qc_extension(self._template("TSV")), ".tsv")
+        self.assertEqual(FileHandler.qc_extension(self._template("XLSX")), ".xlsx")
+        self.assertEqual(FileHandler.qc_extension(self._template("EXCEL")), ".xlsx")
+        self.assertEqual(FileHandler.qc_extension(self._template("XLS")), ".xlsx")
+
+    def test_unsupported_pattern_placeholder_raises(self):
+        # Defensive: bad qc_sample_id_pattern should raise ValueError up
+        # front (clear message), not KeyError as a 500.
+        import copy
+        t = copy.deepcopy(self.base_template)
+        t["qc_sample_id_pattern"] = "{nonsense}-{lot}"
+        with self.assertRaises(ValueError) as ctx:
+            self.handler.generate_qc(t, deviation=0)
+        self.assertIn("nonsense", str(ctx.exception))
 
     def test_no_qc_controls_raises(self):
         bad_template = {"analyzer": {"name": "X"}, "fields": [{"name": "f"}]}

@@ -489,8 +489,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
                 return
 
+            # Explicit None check — an empty dict {} from the client means
+            # "do not upload"; only fall through to defaults when the field
+            # is omitted entirely.
             bridge_upload = params.get("bridge_upload")
-            if not bridge_upload:
+            if bridge_upload is None:
                 bridge_upload = _default_qc_file_bridge_upload(template_name, template)
             if bridge_upload:
                 try:
@@ -510,19 +513,26 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
                     return
                 os.makedirs(resolved_dir, exist_ok=True)
-                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}.csv"
+                ext = FileHandler.qc_extension(template)
+                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}{ext}"
                 out_path = os.path.join(resolved_dir, os.path.basename(fname))
-                with open(out_path, "w", encoding="utf-8") as f:
+                with open(out_path, "wb") as f:
                     f.write(content)
                 written_path = out_path
-            self._send_json(200, {
+            qc_format = FileHandler.qc_format(template)
+            response = {
                 "status": "completed",
                 "template": template_name,
                 "qc": True,
                 "qc_deviation": qc_deviation,
                 "written_path": written_path,
-                "content": content,
-            })
+                "format": qc_format,
+            }
+            # XLSX is binary — don't echo the bytes in JSON; return text inline
+            # only for CSV/TSV where it's diagnostic-friendly.
+            if qc_format in ("CSV", "TSV"):
+                response["content"] = content.decode("utf-8")
+            self._send_json(200, response)
             return
 
         fixture_cfg = template.get("fixture")
@@ -833,8 +843,17 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
         import urllib.request, urllib.error, ssl, uuid as _uuid, base64
         boundary = f"----mock-server-qc-{_uuid.uuid4().hex}"
-        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}.csv"
-        file_bytes = content.encode("utf-8")
+        ext = FileHandler.qc_extension(template)
+        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}{ext}"
+        # Pick a Content-Type that matches the bytes — bridge dispatch is
+        # extension-based but a correct MIME helps debugging tools.
+        content_type = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if ext.endswith("xlsx") else
+                        "text/tab-separated-values" if ext.endswith("tsv") else
+                        "text/csv")
+        # generate_qc returns bytes for both text and binary formats — text
+        # paths emit utf-8 encoded bytes; xlsx emits raw OOXML bytes.
+        file_bytes = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8")
 
         parts = []
         parts.append(f"--{boundary}\r\n".encode())
@@ -847,7 +866,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         parts.append(f"--{boundary}\r\n".encode())
         parts.append(
             f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
-            f"Content-Type: text/csv\r\n\r\n".encode()
+            f"Content-Type: {content_type}\r\n\r\n".encode()
         )
         parts.append(file_bytes)
         parts.append(b"\r\n")
@@ -878,16 +897,25 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             bridge_url, template_name, analyzer_id, qc_deviation, resp_status,
         )
 
-        self._send_json(200, {
+        # XLSX content is binary — only include a text preview for delimited
+        # formats. The upload_filename's extension already indicates the
+        # format clearly; binary preview would just be JSON-serialization
+        # noise (and breaks self._send_json).
+        qc_format = FileHandler.qc_format(template)
+        response = {
             "status": "uploaded",
             "template": template_name,
             "qc": True,
             "qc_deviation": qc_deviation,
+            "format": qc_format,
             "bridge_status": resp_status,
-            "bridge_response_preview": resp_body[:500],
+            "bridge_response_preview": resp_body[:500] if isinstance(resp_body, str) else "",
             "upload_filename": upload_filename,
-            "content_preview": content[:500],
-        })
+            "content_size_bytes": len(file_bytes),
+        }
+        if qc_format in ("CSV", "TSV"):
+            response["content_preview"] = file_bytes[:500].decode("utf-8", errors="replace")
+        self._send_json(200, response)
 
     def _handle_create_analyzer(self):
         mgr = self._get_network_manager()

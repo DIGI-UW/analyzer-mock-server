@@ -18,12 +18,19 @@ Reference: specs/013-hjra-hl7-stream-alignment
 """
 
 import logging
+import os
 import socket
 import time
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Default destination for ORU^R01 result push after an inbound ORM^O01 order.
+# In the harness docker-compose, both vars resolve to the bridge's MLLP listener;
+# overrideable per environment (or set to empty to disable the push entirely).
+DEFAULT_ORDER_RESULT_PUSH_HOST = "openelis-analyzer-bridge"
+DEFAULT_ORDER_RESULT_PUSH_PORT = 2575
 
 # MLLP framing bytes
 VT = b"\x0B"  # Start Block
@@ -104,6 +111,12 @@ class MLLPProtocolHandler:
                     control_id,
                     msg_type,
                 )
+
+                # LIS-initiated order: push a matching ORU^R01 result back to the
+                # bridge's MLLP listener so OE2's inbound import sees it. Echoes
+                # ORC-2 (placer) and OBR-3 (filler / accession) for correlation.
+                if msg_type.startswith("ORM") and self.template:
+                    self._push_order_result(message)
 
         except socket.timeout:
             logger.debug("[MLLP-LISTEN] Connection timeout from %s", self.addr)
@@ -220,6 +233,89 @@ class MLLPProtocolHandler:
                 if len(fields) > 8:
                     return fields[8]  # MSH-9
         return "UNKNOWN"
+
+    def _extract_order_correlation(self, order_message: str) -> Tuple[Optional[str], Optional[str]]:
+        """Parse ORC-2/OBR-2 (placer) and OBR-3/ORC-3 (filler) from an inbound
+        ORM^O01. The bridge embeds the OE2 accession in both placer and filler;
+        we echo whatever was sent. Returns (placer, filler), either may be None
+        if absent."""
+        placer: Optional[str] = None
+        filler: Optional[str] = None
+        for segment in order_message.split("\r"):
+            if segment.startswith("OBR|"):
+                fields = segment.split("|")
+                if len(fields) > 2 and fields[2].strip():
+                    placer = placer or fields[2].strip()
+                if len(fields) > 3 and fields[3].strip():
+                    filler = fields[3].strip()
+            elif segment.startswith("ORC|"):
+                fields = segment.split("|")
+                if len(fields) > 2 and fields[2].strip() and placer is None:
+                    placer = fields[2].strip()
+                if len(fields) > 3 and fields[3].strip() and filler is None:
+                    filler = fields[3].strip()
+        return placer, filler
+
+    def _push_order_result(self, order_message: str) -> None:
+        """After ACK'ing an ORM^O01, push a matching ORU^R01 to the LIS via a
+        fresh MLLP connection to the configured destination (the bridge's MLLP
+        listener in compose). Result OBR-3 echoes the inbound order's filler so
+        OE2's existing accession-keyed inbound result import picks it up.
+
+        Failures are logged, not raised — the order-receipt path stays
+        successful even if the result push can't reach the bridge.
+        """
+        # Lazy import to avoid cross-package import cycle at module load
+        from push import push_hl7_mllp
+        from protocols.hl7_handler import generate_oru_r01
+
+        host = os.environ.get("ORDER_RESULT_PUSH_HOST", DEFAULT_ORDER_RESULT_PUSH_HOST)
+        port_raw = os.environ.get("ORDER_RESULT_PUSH_PORT", str(DEFAULT_ORDER_RESULT_PUSH_PORT))
+        if not host:
+            logger.info("[ORDER_IN] ORDER_RESULT_PUSH_HOST empty; result push disabled")
+            return
+        try:
+            port = int(port_raw)
+        except (TypeError, ValueError):
+            logger.warning("[ORDER_IN] ORDER_RESULT_PUSH_PORT=%r invalid; skipping push", port_raw)
+            return
+
+        placer, filler = self._extract_order_correlation(order_message)
+        if not (placer or filler):
+            logger.warning(
+                "[ORDER_IN] No ORC/OBR placer or filler in order; cannot correlate result for %s",
+                self.addr,
+            )
+            return
+
+        try:
+            oru = generate_oru_r01(
+                self.template,
+                deterministic=True,
+                placer_order_id=placer or filler,
+                filler_order_id=filler or placer,
+            )
+        except Exception as e:
+            logger.error("[ORDER_IN] Failed to generate ORU^R01: %s", e, exc_info=True)
+            return
+
+        try:
+            ok = push_hl7_mllp(host, port, oru, timeout=10)
+            if ok:
+                logger.info(
+                    "[ORDER_IN] Pushed ORU^R01 to %s:%s (placer=%s, filler=%s)",
+                    host, port, placer, filler,
+                )
+            else:
+                logger.warning(
+                    "[ORDER_IN] push_hl7_mllp returned false for %s:%s (placer=%s, filler=%s)",
+                    host, port, placer, filler,
+                )
+        except Exception as e:
+            logger.error(
+                "[ORDER_IN] Exception pushing ORU^R01 to %s:%s: %s",
+                host, port, e, exc_info=True,
+            )
 
     def _build_ack(self, control_id: str, msg_type: str) -> str:
         """Build HL7 ACK message matching the inbound message's control ID."""

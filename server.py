@@ -137,6 +137,7 @@ class ASTMProtocolHandler:
         self.last_accepted_frame = 0  # Track last accepted frame number per CLSI LIS1-A
         self.retransmit_count = 0  # Track retransmissions per CLSI LIS1-A
         self.received_data: List[bytes] = []
+        self.received_orders: List[Dict[str, str]] = []  # inbound LIS orders awaiting result push
         self.running = True
         
     def handle(self):
@@ -157,16 +158,14 @@ class ASTMProtocolHandler:
                     # Client accepted — send our data
                     self._send_frames_from_template()
                 elif response == ENQ:
-                    # CONTENTION: both sides sent ENQ. Per spec, instrument wins.
-                    # Client should yield and send ACK on our next ENQ.
-                    logger.info(f"[PROACTIVE_ENQ] Contention detected with {self.addr}")
-                    time.sleep(1)  # Per spec: instrument waits >= 1s
-                    self._send(ENQ)  # Re-send ENQ
-                    response = self._receive_byte()
-                    if response == ACK:
-                        self._send_frames_from_template()
-                    else:
-                        logger.warning(f"[PROACTIVE_ENQ] Expected ACK after contention, got: {response}")
+                    # CONTENTION: both sides sent ENQ. Yield to client — when the
+                    # LIS has active work (orders), it takes priority over our
+                    # queued results. ACK the client's ENQ so it proceeds to send
+                    # its frames; the normal receive loop processes them and
+                    # send_order_response pushes results back. The template's
+                    # proactive push is forfeit for this connection.
+                    logger.info(f"[PROACTIVE_ENQ] Contention with {self.addr}, yielding to client")
+                    self._send(ACK)
                 # Fall through to normal receive loop regardless
             except socket.timeout:
                 logger.debug(f"[PROACTIVE_ENQ] No response, entering receive mode")
@@ -418,18 +417,27 @@ class ASTMProtocolHandler:
             except Exception as e:
                 logger.error(f"[MESSAGE] Error processing frame {frame_idx}: {e}", exc_info=True)
                 
+        # Snapshot orders before clearing for response dispatch
+        orders_snapshot = list(self.received_orders)
+        self.received_orders = []
+
         # Clear received data
         self.received_data = []
-        
-        # Respond to query if detected
+
+        # Respond to query / order if detected
         if is_results_query:
             logger.info(f"[MESSAGE] Results query detected from {self.addr}, sending template results")
             self.send_results_query_response()
         elif is_field_query:
             logger.info(f"[MESSAGE] Field query detected from {self.addr}, sending field list")
             self.send_field_query_response()
+        elif orders_snapshot:
+            logger.info(
+                f"[ORDER_IN] {len(orders_snapshot)} order record(s) from {self.addr}, pushing results"
+            )
+            self.send_order_response(orders_snapshot)
         else:
-            logger.debug(f"[MESSAGE] Not a field query, no response needed")
+            logger.debug(f"[MESSAGE] No query/order detected, no response needed")
         
     def _process_template_hint(self, record: str):
         """Process X (template hint) record: X|1|template_name| overrides port-based template."""
@@ -454,10 +462,21 @@ class ASTMProtocolHandler:
         logger.info(f"Patient record: ID={patient_id}")
         
     def _process_order(self, record: str):
-        """Process O (Order) record."""
+        """Process O (Order) record. Tracks accession + requested test code for
+        an inbound LIS order so send_order_response can echo a matching result.
+        ASTM universal-test-id is field 5 (parts[4]); format `^^^TESTCODE` per
+        LIS2-A2 §7.4.4."""
         parts = record.split('|')
-        sample_id = parts[2] if len(parts) > 2 else 'Unknown'
-        logger.info(f"Order record: Sample={sample_id}")
+        sample_id = parts[2] if len(parts) > 2 else ''
+        test_universal_id = parts[4] if len(parts) > 4 else ''
+        test_components = test_universal_id.split('^')
+        test_code = test_components[3] if len(test_components) > 3 else ''
+        logger.info(f"Order record: Sample={sample_id} Test={test_code}")
+        if sample_id and test_code:
+            self.received_orders.append({
+                'sample_id': sample_id,
+                'test_code': test_code,
+            })
         
     def _process_result(self, record: str):
         """Process R (Result) record."""
@@ -662,7 +681,90 @@ class ASTMProtocolHandler:
         finally:
             self._send(EOT)
             logger.info(f"[RESULTS_QUERY] Response complete for {self.addr}")
-        
+
+    def send_order_response(self, orders: List[Dict[str, str]]):
+        """After receiving an inbound LIS order, push matching result records
+        back on the same connection. Each order is {sample_id, test_code}.
+
+        The originating sample_id is echoed verbatim in the response O-record
+        (ASTM field 3) — that is the protocol-native correlation OpenELIS's
+        inbound result import keys on.
+
+        Result values come from the loaded ASTM template's `fields[].seedValue`
+        (NUMERIC) or `seedQualitative` (other). Unknown test codes are skipped
+        with a warning rather than failing the whole response.
+        """
+        if not self.astm_template:
+            logger.warning("[ORDER_IN] No template loaded; cannot generate result records")
+            return
+
+        logger.info(
+            f"[ORDER_IN] Pushing results for {len(orders)} order record(s) to {self.addr}"
+        )
+
+        self._send(ENQ)
+        try:
+            response = self._receive_byte()
+            if response != ACK:
+                logger.warning(
+                    f"[ORDER_IN] Did not receive ACK, got: {response.hex() if response else 'none'}"
+                )
+                return
+        except socket.timeout:
+            logger.warning("[ORDER_IN] Timeout waiting for ACK")
+            return
+
+        template_fields = {f.get('code'): f for f in self.astm_template.get('fields', [])}
+        test_patient = self.astm_template.get('testPatient', {})
+        patient_id = test_patient.get('id', 'PAT-ORDER')
+        patient_name = test_patient.get('name', 'DOE^JOHN')
+
+        # Group orders by sample so a multi-test order shares one P/O block.
+        # dict preserves insertion order in Python 3.7+.
+        samples: Dict[str, List[str]] = {}
+        for order in orders:
+            samples.setdefault(order['sample_id'], []).append(order['test_code'])
+
+        records: List[str] = [
+            "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
+        ]
+        patient_seq = 1
+        order_seq = 1
+        result_seq = 1
+        for sample_id, test_codes in samples.items():
+            records.append(f"P|{patient_seq}|{patient_id}||{patient_name}")
+            records.append(f"O|{order_seq}|{sample_id}|||^^^|R")
+            patient_seq += 1
+            order_seq += 1
+            for test_code in test_codes:
+                field = template_fields.get(test_code)
+                if not field:
+                    logger.warning(
+                        f"[ORDER_IN] Test code {test_code} not in template fields; skipping result"
+                    )
+                    continue
+                if field.get('type') == 'NUMERIC':
+                    value = field.get('seedValue', '')
+                    unit = field.get('unit', '')
+                else:
+                    value = field.get('seedQualitative', '')
+                    unit = ''
+                records.append(f"R|{result_seq}|^^^{test_code}|{value}|{unit}||||F")
+                result_seq += 1
+        records.append("L|1|N")
+
+        try:
+            for i, record in enumerate(records):
+                if not self._send_frame(record.strip()):
+                    logger.warning(
+                        f"[ORDER_IN] Send failed at record {i + 1}/{len(records)}"
+                    )
+                    break
+            logger.info(f"[ORDER_IN] Sent {len(records)} result records to {self.addr}")
+        finally:
+            self._send(EOT)
+            logger.info(f"[ORDER_IN] Order response complete for {self.addr}")
+
     def _send_frames_from_template(self):
         """Send template data as ASTM frames (ENQ/ACK already established).
 

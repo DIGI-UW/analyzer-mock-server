@@ -684,34 +684,42 @@ class ASTMProtocolHandler:
 
     def send_order_response(self, orders: List[Dict[str, str]]):
         """After receiving an inbound LIS order, push matching result records
-        back on the same connection. Each order is {sample_id, test_code}.
-
-        The originating sample_id is echoed verbatim in the response O-record
+        back via a FRESH TCP connection to the bridge's ASTM listener. The
+        originating sample_id is echoed verbatim in the response O-record
         (ASTM field 3) — that is the protocol-native correlation OpenELIS's
         inbound result import keys on.
 
-        Result values come from the loaded ASTM template's `fields[].seedValue`
-        (NUMERIC) or `seedQualitative` (other). Unknown test codes are skipped
-        with a warning rather than failing the whole response.
+        Same-connection push doesn't work end-to-end: the bridge's outbound
+        forwarder closes the TCP socket after sending EOT, so any response
+        sent on `self.conn` is dropped. Mirrors the HL7 path which already
+        opens a fresh MLLP connection back to bridge:2575 (see
+        _push_order_result in protocols/mllp_listener.py).
+
+        Destination defaults to the bridge's inbound ASTM listener:
+          ORDER_RESULT_PUSH_HOST=openelis-analyzer-bridge
+          ORDER_RESULT_PUSH_ASTM_PORT=12001
+        Empty host disables the push (useful for standalone dev runs).
+
+        Result values come from the loaded ASTM template's
+        `fields[].seedValue` (NUMERIC) or `seedQualitative` (other). Unknown
+        test codes are skipped with a warning rather than failing the whole
+        response.
         """
         if not self.astm_template:
             logger.warning("[ORDER_IN] No template loaded; cannot generate result records")
             return
 
-        logger.info(
-            f"[ORDER_IN] Pushing results for {len(orders)} order record(s) to {self.addr}"
-        )
-
-        self._send(ENQ)
+        host = os.environ.get("ORDER_RESULT_PUSH_HOST", "openelis-analyzer-bridge")
+        port_raw = os.environ.get("ORDER_RESULT_PUSH_ASTM_PORT", "12001")
+        if not host:
+            logger.info("[ORDER_IN] ORDER_RESULT_PUSH_HOST empty; ASTM result push disabled")
+            return
         try:
-            response = self._receive_byte()
-            if response != ACK:
-                logger.warning(
-                    f"[ORDER_IN] Did not receive ACK, got: {response.hex() if response else 'none'}"
-                )
-                return
-        except socket.timeout:
-            logger.warning("[ORDER_IN] Timeout waiting for ACK")
+            port = int(port_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[ORDER_IN] ORDER_RESULT_PUSH_ASTM_PORT=%r invalid; skipping push", port_raw
+            )
             return
 
         template_fields = {f.get('code'): f for f in self.astm_template.get('fields', [])}
@@ -753,17 +761,30 @@ class ASTMProtocolHandler:
                 result_seq += 1
         records.append("L|1|N")
 
+        # push_astm_tcp opens a new TCP connection, performs ENQ/ACK/frames/EOT,
+        # and returns True on success. Send each record as a single line; the
+        # session helper handles framing.
+        from push import push_astm_tcp
+        message = "\n".join(records)
+        logger.info(
+            f"[ORDER_IN] Pushing {len(records)} ASTM result records for {len(orders)} order(s) "
+            f"to {host}:{port}"
+        )
         try:
-            for i, record in enumerate(records):
-                if not self._send_frame(record.strip()):
-                    logger.warning(
-                        f"[ORDER_IN] Send failed at record {i + 1}/{len(records)}"
-                    )
-                    break
-            logger.info(f"[ORDER_IN] Sent {len(records)} result records to {self.addr}")
-        finally:
-            self._send(EOT)
-            logger.info(f"[ORDER_IN] Order response complete for {self.addr}")
+            ok = push_astm_tcp(host, port, message, timeout=10)
+            if ok:
+                logger.info(
+                    f"[ORDER_IN] Pushed ASTM result message to {host}:{port}"
+                )
+            else:
+                logger.warning(
+                    f"[ORDER_IN] push_astm_tcp returned false for {host}:{port}"
+                )
+        except Exception as e:
+            logger.error(
+                f"[ORDER_IN] Exception pushing ASTM result to {host}:{port}: {e}",
+                exc_info=True,
+            )
 
     def _send_frames_from_template(self):
         """Send template data as ASTM frames (ENQ/ACK already established).

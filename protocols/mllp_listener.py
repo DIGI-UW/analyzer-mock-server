@@ -256,6 +256,23 @@ class MLLPProtocolHandler:
                     filler = fields[3].strip()
         return placer, filler
 
+    def _extract_ordered_codes(self, order_message: str):
+        """Parse the requested test codes from an inbound ORM^O01. Each ordered
+        test is an ORC/OBR group whose OBR-4 (Universal Service Identifier) is
+        `^^^CODE^NAME`; the code is the analyzer's own test code. Preserves order
+        and de-dupes. A faithful analyzer runs exactly these tests."""
+        codes = []
+        for segment in order_message.split("\r"):
+            if segment.startswith("OBR|"):
+                fields = segment.split("|")
+                if len(fields) > 4 and fields[4].strip():
+                    comps = fields[4].split("^")
+                    code = comps[3] if len(comps) > 3 else (comps[0] if comps else "")
+                    code = code.strip()
+                    if code and code not in codes:
+                        codes.append(code)
+        return codes
+
     def _push_order_result(self, order_message: str) -> None:
         """After ACK'ing an ORM^O01, push a matching ORU^R01 to the LIS via a
         fresh MLLP connection to the configured destination (the bridge's MLLP
@@ -288,12 +305,21 @@ class MLLPProtocolHandler:
             )
             return
 
+        ordered_codes = self._extract_ordered_codes(order_message)
+        if not ordered_codes:
+            logger.warning(
+                "[ORDER_IN] No ordered test codes (OBR-4) in order from %s; nothing to result",
+                self.addr,
+            )
+            return
+
         try:
             oru = generate_oru_r01(
                 self.template,
                 deterministic=True,
                 placer_order_id=placer or filler,
                 filler_order_id=filler or placer,
+                ordered_codes=ordered_codes,
             )
         except Exception as e:
             logger.error("[ORDER_IN] Failed to generate ORU^R01: %s", e, exc_info=True)

@@ -136,7 +136,9 @@ class TestSendOrderResponse(unittest.TestCase):
         self.assertIn('R|1|^^^MTB-RIF', message)
         self.assertIn('R|2|^^^HIV-VL', message)
 
-    def test_unknown_test_code_is_skipped_not_fatal(self):
+    def test_unknown_test_code_yields_error_result_not_dropped(self):
+        # A faithful analyzer reports a test it cannot run (status X) rather than
+        # silently omitting it. Both the known and unknown ordered codes appear.
         handler, _ = _make_handler()
         with patch('push.push_astm_tcp', return_value=True) as mock_push:
             with patch.dict(os.environ, {
@@ -148,8 +150,12 @@ class TestSendOrderResponse(unittest.TestCase):
                     {'sample_id': 'ACC-1', 'test_code': 'MTB-RIF'},
                 ])
         message = mock_push.call_args[0][2]
-        self.assertNotIn('^^^UNKNOWN', message)
         self.assertIn('^^^MTB-RIF', message)
+        # Unknown code is surfaced as an error-flagged (status X) R-record.
+        self.assertIn('^^^UNKNOWN', message)
+        unknown_record = [r for r in message.split('\n') if '^^^UNKNOWN' in r][0]
+        self.assertTrue(unknown_record.rstrip().endswith('X'),
+                        f"unknown-code R-record must carry error status X; got: {unknown_record!r}")
 
     def test_no_template_aborts_without_pushing(self):
         handler, _ = _make_handler(template=False)  # explicit no template

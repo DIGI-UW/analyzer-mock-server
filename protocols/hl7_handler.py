@@ -36,6 +36,7 @@ def generate_oru_r01(
     placer_order_id: Optional[str] = None,
     filler_order_id: Optional[str] = None,
     message_control_id: Optional[str] = None,
+    ordered_codes: Optional[List[str]] = None,
 ) -> str:
     """
     Generate a complete HL7 ORU^R01 message from a template.
@@ -131,7 +132,27 @@ def generate_oru_r01(
     ])
     segments.append(obr)
 
-    for seq, field in enumerate(fields, start=1):
+    # A faithful analyzer reports results for exactly the ORDERED tests. When
+    # ordered_codes is supplied, resolve each against the template's catalog and
+    # emit one OBX per ordered test; a code the analyzer doesn't run yields an
+    # error-flagged OBX (it must be visible, not silently dropped). Only when no
+    # order context is given (e.g. unsolicited push / legacy QC) do we fall back
+    # to the full template field list.
+    if ordered_codes:
+        by_code = {f.get("code"): f for f in fields}
+        emit_fields = []
+        for code in ordered_codes:
+            if code in by_code:
+                emit_fields.append(by_code[code])
+            else:
+                emit_fields.append({
+                    "code": code, "name": code, "type": "QUALITATIVE",
+                    "possibleValues": ["TEST NOT PERFORMED"], "_error": True,
+                })
+    else:
+        emit_fields = fields
+
+    for seq, field in enumerate(emit_fields, start=1):
         obx = _obx_segment(seq, field, deterministic)
         segments.append(obx)
 
@@ -160,9 +181,17 @@ def _obx_segment(seq: int, field: Dict, deterministic: bool) -> str:
             value = str(value)
 
     value_type = "NM" if field_type == "NUMERIC" else "ST"
-    # OBX|seq|value_type|^^^code^name||value|unit||N|||F||||||
+    # OBX-8 abnormal flag, OBX-11 result status. A test the analyzer cannot run
+    # (ordered but not in its catalog) is reported with status "X" (cannot
+    # obtain result) per HL7 v2 — visible, not silently omitted.
+    abnormal_flag = "N"
+    result_status = "F"
+    if field.get("_error"):
+        abnormal_flag = ""
+        result_status = "X"
+    # OBX|seq|value_type|^^^code^name||value|unit||flag|||status||||||
     obx_id = f"^^^{code}^{name}"
-    parts = ["OBX", str(seq), value_type, obx_id, "", value, unit, "", "N", "", "", "F", "", "", "", "", ""]
+    parts = ["OBX", str(seq), value_type, obx_id, "", value, unit, "", abnormal_flag, "", "", result_status, "", "", "", "", ""]
     return "|".join(parts)
 
 

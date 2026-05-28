@@ -747,9 +747,15 @@ class ASTMProtocolHandler:
             for test_code in test_codes:
                 field = template_fields.get(test_code)
                 if not field:
+                    # Ordered a test this analyzer can't run. A faithful analyzer
+                    # reports that (result status X = cannot obtain result) rather
+                    # than silently omitting it, so the mismatch is visible.
                     logger.warning(
-                        f"[ORDER_IN] Test code {test_code} not in template fields; skipping result"
+                        f"[ORDER_IN] Ordered test {test_code} not in analyzer profile; "
+                        f"emitting error result (status X)"
                     )
+                    records.append(f"R|{result_seq}|^^^{test_code}|TEST NOT PERFORMED|||||X")
+                    result_seq += 1
                     continue
                 if field.get('type') == 'NUMERIC':
                     value = field.get('seedValue', '')

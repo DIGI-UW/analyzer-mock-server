@@ -230,3 +230,23 @@ def test_fixture_parses_and_is_phi_free(fixture_name, profile_rel):
     blob = "\n".join("\t".join(r) for r in _rows_from_fixture(fixture))
     leaks = [p.pattern for p in _PHI_PATTERNS if p.search(blob)]
     assert not leaks, f"{fixture_name}: real-PHI identifier pattern(s) present: {leaks}"
+
+
+def test_validated_file_profiles_have_faithful_fixture():
+    """VALIDATED gate: a FILE profile may not claim confidence=VALIDATED without a
+    faithful loadable fixture behind it (no 'validated' label on untested data)."""
+    fixtured = {pr for _, pr in FILE_FIXTURES}
+    offenders = []
+    for path in _profile_files():
+        prof = _load(path)
+        if prof.get("protocol", {}).get("name") != "FILE":
+            continue
+        if prof.get("profileMeta", {}).get("confidence") != "VALIDATED":
+            continue
+        rel = os.path.relpath(path, PROFILES_ROOT).replace(os.sep, "/")
+        if rel not in fixtured:
+            offenders.append(rel)
+    assert not offenders, (
+        f"VALIDATED FILE profiles with no faithful fixture (downgrade confidence or add a "
+        f"fixture): {offenders}"
+    )

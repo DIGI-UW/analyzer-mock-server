@@ -14,72 +14,17 @@
     "hl7_sending_app": "MINDRAY",
     "hl7_sending_facility": "BS-200"
   },
-  "fields": [
-    {
-      "code": "CREA",
-      "name": "CREATININE",
-      "unit": "mg/dL",
-      "normalRange": "0.6-1.2",
-      "seedValue": 1.1,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "ALT",
-      "name": "ALANINE AMINOTRANSFERASE",
-      "unit": "U/L",
-      "normalRange": "7-56",
-      "seedValue": 32,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "AST",
-      "name": "ASPARTATE AMINOTRANSFERASE",
-      "unit": "U/L",
-      "normalRange": "10-40",
-      "seedValue": 28,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "GLU",
-      "name": "GLUCOSE",
-      "unit": "mg/dL",
-      "normalRange": "70-100",
-      "seedValue": 92,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "UREA",
-      "name": "BLOOD UREA NITROGEN",
-      "unit": "mg/dL",
-      "normalRange": "7-20",
-      "seedValue": 15,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "ALB",
-      "name": "ALBUMIN",
-      "unit": "g/dL",
-      "normalRange": "3.5-5.0",
-      "seedValue": 4.2,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "TP",
-      "name": "TOTAL PROTEIN",
-      "unit": "g/dL",
-      "normalRange": "6.0-8.3",
-      "seedValue": 7.1,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "TBIL",
-      "name": "TOTAL BILIRUBIN",
-      "unit": "mg/dL",
-      "normalRange": "0.1-1.2",
-      "seedValue": 0.7,
-      "type": "NUMERIC"
-    }
-  ],
+  "profile": "hl7/mindray-bs200",
+  "seedValues": {
+    "CREA": 1.1,
+    "ALT": 32,
+    "AST": 28,
+    "GLU": 92,
+    "UREA": 15,
+    "ALB": 4.2,
+    "TP": 7.1,
+    "TBIL": 0.7
+  },
   "testPatient": {
     "id": "PAT003",
     "name": "RABE^FARA",

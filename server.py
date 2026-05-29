@@ -772,12 +772,22 @@ class ASTMProtocolHandler:
         # session helper handles framing.
         from push import push_astm_tcp
         message = "\n".join(records)
+        # Source the push from the interface the order arrived on (this analyzer's
+        # IP = the inbound connection's LOCAL address). The mock is attached to one
+        # network per analyzer; the bridge identifies the source analyzer by the
+        # push's source IP, so an unbound push from an arbitrary interface gets
+        # mis-attributed. NOTE: self.conn.getsockname() (local), not self.addr (the
+        # bridge's remote address).
+        try:
+            source_ip = self.conn.getsockname()[0]
+        except OSError:
+            source_ip = None
         logger.info(
             f"[ORDER_IN] Pushing {len(records)} ASTM result records for {len(orders)} order(s) "
-            f"to {host}:{port}"
+            f"to {host}:{port} (source={source_ip})"
         )
         try:
-            ok = push_astm_tcp(host, port, message, timeout=10)
+            ok = push_astm_tcp(host, port, message, timeout=10, source_ip=source_ip)
             if ok:
                 logger.info(
                     f"[ORDER_IN] Pushed ASTM result message to {host}:{port}"

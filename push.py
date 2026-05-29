@@ -76,15 +76,15 @@ def push_astm_to_destination(destination: str, astm_message: str,
 
 
 def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
-                   source_ip: Optional[str] = None) -> bool:
+                  source_ip: Optional[str] = None) -> bool:
     """Push an HL7 message over MLLP and require positive application ACK.
 
-    source_ip: optional local IP to bind the outgoing socket to. The mock
-    container has multiple Docker network interfaces (one per registered
-    analyzer); the bridge identifies analyzers by source IP, so QC pushes
-    must come from the right network's address. Without this binding,
-    Linux picks the route arbitrarily and the bridge can't resolve the
-    analyzer registry entry.
+    source_ip: optional local IP to bind the outgoing socket to. The mock has one
+    Docker network interface per registered analyzer; the bridge identifies the
+    source analyzer by the connection's source IP, so the push (a QC message or an
+    ORU result) must come from the ordering analyzer's interface. Without binding,
+    the kernel picks the route arbitrarily and the message is attributed to the
+    wrong analyzer.
     """
     sock = None
     try:

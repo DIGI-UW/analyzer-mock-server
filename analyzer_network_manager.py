@@ -17,11 +17,34 @@ Usage:
     manager.remove_analyzer("bc5380")
 """
 
+import functools
 import logging
 import os
+import threading
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _synchronized(method):
+    """Serialize a network-manager method on ``self._lock``.
+
+    The mock's HTTP server is threaded (api.py ThreadingHTTPServer), so
+    concurrent ``/analyzers`` requests would otherwise race on the shared subnet
+    allocator (``_next_dynamic_subnet``), the ``_analyzers`` map, and Docker
+    network create/connect. Guarding the *mutating* methods makes concurrent
+    provisioning behave exactly as if sequential — creates queue behind each
+    other while read-only endpoints (``list_analyzers``/``get_analyzer``) stay
+    responsive. RLock so one guarded method may call another (e.g. cleanup_all →
+    remove_analyzer).
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 # Subnet allocation: 10.42.{N}.0/24 — completely separate range from
 # analyzer-net (172.21.1.0/24) to avoid Docker routing conflicts
@@ -46,6 +69,7 @@ class AnalyzerNetworkManager:
 
     def __init__(self):
         self._docker = None
+        self._lock = threading.RLock()
         self._analyzers: Dict[str, dict] = {}  # name → {network, ip, template, ...}
         self._next_dynamic_subnet = DYNAMIC_SUBNET_BASE
         self._mock_container = os.environ.get("MOCK_CONTAINER_NAME", os.environ.get("HOSTNAME", ""))
@@ -103,6 +127,7 @@ class AnalyzerNetworkManager:
             logger.warning("Failed to inspect existing Docker subnets: %s", err)
         return False
 
+    @_synchronized
     def create_analyzer(
         self,
         name: str,
@@ -231,6 +256,7 @@ class AnalyzerNetworkManager:
                 pass
             raise
 
+    @_synchronized
     def connect_mock_to_analyzer(self, name: str) -> bool:
         """Attach the running mock container to an existing analyzer network."""
         info = self._analyzers.get(name)
@@ -259,6 +285,7 @@ class AnalyzerNetworkManager:
             )
             return False
 
+    @_synchronized
     def remove_analyzer(self, name: str) -> bool:
         """Remove an analyzer's Docker network.
 
@@ -282,6 +309,7 @@ class AnalyzerNetworkManager:
         """Get a specific analyzer's info."""
         return self._analyzers.get(name)
 
+    @_synchronized
     def cleanup_all(self):
         """Remove all analyzer networks. Called on shutdown."""
         for name in list(self._analyzers.keys()):

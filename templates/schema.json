@@ -4,8 +4,24 @@
   "title": "Analyzer Message Template",
   "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports ASTM, HL7, RS232, FILE protocols with field definitions and deterministic seed values.",
   "type": "object",
-  "required": ["analyzer", "protocol", "fields"],
+  "required": ["analyzer", "protocol"],
+  "oneOf": [
+    { "required": ["fields"], "description": "Legacy: inline assay fields." },
+    { "required": ["profile"], "description": "Profile-backed: assay menu derived from the canonical profile referenced by `profile` (single source of truth)." }
+  ],
   "properties": {
+    "profile": {
+      "type": "string",
+      "description": "Reference to a canonical profile (e.g. 'hl7/mindray-bc5380'); profile_adapter derives `fields` from it. Mutually exclusive with inline `fields`."
+    },
+    "seedValues": {
+      "type": "object",
+      "description": "Per-code deterministic mock values keyed by analyzer test_code (profile-backed templates)."
+    },
+    "fieldOverrides": {
+      "type": "object",
+      "description": "Per-code simulation-fidelity overrides merged onto profile-derived fields (e.g. version, complementaryResults). Does NOT change the assay menu."
+    },
     "analyzer": {
       "type": "object",
       "description": "Analyzer identification metadata",
@@ -296,7 +312,7 @@
       "type": "object",
       "description": "File format configuration (if protocol.transport=FILE)",
       "properties": {
-        "format": { "enum": ["CSV", "TSV", "TXT", "XLS"] },
+        "format": { "enum": ["CSV", "TSV", "TXT", "XLS", "XLSX"] },
         "delimiter": { "type": "string", "default": "," },
         "has_header": { "type": "boolean", "default": true },
         "column_mapping": { "type": "object" }

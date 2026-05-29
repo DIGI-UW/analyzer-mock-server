@@ -88,6 +88,34 @@ def test_profile_conforms_to_canonical_schema(profile_path, validator):
     )
 
 
+TEMPLATE_SCHEMA_PATH = os.path.join(TEMPLATES_DIR, "schema.json")
+
+
+def _template_files():
+    return [
+        p for p in sorted(glob.glob(os.path.join(TEMPLATES_DIR, "*.json")))
+        if os.path.basename(p) != "schema.json"
+    ]
+
+
+@pytest.fixture(scope="module")
+def template_validator():
+    return Draft7Validator(_load(TEMPLATE_SCHEMA_PATH))
+
+
+@pytest.mark.parametrize(
+    "template_path", _template_files(),
+    ids=[os.path.basename(p) for p in _template_files()],
+)
+def test_template_conforms_to_schema(template_path, template_validator):
+    tpl = _load(template_path)
+    errors = sorted(template_validator.iter_errors(tpl), key=lambda e: list(e.path))
+    detail = "\n".join(f"    {list(e.path)}: {e.message}" for e in errors)
+    assert not errors, (
+        f"{os.path.basename(template_path)} violates template schema:\n{detail}"
+    )
+
+
 @pytest.mark.parametrize("template_name", _profile_backed_templates())
 def test_profile_backed_template_loads_through_real_adapter(template_name):
     tpl = _load(os.path.join(TEMPLATES_DIR, template_name))

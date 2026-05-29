@@ -75,25 +75,30 @@ def _default_qc_file_bridge_upload(template_name: str, template: Dict) -> Dict[s
 
 
 def _load_template(analyzer: str) -> Optional[Dict]:
-    """Load analyzer template — profile-backed first, then local file."""
-    try:
-        from profile_adapter import load_strict_013_profile_template
-        profile_template = load_strict_013_profile_template(analyzer)
-        if profile_template is not None:
-            return profile_template
-    except Exception as e:
-        logger.warning("Failed to load profile template for %s: %s", analyzer, e)
-
+    """Load an analyzer's mock template: transport/fixtures from
+    templates/<analyzer>.json, assay `fields` derived from the canonical profile
+    it references (`profile` key) — single source of truth. Templates without a
+    `profile` key fall back to their own `fields` (legacy, pending migration)."""
     base = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base, "templates", f"{analyzer}.json")
     if not os.path.exists(path):
         return None
     try:
         with open(path, "r") as f:
-            return json.load(f)
+            template = json.load(f)
     except Exception as e:
         logger.warning("Failed to load template %s: %s", path, e)
         return None
+
+    try:
+        from profile_adapter import load_profile_backed_template
+        merged = load_profile_backed_template(analyzer, template)
+        if merged is not None:
+            return merged
+    except Exception as e:
+        logger.warning("Failed to derive profile-backed template for %s: %s", analyzer, e)
+
+    return template
 
 
 def _safe_file_output_path(target_dir, filename, template_name, default_pattern):

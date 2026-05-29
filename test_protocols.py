@@ -21,10 +21,12 @@ from api import MockAPIHandler as SimulateAPIHandler
 
 
 def _load_template(name: str):
-    base = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(base, "templates", f"{name}.json")
-    with open(path, "r") as f:
-        return json.load(f)
+    # Use the production loader so these tests exercise the real template path:
+    # transport/fixtures from templates/<name>.json + assay fields derived from the
+    # canonical profile it references. (A raw json.load would bypass the profile
+    # derivation and test a stub.)
+    from server import _load_template as _load_production_template
+    return _load_production_template(name)
 
 
 class TestASTMHandler(unittest.TestCase):

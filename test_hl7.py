@@ -301,12 +301,28 @@ def test_non_hl7_template_raises():
         generate_oru_r01(non_hl7, deterministic=True)
 
 
-def test_strict_013_profiles_have_adapter_targets():
-    """Strict 013 profile files must have explicit adapter targets."""
-    from profile_adapter import STRICT_013_PROFILE_FILES
-
-    expected = {"mindray-bc5380.json", "mindray-bs200.json", "mindray-bs300.json"}
-    assert set(STRICT_013_PROFILE_FILES.values()) == expected
+@pytest.mark.parametrize(
+    "template_name,profile_ref",
+    [
+        ("mindray_bc5380", "hl7/mindray-bc5380"),
+        ("mindray_bs200", "hl7/mindray-bs200"),
+        ("mindray_bs300", "hl7/mindray-bs300"),
+    ],
+)
+def test_hl7_templates_reference_their_canonical_profile(template_name, profile_ref):
+    """Profile-backed templates must declare the canonical profile they derive
+    their assay menu from (the `profile` key), so coverage stays single-sourced."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(base, "templates", f"{template_name}.json"), encoding="utf-8") as fh:
+        template = json.load(fh)
+    assert template.get("profile") == profile_ref, (
+        f"{template_name} must reference profile {profile_ref}; the assay menu is "
+        "derived from the profile, not hand-maintained in the template"
+    )
+    assert "fields" not in template, (
+        f"{template_name} must not carry a hand-maintained `fields` list — assays "
+        "come from the canonical profile"
+    )
 
 
 @pytest.mark.parametrize(

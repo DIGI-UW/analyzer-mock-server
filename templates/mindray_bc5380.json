@@ -14,40 +14,14 @@
     "hl7_sending_app": "MINDRAY",
     "hl7_sending_facility": "BC-5380"
   },
-  "fields": [
-    {
-      "code": "WBC",
-      "name": "WHITE BLOOD CELL",
-      "unit": "10*3/uL",
-      "normalRange": "4.0-10.0",
-      "seedValue": 7.5,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "RBC",
-      "name": "RED BLOOD CELL",
-      "unit": "10*6/uL",
-      "normalRange": "4.0-5.5",
-      "seedValue": 4.82,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "HGB",
-      "name": "HEMOGLOBIN",
-      "unit": "g/dL",
-      "normalRange": "12.0-17.5",
-      "seedValue": 14.2,
-      "type": "NUMERIC"
-    },
-    {
-      "code": "HCT",
-      "name": "HEMATOCRIT",
-      "unit": "%",
-      "normalRange": "36-54",
-      "seedValue": 42.0,
-      "type": "NUMERIC"
-    }
-  ],
+  "profile": "hl7/mindray-bc5380",
+  "seedValues": {
+    "WBC": 7.5,
+    "HGB": 14.2,
+    "PLT": 250,
+    "LYMPH": 2.1,
+    "MONO": 0.5
+  },
   "testPatient": {
     "id": "PAT001",
     "name": "DOE^JOHN",

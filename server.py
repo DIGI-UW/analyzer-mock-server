@@ -1065,26 +1065,34 @@ class ASTMMockServer:
 
 
 def _load_template(analyzer: str) -> Optional[Dict]:
-    """Load analyzer template from templates/<analyzer>.json."""
-    try:
-        from profile_adapter import load_strict_013_profile_template
+    """Load an analyzer's mock template.
 
-        profile_template = load_strict_013_profile_template(analyzer)
-        if profile_template is not None:
-            return profile_template
-    except Exception as e:
-        logger.warning("Failed to load strict profile-backed template for %s: %s", analyzer, e)
-
+    The on-disk templates/<analyzer>.json carries transport/framing mechanics +
+    mock test fixtures and references its canonical profile via a `profile` key.
+    The assay menu (`fields`) is then derived from that profile — single source of
+    truth. Templates without a `profile` key fall back to their own `fields`
+    (legacy, pending migration)."""
     base = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base, "templates", f"{analyzer}.json")
     if not os.path.exists(path):
         return None
     try:
         with open(path, "r") as f:
-            return json.load(f)
+            template = json.load(f)
     except Exception as e:
         logger.warning("Failed to load template %s: %s", path, e)
         return None
+
+    try:
+        from profile_adapter import load_profile_backed_template
+
+        merged = load_profile_backed_template(analyzer, template)
+        if merged is not None:
+            return merged
+    except Exception as e:
+        logger.warning("Failed to derive profile-backed template for %s: %s", analyzer, e)
+
+    return template
 
 
 def _load_port_templates(default_port: int) -> Dict[int, str]:

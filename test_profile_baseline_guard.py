@@ -125,3 +125,108 @@ def test_profile_backed_template_loads_through_real_adapter(template_name):
     assert fields, f"{template_name}: profile yielded zero assay fields"
     missing_loinc = [f.get("code") for f in fields if not f.get("loinc")]
     assert not missing_loinc, f"{template_name}: assay fields missing LOINC: {missing_loinc}"
+
+
+# --- Fixture faithfulness: parse each loadable fixture through a faithful mirror
+# of the bridge FileResultParser contract and assert it would import (≥1 result
+# whose testCode maps to a LOINC), and that it carries zero real-PHI patterns. ---
+
+import csv as _csv
+import re as _re
+
+_OE2_ROOT = os.path.dirname(os.path.dirname(PROFILES_ROOT))
+FIXTURES_DIR = os.path.join(_OE2_ROOT, "src", "test", "resources", "testdata", "files")
+
+# (fixture filename, profile relpath under projects/analyzer-profiles)
+FILE_FIXTURES = [
+    ("tecan-f50-results.csv", "file/tecan-f50.json"),
+    ("multiskan-fc-results.csv", "file/multiskan-fc.json"),
+    ("fluorocycler-results.xlsx", "file/fluorocycler-xt.json"),
+    ("quantstudio5-results.xlsx", "file/quantstudio.json"),
+    ("quantstudio7-results.xlsx", "file/quantstudio.json"),
+]
+
+# Real Madagascar accession/identifier shapes that must never appear in a fixture.
+_PHI_PATTERNS = [_re.compile(p) for p in (r"\bLM\d{6,}", r"CG-M4-\d", r"\bLL\d{6,}", r"\bDCN\d{6,}")]
+
+
+def _rows_from_fixture(path):
+    """Return list-of-rows (each a list of cell strings) for csv/xlsx, mirroring
+    the bridge's reader dispatch."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".csv", ".tsv", ".txt"):
+        with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+            sample = fh.readline()
+            delim = ";" if sample.count(";") >= sample.count(",") else ","
+            fh.seek(0)
+            return [[(c or "").strip() for c in row] for row in _csv.reader(fh, delimiter=delim)]
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb["Results"] if "Results" in wb.sheetnames else wb.worksheets[0]
+    return [[("" if c is None else str(c)).strip() for c in row] for row in ws.iter_rows(values_only=True)]
+
+
+def _find_header_row(rows):
+    """Mirror FileResultParser.findHeaderRow (sheet/CSV header location)."""
+    if not rows:
+        return -1
+    a0 = rows[0][0] if rows[0] else ""
+    if a0 == "Well":
+        return 0
+    if "Block Type" in a0 or "Experiment Name" in a0:
+        for i in range(min(200, len(rows))):
+            if rows[i] and rows[i][0] == "Well":
+                return i
+        return 0
+    return 0
+
+
+def _emit(rows, column_mapping):
+    """Mirror the bridge: map header→role, emit a row iff sampleId+testCode+value
+    (result→ctValue→interpretation) are all non-blank."""
+    h = _find_header_row(rows)
+    header = rows[h]
+    role_idx = {}
+    for i, name in enumerate(header):
+        role = column_mapping.get(name)
+        if role:
+            role_idx[role] = i
+
+    def cell(row, role):
+        i = role_idx.get(role)
+        return row[i] if (i is not None and i < len(row)) else ""
+
+    out = []
+    for row in rows[h + 1:]:
+        if not any(row):
+            continue
+        sample_id = cell(row, "sampleId")
+        test_code = cell(row, "testCode")
+        value = cell(row, "result") or cell(row, "ctValue") or cell(row, "interpretation")
+        if sample_id and test_code and value:
+            out.append((sample_id, test_code, value))
+    return out
+
+
+@pytest.mark.parametrize(
+    "fixture_name,profile_rel", FILE_FIXTURES,
+    ids=[f[0] for f in FILE_FIXTURES],
+)
+def test_fixture_parses_and_is_phi_free(fixture_name, profile_rel):
+    fixture = os.path.join(FIXTURES_DIR, fixture_name)
+    assert os.path.isfile(fixture), f"loadable fixture missing: {fixture}"
+    profile = _load(os.path.join(PROFILES_ROOT, profile_rel))
+    column_mapping = profile.get("column_mapping", {})
+    mapped_codes = {m.get("test_code") for m in profile.get("default_test_mappings", [])}
+
+    emitted = _emit(_rows_from_fixture(fixture), column_mapping)
+    assert emitted, f"{fixture_name}: parses to zero importable rows (sampleId+testCode+value)"
+    patient = [(s, t, v) for (s, t, v) in emitted if t in mapped_codes]
+    assert patient, (
+        f"{fixture_name}: no row whose testCode is in the profile's default_test_mappings "
+        f"{sorted(mapped_codes)}; emitted testCodes={sorted({t for _, t, _ in emitted})}"
+    )
+
+    blob = "\n".join("\t".join(r) for r in _rows_from_fixture(fixture))
+    leaks = [p.pattern for p in _PHI_PATTERNS if p.search(blob)]
+    assert not leaks, f"{fixture_name}: real-PHI identifier pattern(s) present: {leaks}"

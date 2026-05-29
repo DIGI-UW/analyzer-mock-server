@@ -119,6 +119,59 @@ class TestCreateAnalyzerOverlapRetry(unittest.TestCase):
         # The second (successful) subnet differs from the first (overlapped) one.
         self.assertEqual(result["ip"], f"10.42.{DYNAMIC_SUBNET_BASE + 1}.10")
 
+    def test_orphan_name_conflict_is_removed_and_recreated_not_reused(self):
+        # A leftover network with the same name (orphan from a previous run) may
+        # have a different subnet than the one we're allocating. Reusing it would
+        # connect containers at IPs outside its subnet ("invalid endpoint
+        # settings: no configured subnet ... contain the IP"). create_analyzer
+        # must REMOVE the orphan and recreate fresh, so the returned IP is in the
+        # network that actually got created.
+        good_net = MagicMock()
+        self.mock_docker.networks.create.side_effect = [
+            Exception("409 Client Error: Conflict — network with name ... already exists"),
+            good_net,
+        ]
+        orphan = MagicMock()
+        orphan.attrs = {"Containers": {}}
+        self.mock_docker.networks.get.return_value = orphan
+
+        fake_types = MagicMock()
+        with patch.dict(
+            "sys.modules",
+            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
+        ):
+            result = self.mgr.create_analyzer("demo-outbound-bc5380", "mindray_bc5380", port=5380)
+
+        # Recreated, not reused: two create attempts, orphan removed exactly once.
+        self.assertEqual(self.mock_docker.networks.create.call_count, 2)
+        orphan.remove.assert_called_once()
+        # IP is in the subnet that was actually created (dynamic base; nothing else in use).
+        self.assertEqual(result["subnet"], f"10.42.{DYNAMIC_SUBNET_BASE}.0/24")
+        self.assertEqual(result["ip"], f"10.42.{DYNAMIC_SUBNET_BASE}.10")
+
+    def test_connect_failure_rolls_back_created_network(self):
+        # If wiring the network up fails after create, the half-created network
+        # must be removed — otherwise it becomes the orphan that breaks the next
+        # run's name-conflict path.
+        self.mgr._mock_container = "mock-ctr"
+        good_net = MagicMock()
+        good_net.connect.side_effect = Exception("boom: cannot connect endpoint")
+        self.mock_docker.networks.create.return_value = good_net
+        rollback_net = MagicMock()
+        rollback_net.attrs = {"Containers": {}}
+        self.mock_docker.networks.get.return_value = rollback_net
+
+        fake_types = MagicMock()
+        with patch.dict(
+            "sys.modules",
+            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
+        ):
+            with self.assertRaises(Exception):
+                self.mgr.create_analyzer("demo-x", "some_template", port=0)
+
+        # Rolled back: _cleanup_network removed the network we'd created.
+        rollback_net.remove.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

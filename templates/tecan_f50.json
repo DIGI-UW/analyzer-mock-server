@@ -3,7 +3,7 @@
     "name": "Tecan Infinite F50",
     "model": "Infinite F50",
     "manufacturer": "Tecan",
-    "category": "IMMUNOASSAY"
+    "category": "IMMUNOLOGY"
   },
   "protocol": {
     "type": "FILE",

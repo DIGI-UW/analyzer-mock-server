@@ -3,7 +3,7 @@
     "name": "Thermo Multiskan FC",
     "model": "Multiskan FC",
     "manufacturer": "Thermo Fisher",
-    "category": "IMMUNOASSAY"
+    "category": "IMMUNOLOGY"
   },
   "protocol": {
     "type": "FILE",

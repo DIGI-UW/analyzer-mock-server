@@ -23,8 +23,11 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
 def _load_template(name: str) -> dict:
-    with open(os.path.join(TEMPLATE_DIR, f"{name}.json")) as handle:
-        return json.load(handle)
+    # Use the production loader so assay fields are derived from the canonical
+    # profile (single source of truth), not a raw template read that would miss
+    # profile-backed analyzers' fields.
+    from server import _load_template as _load_production_template
+    return _load_production_template(name)
 
 
 class QCMessageContract(unittest.TestCase):

@@ -75,7 +75,23 @@ def send_frame(sock, frame_num, data):
         return False
 
 
-def test_basic_connection(host, port):
+def enq_handshake(sock):
+    """Establish an ASTM link: send ENQ, return True once the receiver ACKs.
+
+    A real instrument with queued results asserts ENQ on connect (proactive_enq),
+    which collides with the client's ENQ — line contention per CLSI LIS1-A §8.2.7.1.
+    The sender with active work (here, this client) holds priority; the instrument
+    yields and ACKs. So a contending ENQ (0x05) is consumed and we read the ACK that
+    follows. This mirrors the bridge's OutboundAstmClient handshake.
+    """
+    sock.send(ENQ)
+    resp = sock.recv(1)
+    if resp == ENQ:
+        resp = sock.recv(1)
+    return resp == ACK
+
+
+def check_basic_connection(host, port):
     """Test 1: Basic TCP connection and ENQ/ACK handshake."""
     print_step(1, "Basic Connection & Handshake")
     
@@ -85,18 +101,14 @@ def test_basic_connection(host, port):
         sock.connect((host, port))
         print(f"  ✓ Connected to {host}:{port}")
         
-        # Send ENQ
+        # Send ENQ (contention-aware: instrument may assert proactive ENQ)
         print(f"  → Sending ENQ (0x05)...")
-        sock.send(ENQ)
-        
-        # Receive ACK
-        response = sock.recv(1)
-        if response == ACK:
+        if enq_handshake(sock):
             print(f"  ← Received ACK (0x06) - Handshake successful!")
             sock.close()
             return True
         else:
-            print(f"  ✗ Unexpected response: {response.hex()}")
+            print(f"  ✗ Handshake not ACKed")
             sock.close()
             return False
             
@@ -105,7 +117,7 @@ def test_basic_connection(host, port):
         return False
 
 
-def test_typical_communication_pathway(host, port):
+def check_typical_communication_pathway(host, port):
     """
     Test 2: Typical ASTM LIS2-A2 Communication Pathway
     
@@ -133,10 +145,8 @@ def test_typical_communication_pathway(host, port):
         # Step 2.1: Handshake
         print(f"\n  2.1 Handshake:")
         print(f"    → Sending ENQ...")
-        sock.send(ENQ)
-        response = sock.recv(1)
-        if response != ACK:
-            print(f"    ✗ Expected ACK, got {response.hex()}")
+        if not enq_handshake(sock):
+            print(f"    ✗ Handshake not ACKed")
             sock.close()
             return False
         print(f"    ← Received ACK - Ready to send data")
@@ -202,7 +212,7 @@ def test_typical_communication_pathway(host, port):
         return False
 
 
-def test_qc_segment(host, port):
+def check_qc_segment(host, port):
     """Test 3: QC (Quality Control) Segment Communication."""
     print_step(3, "QC Segment Communication")
     print("\n  This test demonstrates QC result transmission using Q-segments")
@@ -213,10 +223,8 @@ def test_qc_segment(host, port):
         sock.connect((host, port))
         print(f"\n  ✓ Connected to {host}:{port}")
         
-        # Handshake
-        sock.send(ENQ)
-        response = sock.recv(1)
-        if response != ACK:
+        # Handshake (contention-aware)
+        if not enq_handshake(sock):
             print(f"  ✗ Handshake failed")
             sock.close()
             return False
@@ -258,7 +266,7 @@ def test_qc_segment(host, port):
         return False
 
 
-def test_multiple_connections(host, port):
+def check_multiple_connections(host, port):
     """Test 4: Multiple simultaneous connections."""
     print_step(4, "Multiple Simultaneous Connections")
     print("\n  Testing server's ability to handle concurrent connections")
@@ -278,10 +286,12 @@ def test_multiple_connections(host, port):
         for sock in sockets:
             sock.send(ENQ)
         
-        # All should receive ACK
+        # All should receive ACK (consume a contending proactive ENQ first)
         all_acked = True
         for i, sock in enumerate(sockets):
             response = sock.recv(1)
+            if response == ENQ:
+                response = sock.recv(1)
             if response == ACK:
                 print(f"  ✓ Connection {i+1} received ACK")
             else:
@@ -337,16 +347,16 @@ def main():
     results = []
     
     # Run all tests
-    results.append(("Basic Connection", test_basic_connection(args.host, args.port)))
+    results.append(("Basic Connection", check_basic_connection(args.host, args.port)))
     time.sleep(0.5)  # Brief pause between tests
     
-    results.append(("Typical Pathway", test_typical_communication_pathway(args.host, args.port)))
+    results.append(("Typical Pathway", check_typical_communication_pathway(args.host, args.port)))
     time.sleep(0.5)
     
-    results.append(("QC Segments", test_qc_segment(args.host, args.port)))
+    results.append(("QC Segments", check_qc_segment(args.host, args.port)))
     time.sleep(0.5)
     
-    results.append(("Multiple Connections", test_multiple_connections(args.host, args.port)))
+    results.append(("Multiple Connections", check_multiple_connections(args.host, args.port)))
     
     # Summary
     print("\n" + "="*60)

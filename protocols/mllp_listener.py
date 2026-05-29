@@ -325,8 +325,15 @@ class MLLPProtocolHandler:
             logger.error("[ORDER_IN] Failed to generate ORU^R01: %s", e, exc_info=True)
             return
 
+        # Source the push from the interface the order arrived on (this analyzer's
+        # IP = the inbound connection's LOCAL address), so the bridge identifies the
+        # right analyzer. self.conn.getsockname() (local), not self.addr (remote).
         try:
-            ok = push_hl7_mllp(host, port, oru, timeout=10)
+            source_ip = self.conn.getsockname()[0]
+        except OSError:
+            source_ip = None
+        try:
+            ok = push_hl7_mllp(host, port, oru, timeout=10, source_ip=source_ip)
             if ok:
                 logger.info(
                     "[ORDER_IN] Pushed ORU^R01 to %s:%s (placer=%s, filler=%s)",

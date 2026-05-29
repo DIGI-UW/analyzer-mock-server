@@ -75,13 +75,17 @@ MINDRAY_BC5380 = {
 }
 
 
-def _socketpair_tcp():
+def _socketpair_tcp(local_ip="127.0.0.1"):
+    """A connected (client, server) TCP pair. `local_ip` (any 127.0.0.0/8 address)
+    becomes the server side's local address — i.e. server.getsockname()[0] == local_ip.
+    Used to simulate the mock listening on a specific per-analyzer interface so the
+    result push-back's source IP can be asserted."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
+    listener.bind((local_ip, 0))
     listener.listen(1)
     port = listener.getsockname()[1]
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(("127.0.0.1", port))
+    client.connect((local_ip, port))
     server, _ = listener.accept()
     listener.close()
     return client, server
@@ -114,12 +118,14 @@ class _MllpCaptureServer:
         self._listener.listen(1)
         self.port = self._listener.getsockname()[1]
         self.captured = None
+        self.peer_ip = None
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def _run(self):
         try:
-            conn, _ = self._listener.accept()
+            conn, peer = self._listener.accept()
+            self.peer_ip = peer[0]
         except OSError:
             return
         try:
@@ -236,12 +242,14 @@ class _AstmCaptureServer:
         self._listener.listen(1)
         self.port = self._listener.getsockname()[1]
         self.records = None
+        self.peer_ip = None
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def _run(self):
         try:
-            conn, _ = self._listener.accept()
+            conn, peer = self._listener.accept()
+            self.peer_ip = peer[0]
         except OSError:
             return
         records = []
@@ -385,6 +393,72 @@ class TestHl7OrderRoundtrip:
         captured = _drive_order(MINDRAY_BC5380, "ACC-INT-3", ["HGB"])
         assert captured is not None
         assert "ACC-INT-3" in captured, "originating accession must be echoed (OBR-3/ORC) for correlation"
+
+
+class TestResultPushSourceInterface:
+    """The mock is attached to one Docker network per analyzer; the bridge identifies
+    the source analyzer by the push connection's SOURCE IP. The result push MUST source
+    from the interface the order arrived on — the inbound connection's LOCAL address
+    (self.conn.getsockname()[0], = the analyzer's IP), NOT self.addr (the bridge's
+    address) and NOT the kernel's default route. Without binding, a multi-homed mock
+    pushes from an arbitrary interface and the bridge mis-identifies the analyzer.
+
+    Asserted with distinct 127.0.0.0/8 loopback addresses: the mock side listens on
+    127.0.0.2/.3 (the 'analyzer interface'); the stand-in bridge listens on 127.0.0.1
+    and records the push's source IP.
+    """
+
+    def test_astm_push_sources_from_ordering_analyzer_interface(self):
+        capture = _AstmCaptureServer()
+        env = {"ORDER_RESULT_PUSH_HOST": "127.0.0.1",
+               "ORDER_RESULT_PUSH_ASTM_PORT": str(capture.port)}
+        client, server = _socketpair_tcp("127.0.0.2")  # mock's per-analyzer interface
+        handler = ASTMProtocolHandler(
+            conn=server, addr=("127.0.0.1", 0), fields_config={},
+            response_delay_ms=0, astm_template=GENEXPERT_ASTM,
+        )
+        t = threading.Thread(target=handler.handle, daemon=True)
+        records = ["H|\\^&|||OE2^Order^1.0|||||||LIS2-A2", "P|1|||PAT-1",
+                   "O|1|ACC-SRC-1||^^^MTB-RIF|R", "L|1|N"]
+        with _patch_env(env):
+            t.start()
+            try:
+                send_astm_session(client, records, "src-test")
+                capture.wait(5)
+            finally:
+                client.close()
+                t.join(timeout=3)
+                capture.close()
+        assert capture.peer_ip == "127.0.0.2", (
+            "ASTM result push must source from the ordering analyzer's interface "
+            "(self.conn.getsockname()[0]), so the bridge identifies the right "
+            f"analyzer; got source {capture.peer_ip}"
+        )
+
+    def test_mllp_push_sources_from_ordering_analyzer_interface(self):
+        capture = _MllpCaptureServer()
+        env = {"ORDER_RESULT_PUSH_HOST": "127.0.0.1",
+               "ORDER_RESULT_PUSH_PORT": str(capture.port)}
+        client, server = _socketpair_tcp("127.0.0.3")
+        handler = MLLPProtocolHandler(
+            conn=server, addr=("127.0.0.1", 0), template=MINDRAY_BC5380,
+            template_name="mindray_bc5380", response_delay_ms=0,
+        )
+        t = threading.Thread(target=handler.handle, daemon=True)
+        with _patch_env(env):
+            t.start()
+            try:
+                client.sendall(_mllp_frame(_orm_for("ACC-SRC-2", ["WBC"])))
+                _recv_mllp(client)
+                capture.wait(5)
+            finally:
+                client.close()
+                t.join(timeout=3)
+                capture.close()
+        assert capture.peer_ip == "127.0.0.3", (
+            "MLLP ORU push must source from the ordering analyzer's interface "
+            f"(self.conn.getsockname()[0]); got source {capture.peer_ip}"
+        )
 
 
 if __name__ == "__main__":

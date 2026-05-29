@@ -130,7 +130,9 @@ class AnalyzerNetworkManager:
             import docker.types
             network = None
 
-            # Create the network, or reuse an existing same-named one (idempotent).
+            # Create the network. A live analyzer's network is reused earlier
+            # (self._analyzers cache); here we only ever create, draining any
+            # stale same-named orphan first (see the Conflict branch below).
             #
             # Retry on Docker "Pool overlaps": the dynamically chosen /24 can
             # collide with a network created concurrently (e.g. two demo
@@ -151,10 +153,17 @@ class AnalyzerNetworkManager:
                 except Exception as create_err:
                     msg = str(create_err)
                     if "Conflict" in msg or "already exists" in msg:
-                        # Reuse existing Docker network (e.g., left over from a previous run)
-                        network = self.docker.networks.get(network_name)
-                        logger.info("Reusing existing network %s", network_name)
-                        break
+                        # A network with this name already exists but is NOT one we
+                        # created this session — idempotent reuse for a live analyzer
+                        # is handled above via self._analyzers. So this is an ORPHAN
+                        # left by a previous run, and its subnet may differ from the
+                        # one we just tried. Reusing it would connect containers at
+                        # IPs outside its subnet (Docker "invalid endpoint settings:
+                        # no configured subnet ... contain the IP"). Remove it and
+                        # recreate fresh at our intended subnet.
+                        logger.warning("Removing orphaned network %s and recreating fresh", network_name)
+                        self._cleanup_network(network_name)
+                        continue
                     if "overlap" not in msg.lower():
                         raise
                     logger.warning(
@@ -212,6 +221,14 @@ class AnalyzerNetworkManager:
 
         except Exception as e:
             logger.error("Failed to create analyzer network %s: %s", name, e)
+            # Roll back a network we created but couldn't fully wire up (e.g. a
+            # connect failure), so a failed create never leaves a half-created
+            # orphan that poisons the next run's name-conflict path. Safe no-op
+            # if nothing was created.
+            try:
+                self._cleanup_network(network_name)
+            except Exception:
+                pass
             raise
 
     def connect_mock_to_analyzer(self, name: str) -> bool:

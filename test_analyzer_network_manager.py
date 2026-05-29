@@ -172,6 +172,46 @@ class TestCreateAnalyzerOverlapRetry(unittest.TestCase):
         # Rolled back: _cleanup_network removed the network we'd created.
         rollback_net.remove.assert_called_once()
 
+    def test_concurrent_creates_serialize_to_distinct_subnets(self):
+        # The mock's HTTP server is threaded, so create_analyzer can be called
+        # concurrently. Without serialization the subnet allocator races and two
+        # analyzers get the same /24 (the "ip=missing"/overlap failures). The
+        # @_synchronized lock must make concurrent creates yield DISTINCT subnets
+        # and all succeed. A small delay in the mocked create widens the race
+        # window so an unlocked allocator would reliably collide.
+        import threading
+        import time
+
+        def slow_create(*args, **kwargs):
+            time.sleep(0.02)
+            return MagicMock()
+
+        self.mock_docker.networks.create.side_effect = slow_create
+        fake_types = MagicMock()
+        results = {}
+        errors = []
+
+        def worker(i):
+            try:
+                results[i] = self.mgr.create_analyzer(f"demo-conc-{i}", "tmpl", port=0)["subnet"]
+            except Exception as e:  # noqa: BLE001 — surface in assertion
+                errors.append(repr(e))
+
+        with patch.dict(
+            "sys.modules",
+            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
+        ):
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        self.assertEqual(errors, [], f"concurrent creates errored: {errors}")
+        self.assertEqual(
+            len(set(results.values())), 5, f"subnets collided under concurrency: {results}"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

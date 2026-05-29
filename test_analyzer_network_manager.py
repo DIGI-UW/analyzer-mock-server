@@ -7,7 +7,11 @@ Docker is not required — the docker client is mocked.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from analyzer_network_manager import AnalyzerNetworkManager, FIXED_SUBNETS
+from analyzer_network_manager import (
+    DYNAMIC_SUBNET_BASE,
+    FIXED_SUBNETS,
+    AnalyzerNetworkManager,
+)
 
 
 class TestSelectSubnetId(unittest.TestCase):
@@ -69,6 +73,51 @@ class TestSelectSubnetId(unittest.TestCase):
         # Should not raise; should not falsely report any subnet in use.
         for subnet_id in (FIXED_SUBNETS["bc5380"], 99):
             self.assertFalse(self.mgr._subnet_in_use(subnet_id))
+
+
+class TestCreateAnalyzerOverlapRetry(unittest.TestCase):
+    """create_analyzer must survive Docker 'Pool overlaps' on the chosen /24.
+
+    A concurrently-created network (two demo analyzers provisioning at once)
+    can take the subnet this manager picked, so `docker network create` fails
+    with a 403 'Pool overlaps' that is NOT a name conflict. Before the retry,
+    that propagated and the analyzer came back with no IP — the 'ip=missing'
+    harness failure. create_analyzer now advances to the next free subnet and
+    retries.
+    """
+
+    def setUp(self):
+        self.mgr = AnalyzerNetworkManager()
+        self.mock_docker = MagicMock()
+        self.mock_docker.networks.list.return_value = []
+        self.mgr._docker = self.mock_docker
+        # Only attempt container connects when these are set — keep empty so the
+        # test exercises subnet allocation without real Docker connect calls.
+        self.mgr._mock_container = ""
+        self.mgr._bridge_container = ""
+
+    def test_create_retries_on_pool_overlap(self):
+        good_net = MagicMock()
+        self.mock_docker.networks.create.side_effect = [
+            Exception(
+                "403 Client Error: invalid pool request: Pool overlaps with"
+                " other one on this address space"
+            ),
+            good_net,
+        ]
+        fake_types = MagicMock()
+        with patch.dict(
+            "sys.modules",
+            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
+        ):
+            result = self.mgr.create_analyzer("demo-outbound-bc5380", "mindray_bc5380", port=5380)
+
+        # Retried past the overlap and returned a usable analyzer IP.
+        self.assertEqual(self.mock_docker.networks.create.call_count, 2)
+        self.assertTrue(result["ip"].startswith("10.42."))
+        self.assertTrue(result["ip"].endswith(".10"))
+        # The second (successful) subnet differs from the first (overlapped) one.
+        self.assertEqual(result["ip"], f"10.42.{DYNAMIC_SUBNET_BASE + 1}.10")
 
 
 if __name__ == "__main__":

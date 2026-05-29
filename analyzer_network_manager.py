@@ -38,6 +38,7 @@ FIXED_SUBNETS: Dict[str, int] = {
     "bs300": 23,
 }
 DYNAMIC_SUBNET_BASE = 50  # Dynamic allocations start here (won't collide with fixed)
+MAX_SUBNET_ATTEMPTS = 30  # Retry budget when a chosen /24 overlaps an existing network
 
 
 class AnalyzerNetworkManager:
@@ -123,31 +124,56 @@ class AnalyzerNetworkManager:
             return self._analyzers[name]
 
         subnet_id = self._select_subnet_id(name)
-
-        subnet = f"10.42.{subnet_id}.0/24"
-        analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"
-        bridge_ip = f"10.42.{subnet_id}.{BRIDGE_IP_SUFFIX}"
         network_name = f"{NETWORK_PREFIX}{name}"
 
         try:
             import docker.types
             network = None
 
-            # Try to create network, or reuse existing (idempotent)
-            try:
-                ipam_pool = docker.types.IPAMPool(subnet=subnet)
-                ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
-                network = self.docker.networks.create(
-                    network_name, driver="bridge", ipam=ipam_config
+            # Create the network, or reuse an existing same-named one (idempotent).
+            #
+            # Retry on Docker "Pool overlaps": the dynamically chosen /24 can
+            # collide with a network created concurrently (e.g. two demo
+            # analyzers provisioning at once) or one that _subnet_in_use's
+            # exact-subnet scan didn't match. On overlap, advance to the next
+            # free subnet id and retry — without this the create raises and the
+            # analyzer comes back with no IP (the "ip=missing" harness failure).
+            for _attempt in range(MAX_SUBNET_ATTEMPTS):
+                subnet = f"10.42.{subnet_id}.0/24"
+                try:
+                    ipam_pool = docker.types.IPAMPool(subnet=subnet)
+                    ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
+                    network = self.docker.networks.create(
+                        network_name, driver="bridge", ipam=ipam_config
+                    )
+                    logger.info("Created network %s (subnet %s)", network_name, subnet)
+                    break
+                except Exception as create_err:
+                    msg = str(create_err)
+                    if "Conflict" in msg or "already exists" in msg:
+                        # Reuse existing Docker network (e.g., left over from a previous run)
+                        network = self.docker.networks.get(network_name)
+                        logger.info("Reusing existing network %s", network_name)
+                        break
+                    if "overlap" not in msg.lower():
+                        raise
+                    logger.warning(
+                        "Subnet %s overlaps an existing network; retrying %s with the next free subnet",
+                        subnet, name,
+                    )
+                    subnet_id += 1
+                    while self._subnet_in_use(subnet_id):
+                        subnet_id += 1
+                    self._next_dynamic_subnet = max(self._next_dynamic_subnet, subnet_id + 1)
+            if network is None:
+                raise RuntimeError(
+                    f"Could not allocate a non-overlapping subnet for {name} "
+                    f"after {MAX_SUBNET_ATTEMPTS} attempts"
                 )
-                logger.info("Created network %s (subnet %s)", network_name, subnet)
-            except Exception as create_err:
-                if "Conflict" in str(create_err) or "already exists" in str(create_err):
-                    # Reuse existing Docker network (e.g., left over from previous run)
-                    network = self.docker.networks.get(network_name)
-                    logger.info("Reusing existing network %s", network_name)
-                else:
-                    raise
+
+            subnet = f"10.42.{subnet_id}.0/24"
+            analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"
+            bridge_ip = f"10.42.{subnet_id}.{BRIDGE_IP_SUFFIX}"
 
             # Connect mock container (skip if already connected)
             if connect_mock and self._mock_container:

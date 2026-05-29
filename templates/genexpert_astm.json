@@ -22,71 +22,36 @@
         "enable_qc": false,
         "proactive_enq": true
     },
-    "fields": [
-        {
-            "code": "MTB-RIF",
+    "profile": "astm/genexpert-astm",
+    "fieldOverrides": {
+        "MTB-RIF": {
             "name": "Xpert MTB/RIF",
-            "loinc": "85362-2",
-            "type": "QUALITATIVE",
-            "possibleValues": [
-                "MTB DETECTED",
-                "NOT DETECTED",
-                "HIGH",
-                "MEDIUM",
-                "LOW",
-                "VERY LOW",
-                "INDETERMINATE",
-                "ERROR",
-                "NO RESULT"
-            ],
+            "possibleValues": ["MTB DETECTED", "NOT DETECTED", "HIGH", "MEDIUM", "LOW", "VERY LOW", "INDETERMINATE", "ERROR", "NO RESULT"],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
-        {
-            "code": "RIF",
+        "RIF": {
             "name": "Xpert MTB/RIF Rif Resistance",
-            "loinc": "46244-0",
-            "type": "QUALITATIVE",
-            "possibleValues": [
-                "DETECTED",
-                "NOT DETECTED",
-                "INDETERMINATE"
-            ],
+            "possibleValues": ["DETECTED", "NOT DETECTED", "INDETERMINATE"],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
-        {
-            "code": "HIV-VL",
+        "HIV-VL": {
             "name": "Xpert HIV-1 Viral Load",
-            "loinc": "20447-9",
-            "type": "NUMERIC",
-            "unit": "copies/mL",
             "normalRange": "20-10000000",
             "seedValue": 1250,
             "version": "1.0",
             "complementaryResults": [
-                {
-                    "name": "Conc/LOG",
-                    "unit": "log(copies/mL)",
-                    "seedValue": 3.1
-                }
+                {"name": "Conc/LOG", "unit": "log(copies/mL)", "seedValue": 3.1}
             ]
         },
-        {
-            "code": "COVID19",
+        "COVID19": {
             "name": "Xpert Xpress SARS-CoV-2",
-            "loinc": "94500-6",
-            "type": "QUALITATIVE",
-            "possibleValues": [
-                "POSITIVE",
-                "NEGATIVE",
-                "INDETERMINATE",
-                "ERROR"
-            ],
+            "possibleValues": ["POSITIVE", "NEGATIVE", "INDETERMINATE", "ERROR"],
             "seedQualitative": "NEGATIVE",
             "version": "1.0"
         }
-    ],
+    },
     "qcSample": {
         "id": "DEV01261000000000999",
         "actionCode": "Q",

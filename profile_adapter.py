@@ -75,6 +75,11 @@ def load_profile_backed_template(
         profile = json.load(fh)
 
     seed_values = transport_template.get("seedValues", {})
+    # Per-code simulation-fidelity overrides (mock test data, NOT coverage): e.g. a
+    # GeneXpert assay's wire vocabulary, cartridge `version` for the 8-component test
+    # ID, or `complementaryResults` (Ct/Conc sub-results). Merged onto the
+    # profile-derived field so the profile still owns the assay menu + result_type.
+    field_overrides = transport_template.get("fieldOverrides", {})
 
     fields: List[Dict[str, Any]] = []
     for mapping in profile.get("default_test_mappings", []):
@@ -101,9 +106,13 @@ def load_profile_backed_template(
             field["seedQualitative"] = seed_q if seed_q is not None else _default_negative(values)
         else:
             # Default to NUMERIC when result_type is absent or quantitative.
+            # Always carry a deterministic seedValue (0 when none supplied) so the
+            # mock is reproducible — un-seeded numerics must not emit random values.
             field["type"] = "NUMERIC"
-            if code in seed_values:
-                field["seedValue"] = seed_values[code]
+            field["seedValue"] = seed_values.get(code, 0)
+        overrides = field_overrides.get(code)
+        if overrides:
+            field.update(overrides)
         fields.append(field)
 
     merged: Dict[str, Any] = dict(transport_template)

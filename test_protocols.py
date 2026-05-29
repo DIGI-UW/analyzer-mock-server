@@ -136,8 +136,9 @@ class TestASTMGeneXpert(unittest.TestCase):
         msg = self._generate()
         o = self._segments(msg, "O")[0]
         fields = o.split("|")
-        # O.5 (index 4) = ^^^MTB-RIF
-        self.assertEqual(fields[4], "^^^MTB-RIF")
+        # O.5 (index 4) = ^^^<first ordered assay code> (assays come from the profile)
+        first_code = self.template["fields"][0]["code"]
+        self.assertEqual(fields[4], f"^^^{first_code}")
 
     def test_o_record_has_26_fields(self):
         msg = self._generate()
@@ -163,8 +164,11 @@ class TestASTMGeneXpert(unittest.TestCase):
     def test_r_record_8_component_test_id(self):
         msg = self._generate()
         r_lines = self._segments(msg, "R")
-        # First R-record should have MTB-RIF with 8 components
-        r_fields = r_lines[0].split("|")
+        # The MTB-RIF R-record carries the 8-component GeneXpert test ID (it declares
+        # a cartridge version via fieldOverrides). Find it among the derived assays.
+        mtb_rif = [l for l in r_lines if l.split("|")[2].split("^")[3:4] == ["MTB-RIF"]]
+        self.assertTrue(mtb_rif, "expected an MTB-RIF R-record")
+        r_fields = mtb_rif[0].split("|")
         test_id = r_fields[2]
         components = test_id.split("^")
         # ^^^MTB-RIF^Xpert MTB/RIF^2.1^^ = 8 components

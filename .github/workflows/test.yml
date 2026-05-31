@@ -31,7 +31,10 @@ jobs:
           ref: ${{ inputs.parent_ref || 'develop' }}
 
       - name: Set profiles path for tests
-        run: echo "ANALYZER_PROFILES_DIR=${{ github.workspace }}/parent/projects/analyzer-profiles/hl7" >> $GITHUB_ENV
+        # ANALYZER_PROFILES_DIR is the profiles ROOT; the adapter appends the
+        # protocol subdir (astm/hl7/file) itself. Pointing it at /hl7 made paths
+        # resolve to <dir>/hl7/... and broke profile loading in CI.
+        run: echo "ANALYZER_PROFILES_DIR=${{ github.workspace }}/parent/projects/analyzer-profiles" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5

@@ -337,11 +337,14 @@ def test_strict_013_templates_follow_profile_obx_codes_and_units(template_name, 
     """Strict 013 templates should derive OBX code/unit semantics from profile defaults."""
     from server import _load_template
 
+    # ANALYZER_PROFILES_DIR is the profiles ROOT (matching profile_adapter); the
+    # protocol subdir is appended here. (Previously this treated the env as the
+    # hl7 dir, disagreeing with the adapter and breaking when CI set the root.)
     profiles_dir = os.environ.get("ANALYZER_PROFILES_DIR")
     if not profiles_dir:
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        profiles_dir = os.path.join(repo_root, "projects", "analyzer-profiles", "hl7")
-    profile_path = os.path.join(profiles_dir, profile_file)
+        profiles_dir = os.path.join(repo_root, "projects", "analyzer-profiles")
+    profile_path = os.path.join(profiles_dir, "hl7", profile_file)
     with open(profile_path, "r", encoding="utf-8") as fh:
         profile = json.load(fh)
 

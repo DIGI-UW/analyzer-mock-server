@@ -701,9 +701,10 @@ class ASTMProtocolHandler:
         Empty host disables the push (useful for standalone dev runs).
 
         Result values come from the loaded ASTM template's
-        `fields[].seedValue` (NUMERIC) or `seedQualitative` (other). Unknown
-        test codes are skipped with a warning rather than failing the whole
-        response.
+        `fields[].seedValue` (NUMERIC) or `seedQualitative` (other). A test code
+        not in this analyzer's profile gets an error-flagged result record (ASTM
+        result status X = cannot obtain result) rather than being silently
+        omitted or failing the whole response — so the mismatch stays visible.
         """
         if not self.astm_template:
             logger.warning("[ORDER_IN] No template loaded; cannot generate result records")

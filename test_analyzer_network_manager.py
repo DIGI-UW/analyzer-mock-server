@@ -1,216 +1,194 @@
 """
-Unit tests for AnalyzerNetworkManager._select_subnet_id.
+Unit tests for AnalyzerNetworkManager — deterministic, idempotent provisioning.
 
-Docker is not required — the docker client is mocked.
+Docker is mocked; no real daemon required.
 """
 
+import sys
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from analyzer_network_manager import (
     DYNAMIC_SUBNET_BASE,
+    DYNAMIC_SUBNET_MAX,
     FIXED_SUBNETS,
+    NETWORK_PREFIX,
     AnalyzerNetworkManager,
 )
 
 
-class TestSelectSubnetId(unittest.TestCase):
-    def setUp(self):
-        # docker is lazy-imported inside AnalyzerNetworkManager.docker property;
-        # set _docker directly to avoid needing the docker SDK installed.
-        self.mgr = AnalyzerNetworkManager()
-        self.mock_docker = MagicMock()
-        self.mock_docker.networks.list.return_value = []
-        self.mgr._docker = self.mock_docker
-
-    def test_exact_match_returns_fixed_subnet(self):
-        """An analyzer named exactly 'genexpert' gets the fixed subnet."""
-        self.assertIn("genexpert", FIXED_SUBNETS)
-        self.assertEqual(
-            self.mgr._select_subnet_id("genexpert"), FIXED_SUBNETS["genexpert"]
-        )
-
-    def test_substring_does_not_claim_fixed_subnet(self):
-        """Previously, any name *containing* a FIXED_SUBNETS key matched —
-        so 'demo-genexpert-site1' and 'demo-genexpert-site2' both claimed
-        subnet 20 and the second `docker network create` hit a Pool overlap.
-        The fix requires exact match, so these fall through to the dynamic
-        range."""
-        a = self.mgr._select_subnet_id("demo-genexpert-site1")
-        b = self.mgr._select_subnet_id("demo-genexpert-site2")
-        self.assertNotEqual(a, FIXED_SUBNETS["genexpert"])
-        self.assertNotEqual(b, FIXED_SUBNETS["genexpert"])
-        self.assertNotEqual(a, b, "dynamic subnets must be distinct")
-
-    def test_case_insensitive_exact_match(self):
-        """Mixed case still resolves to the fixed subnet."""
-        self.assertEqual(
-            self.mgr._select_subnet_id("GeneXpert"), FIXED_SUBNETS["genexpert"]
-        )
-
-    def test_fixed_subnet_in_use_falls_through_to_dynamic(self):
-        """If a second instance of the same template name is created while the
-        fixed subnet is still occupied, fall through to dynamic allocation
-        instead of colliding."""
-        fixed = FIXED_SUBNETS["bc5380"]
-        # Simulate the fixed subnet already allocated
-        net = MagicMock()
-        net.attrs = {"IPAM": {"Config": [{"Subnet": f"10.42.{fixed}.0/24"}]}}
-        self.mock_docker.networks.list.return_value = [net]
-
-        got = self.mgr._select_subnet_id("bc5380")
-        self.assertNotEqual(got, fixed)
-
-    def test_subnet_in_use_handles_explicit_null_ipam_config(self):
-        # Docker can return networks whose IPAM.Config is explicitly null
-        # (not just missing) — for example, networks created without an
-        # address pool. _subnet_in_use must treat that as an empty config
-        # and not raise "'NoneType' object is not iterable".
-        net = MagicMock()
-        net.attrs = {"IPAM": {"Config": None}}
-        self.mock_docker.networks.list.return_value = [net]
-
-        # Should not raise; should not falsely report any subnet in use.
-        for subnet_id in (FIXED_SUBNETS["bc5380"], 99):
-            self.assertFalse(self.mgr._subnet_in_use(subnet_id))
+def _net(name="net", subnet=None, containers=None):
+    """A fake Docker network with IPAM subnet + container attachments."""
+    n = MagicMock()
+    n.name = name
+    cfg = [{"Subnet": subnet}] if subnet else []
+    n.attrs = {"IPAM": {"Config": cfg}, "Containers": containers or {}}
+    return n
 
 
-class TestCreateAnalyzerOverlapRetry(unittest.TestCase):
-    """create_analyzer must survive Docker 'Pool overlaps' on the chosen /24.
-
-    A concurrently-created network (two demo analyzers provisioning at once)
-    can take the subnet this manager picked, so `docker network create` fails
-    with a 403 'Pool overlaps' that is NOT a name conflict. Before the retry,
-    that propagated and the analyzer came back with no IP — the 'ip=missing'
-    harness failure. create_analyzer now advances to the next free subnet and
-    retries.
-    """
-
+class Base(unittest.TestCase):
     def setUp(self):
         self.mgr = AnalyzerNetworkManager()
-        self.mock_docker = MagicMock()
-        self.mock_docker.networks.list.return_value = []
-        self.mgr._docker = self.mock_docker
-        # Only attempt container connects when these are set — keep empty so the
-        # test exercises subnet allocation without real Docker connect calls.
+        self.docker = MagicMock()
+        self.docker.networks.list.return_value = []
+        # Default: no network exists (get raises NotFound-like).
+        self.docker.networks.get.side_effect = Exception("404 network not found")
+        self.mgr._docker = self.docker
+        # Skip real container connects unless a test opts in.
         self.mgr._mock_container = ""
         self.mgr._bridge_container = ""
+        # create_analyzer does `import docker.types` — stub it.
+        types = MagicMock()
+        p = patch.dict(sys.modules, {"docker": MagicMock(types=types), "docker.types": types})
+        p.start()
+        self.addCleanup(p.stop)
 
-    def test_create_retries_on_pool_overlap(self):
-        good_net = MagicMock()
-        self.mock_docker.networks.create.side_effect = [
-            Exception(
-                "403 Client Error: invalid pool request: Pool overlaps with"
-                " other one on this address space"
-            ),
-            good_net,
+
+class TestDeterministicAllocation(Base):
+    def test_fixed_exact_match(self):
+        self.assertEqual(self.mgr._subnet_id_for("genexpert"), FIXED_SUBNETS["genexpert"])
+
+    def test_fixed_case_insensitive(self):
+        self.assertEqual(self.mgr._subnet_id_for("GeneXpert"), FIXED_SUBNETS["genexpert"])
+
+    def test_substring_is_not_the_fixed_subnet(self):
+        s = self.mgr._subnet_id_for("demo-genexpert-site1")
+        self.assertNotEqual(s, FIXED_SUBNETS["genexpert"])
+        self.assertTrue(DYNAMIC_SUBNET_BASE <= s <= DYNAMIC_SUBNET_MAX)
+
+    def test_same_name_same_subnet_across_calls_and_instances(self):
+        a = self.mgr._subnet_id_for("demo-outbound-gx")
+        b = self.mgr._subnet_id_for("demo-outbound-gx")
+        c = AnalyzerNetworkManager()._subnet_id_for("demo-outbound-gx")  # fresh instance, no shared state
+        self.assertEqual(a, b)
+        self.assertEqual(a, c, "deterministic across instances — no mutable counter")
+
+    def test_distinct_demo_names_get_distinct_subnets(self):
+        self.assertNotEqual(
+            self.mgr._subnet_id_for("demo-outbound-gx"),
+            self.mgr._subnet_id_for("demo-outbound-bc5380"),
+        )
+
+    def test_subnet_id_of_parses_actual_subnet(self):
+        self.assertEqual(AnalyzerNetworkManager._subnet_id_of(_net(subnet="10.42.77.0/24")), 77)
+        self.assertIsNone(AnalyzerNetworkManager._subnet_id_of(_net(subnet=None)))
+
+
+class TestCreateAnalyzer(Base):
+    def test_fresh_create_uses_deterministic_subnet(self):
+        self.docker.networks.create.return_value = _net()
+        r = self.mgr.create_analyzer("demo-outbound-gx", "tmpl", port=9600)
+        expected = self.mgr._subnet_id_for("demo-outbound-gx")
+        self.assertEqual(r["subnet"], f"10.42.{expected}.0/24")
+        self.assertEqual(r["ip"], f"10.42.{expected}.10")
+        self.docker.networks.create.assert_called_once()
+
+    def test_idempotent_adopts_existing_subnet_without_recreating(self):
+        # The network already exists with a DIFFERENT subnet than the deterministic
+        # one (e.g. an orphan, or a prior different allocation). Adopt its ACTUAL
+        # subnet so containers connect at in-subnet IPs — and do NOT recreate.
+        existing = _net(name=NETWORK_PREFIX + "bc5380", subnet="10.42.99.0/24")
+        self.docker.networks.get.side_effect = None
+        self.docker.networks.get.return_value = existing
+        r = self.mgr.create_analyzer("bc5380", "tmpl", port=5380)
+        self.assertEqual(r["subnet"], "10.42.99.0/24")
+        self.assertEqual(r["ip"], "10.42.99.10")
+        self.docker.networks.create.assert_not_called()
+
+    def test_second_create_same_name_is_noop_returns_same(self):
+        created = _net(name=NETWORK_PREFIX + "demo-x", subnet=None)
+        self.docker.networks.create.return_value = created
+        first = self.mgr.create_analyzer("demo-x", "tmpl")
+        # Second call: now the cache has it AND networks.get must find it.
+        self.docker.networks.get.side_effect = None
+        self.docker.networks.get.return_value = created
+        second = self.mgr.create_analyzer("demo-x", "tmpl")
+        self.assertEqual(first, second)
+        self.docker.networks.create.assert_called_once()  # not created again
+
+    def test_overlap_probes_to_next_free_subnet(self):
+        good = _net()
+        self.docker.networks.create.side_effect = [
+            Exception("403 Client Error: Pool overlaps with other one on this address space"),
+            good,
         ]
-        fake_types = MagicMock()
-        with patch.dict(
-            "sys.modules",
-            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
-        ):
-            result = self.mgr.create_analyzer("demo-outbound-bc5380", "mindray_bc5380", port=5380)
+        r = self.mgr.create_analyzer("demo-x", "tmpl")
+        self.assertEqual(self.docker.networks.create.call_count, 2)
+        start = self.mgr._subnet_id_for("demo-x")
+        # list() returns [] so the next id is free → start + 1
+        self.assertEqual(r["subnet"], f"10.42.{start + 1}.0/24")
 
-        # Retried past the overlap and returned a usable analyzer IP.
-        self.assertEqual(self.mock_docker.networks.create.call_count, 2)
-        self.assertTrue(result["ip"].startswith("10.42."))
-        self.assertTrue(result["ip"].endswith(".10"))
-        # The second (successful) subnet differs from the first (overlapped) one.
-        self.assertEqual(result["ip"], f"10.42.{DYNAMIC_SUBNET_BASE + 1}.10")
-
-    def test_orphan_name_conflict_is_removed_and_recreated_not_reused(self):
-        # A leftover network with the same name (orphan from a previous run) may
-        # have a different subnet than the one we're allocating. Reusing it would
-        # connect containers at IPs outside its subnet ("invalid endpoint
-        # settings: no configured subnet ... contain the IP"). create_analyzer
-        # must REMOVE the orphan and recreate fresh, so the returned IP is in the
-        # network that actually got created.
-        good_net = MagicMock()
-        self.mock_docker.networks.create.side_effect = [
-            Exception("409 Client Error: Conflict — network with name ... already exists"),
-            good_net,
-        ]
-        orphan = MagicMock()
-        orphan.attrs = {"Containers": {}}
-        self.mock_docker.networks.get.return_value = orphan
-
-        fake_types = MagicMock()
-        with patch.dict(
-            "sys.modules",
-            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
-        ):
-            result = self.mgr.create_analyzer("demo-outbound-bc5380", "mindray_bc5380", port=5380)
-
-        # Recreated, not reused: two create attempts, orphan removed exactly once.
-        self.assertEqual(self.mock_docker.networks.create.call_count, 2)
-        orphan.remove.assert_called_once()
-        # IP is in the subnet that was actually created (dynamic base; nothing else in use).
-        self.assertEqual(result["subnet"], f"10.42.{DYNAMIC_SUBNET_BASE}.0/24")
-        self.assertEqual(result["ip"], f"10.42.{DYNAMIC_SUBNET_BASE}.10")
-
-    def test_connect_failure_rolls_back_created_network(self):
-        # If wiring the network up fails after create, the half-created network
-        # must be removed — otherwise it becomes the orphan that breaks the next
-        # run's name-conflict path.
+    def test_connect_failure_rolls_back_only_a_network_we_created(self):
         self.mgr._mock_container = "mock-ctr"
-        good_net = MagicMock()
-        good_net.connect.side_effect = Exception("boom: cannot connect endpoint")
-        self.mock_docker.networks.create.return_value = good_net
-        rollback_net = MagicMock()
-        rollback_net.attrs = {"Containers": {}}
-        self.mock_docker.networks.get.return_value = rollback_net
+        created = _net(name=NETWORK_PREFIX + "demo-x")
+        created.connect.side_effect = Exception("boom: cannot connect")
+        self.docker.networks.create.return_value = created
+        # get: existence-check raises (None) → create; then cleanup-lookup returns it.
+        self.docker.networks.get.side_effect = [Exception("404"), created]
+        with self.assertRaises(Exception):
+            self.mgr.create_analyzer("demo-x", "tmpl")
+        created.remove.assert_called_once()
 
-        fake_types = MagicMock()
-        with patch.dict(
-            "sys.modules",
-            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
-        ):
-            with self.assertRaises(Exception):
-                self.mgr.create_analyzer("demo-x", "some_template", port=0)
+    def test_connect_failure_does_NOT_remove_an_adopted_network(self):
+        # We adopted an existing (possibly live/seeded) network; a connect failure
+        # must NOT remove it.
+        self.mgr._mock_container = "mock-ctr"
+        existing = _net(name=NETWORK_PREFIX + "bc5380", subnet="10.42.21.0/24")
+        existing.connect.side_effect = Exception("boom: cannot connect")
+        self.docker.networks.get.side_effect = None
+        self.docker.networks.get.return_value = existing
+        with self.assertRaises(Exception):
+            self.mgr.create_analyzer("bc5380", "tmpl")
+        existing.remove.assert_not_called()
+        self.docker.networks.create.assert_not_called()
 
-        # Rolled back: _cleanup_network removed the network we'd created.
-        rollback_net.remove.assert_called_once()
 
-    def test_concurrent_creates_serialize_to_distinct_subnets(self):
-        # The mock's HTTP server is threaded, so create_analyzer can be called
-        # concurrently. Without serialization the subnet allocator races and two
-        # analyzers get the same /24 (the "ip=missing"/overlap failures). The
-        # @_synchronized lock must make concurrent creates yield DISTINCT subnets
-        # and all succeed. A small delay in the mocked create widens the race
-        # window so an unlocked allocator would reliably collide.
-        import threading
-        import time
+class TestReconcileOrphans(Base):
+    def test_drains_zero_container_orphans_keeps_live_and_foreign(self):
+        orphan = _net(name=NETWORK_PREFIX + "demo-old", subnet="10.42.60.0/24", containers={})
+        live = _net(name=NETWORK_PREFIX + "genexpert", subnet="10.42.20.0/24",
+                    containers={"c1": {"Name": "openelis-analyzer-mock"}})
+        foreign = _net(name="some-other-net", containers={})
+        self.docker.networks.list.return_value = [orphan, live, foreign]
+        # _cleanup_network looks the network up by name before removing it.
+        self.docker.networks.get.side_effect = None
+        self.docker.networks.get.return_value = orphan
+        removed = self.mgr.reconcile_orphans()
+        self.assertEqual(removed, 1, "only the zero-container mock-analyzer orphan")
+        orphan.remove.assert_called_once()
+        live.remove.assert_not_called()
+        foreign.remove.assert_not_called()
 
+
+class TestConcurrency(Base):
+    def test_concurrent_distinct_analyzers_get_distinct_subnets(self):
+        # Deterministic per-name allocation means concurrent creates of DIFFERENT
+        # analyzers don't contend on any shared counter — each lands on its own
+        # name-derived subnet. The delay widens any race window.
         def slow_create(*args, **kwargs):
             time.sleep(0.02)
-            return MagicMock()
+            return _net()
 
-        self.mock_docker.networks.create.side_effect = slow_create
-        fake_types = MagicMock()
+        self.docker.networks.create.side_effect = slow_create
         results = {}
         errors = []
 
         def worker(i):
             try:
-                results[i] = self.mgr.create_analyzer(f"demo-conc-{i}", "tmpl", port=0)["subnet"]
-            except Exception as e:  # noqa: BLE001 — surface in assertion
+                results[i] = self.mgr.create_analyzer(f"demo-conc-{i}", "tmpl")["subnet"]
+            except Exception as e:  # noqa: BLE001
                 errors.append(repr(e))
 
-        with patch.dict(
-            "sys.modules",
-            {"docker": MagicMock(types=fake_types), "docker.types": fake_types},
-        ):
-            threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         self.assertEqual(errors, [], f"concurrent creates errored: {errors}")
-        self.assertEqual(
-            len(set(results.values())), 5, f"subnets collided under concurrency: {results}"
-        )
+        self.assertEqual(len(set(results.values())), 6, f"subnets collided: {results}")
 
 
 if __name__ == "__main__":

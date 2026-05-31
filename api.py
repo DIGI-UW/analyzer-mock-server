@@ -1036,6 +1036,17 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 def start_api_server(port: int):
     """Start the mock API HTTP server."""
+    # Converge to a clean baseline: drain orphaned analyzer networks left by a
+    # crashed/killed prior run (zero-container mock-analyzer-* nets). Live/seeded
+    # networks (with containers attached) are kept. Best-effort — never blocks
+    # startup if Docker is unavailable.
+    try:
+        mgr = MockAPIHandler._get_network_manager()
+        if mgr is not None:
+            mgr.reconcile_orphans()
+    except Exception as e:  # noqa: BLE001 — startup hygiene must not crash the server
+        logger.warning("Startup orphan reconcile skipped: %s", e)
+
     server = ThreadingHTTPServer(("0.0.0.0", port), MockAPIHandler)
     logger.info("Mock API server started on port %s", port)
     try:

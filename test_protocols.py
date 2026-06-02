@@ -207,10 +207,25 @@ class TestASTMGeneXpert(unittest.TestCase):
     # --- R-record: qualitative values ---
 
     def test_qualitative_seed_value(self):
+        # DATA test: depends on the canonical GeneXpert profile declaring its assays
+        # qualitative (result_type). The mock reads projects/analyzer-profiles from
+        # its OE2 parent (monorepo layout) — single source of truth. When that
+        # profile predates the result_type enrichment (e.g. a standalone CI checkout
+        # of an older OE2 ref), there's nothing qualitative to assert, so skip rather
+        # than false-fail on un-merged cross-repo state. The adapter's qualitative
+        # LOGIC is gated hermetically by TestProfileAdapterQualitativeLogic below, and
+        # the real round-trip value is gated by the integrated (OE2-monorepo) harness E2E.
+        first_field = self.template["fields"][0]
+        if first_field.get("type") != "QUALITATIVE":
+            self.skipTest(
+                "GeneXpert profile not enriched with result_type (first assay "
+                f"'{first_field.get('code')}' is {first_field.get('type')}); qualitative "
+                "value is gated by the integrated monorepo CI against PR-version profiles"
+            )
         msg = self._generate()
         r_lines = self._segments(msg, "R")
-        # First R-record (MTB-RIF) seed should be "NOT DETECTED" —
-        # aligns with Cepheid LIS spec 302-2261 vocabulary.
+        # First R-record seed should be "NOT DETECTED" — aligns with Cepheid LIS
+        # spec 302-2261 vocabulary.
         r_fields = r_lines[0].split("|")
         self.assertIn("NOT DETECTED", r_fields[3])
 
@@ -516,6 +531,62 @@ class TestFileSimulateAPI(unittest.TestCase):
         conn.close()
         self.assertGreaterEqual(resp.status, 400)
         self.assertLess(resp.status, 500)
+
+
+class TestProfileAdapterQualitativeLogic(unittest.TestCase):
+    """Hermetic gate for the adapter's result_type→seed mapping.
+
+    Pins the LOGIC against a SYNTHETIC profile (built in a temp dir and pointed at
+    via ANALYZER_PROFILES_DIR) with no dependency on the canonical analyzer-profiles
+    tree. This is the mock-OWNED unit gate that runs in standalone CI regardless of
+    which OE2 ref is present; the REAL GeneXpert profile values are gated by the
+    integrated (OE2-monorepo) harness E2E. Keeps qualitative coverage even when
+    test_qualitative_seed_value skips on an un-enriched profile checkout.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        astm_dir = os.path.join(self._tmp.name, "astm")
+        os.makedirs(astm_dir)
+        with open(os.path.join(astm_dir, "synth.json"), "w") as fh:
+            json.dump(
+                {
+                    "default_test_mappings": [
+                        {
+                            "test_code": "QUAL1",
+                            "loinc": "111-1",
+                            "result_type": "qualitative",
+                            "values": ["DETECTED", "NOT DETECTED"],
+                        },
+                        {"test_code": "QUANT1", "loinc": "222-2", "result_type": "quantitative"},
+                    ]
+                },
+                fh,
+            )
+        self._prev = os.environ.get("ANALYZER_PROFILES_DIR")
+        os.environ["ANALYZER_PROFILES_DIR"] = self._tmp.name
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self):
+        if self._prev is None:
+            os.environ.pop("ANALYZER_PROFILES_DIR", None)
+        else:
+            os.environ["ANALYZER_PROFILES_DIR"] = self._prev
+
+    def test_qualitative_seeds_negative_vocab_quantitative_seeds_zero(self):
+        from profile_adapter import load_profile_backed_template
+
+        merged = load_profile_backed_template(
+            "synth", {"profile": "astm/synth", "protocol": {"type": "ASTM"}}
+        )
+        fields = {f["code"]: f for f in merged["fields"]}
+        # qualitative result_type -> QUALITATIVE field seeded to the negative vocab
+        self.assertEqual(fields["QUAL1"]["type"], "QUALITATIVE")
+        self.assertEqual(fields["QUAL1"]["seedQualitative"], "NOT DETECTED")
+        # quantitative -> NUMERIC field, deterministic 0 seed
+        self.assertEqual(fields["QUANT1"]["type"], "NUMERIC")
+        self.assertEqual(fields["QUANT1"]["seedValue"], 0)
 
 
 if __name__ == "__main__":

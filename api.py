@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -29,6 +30,12 @@ from protocols.file_handler import FileHandler
 from push import push_hl7_to_destination, push_astm_to_destination
 
 logger = logging.getLogger(__name__)
+
+# Provisioning is convergent/idempotent, so a transient Docker-churn failure is
+# safe to retry — this is what prevents the intermittent `ip=missing` the harness
+# saw (a one-shot create that hit a transient attach error returned no IP).
+CREATE_MAX_RETRIES = 3
+CREATE_RETRY_BACKOFF_S = 0.4
 
 
 QC_DEFAULT_ASTM_TEMPLATE = "genexpert_astm"
@@ -981,22 +988,37 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if not re.match(r'^[A-Za-z0-9_-]+$', name):
             self._send_json(400, {"error": "name must be alphanumeric/dash/underscore only"})
             return
-        try:
-            # Connecting the current mock container to a new Docker network can
-            # tear down the in-flight HTTP socket. Return the API response first,
-            # then attach the mock container asynchronously.
-            result = mgr.create_analyzer(name, template, port, connect_mock=False)
-        except Exception as e:
-            error_str = str(e)
-            if "Conflict" in error_str or "already exists" in error_str:
-                # Network exists — return the existing analyzer info if cached
-                existing = mgr._analyzers.get(name)
-                if existing:
-                    self._send_json(200, existing)
-                else:
-                    self._send_json(409, {"error": error_str})
-            else:
-                self._send_json(500, {"error": error_str})
+        # Provisioning is idempotent, so retry transient Docker-churn failures
+        # rather than ever returning a response without an IP (the `ip=missing`
+        # flake). Connecting the current mock container to a new network can tear
+        # down the in-flight HTTP socket, so the mock attach is deferred to the
+        # async step below; only the deterministic IP is needed in the response.
+        result = None
+        last_error = None
+        for attempt in range(1, CREATE_MAX_RETRIES + 1):
+            try:
+                result = mgr.create_analyzer(name, template, port, connect_mock=False)
+                break
+            except Exception as e:
+                error_str = str(e)
+                if "Conflict" in error_str or "already exists" in error_str:
+                    # Network exists — return cached info immediately if we have
+                    # it; otherwise retry so create_analyzer adopts it (idempotent)
+                    # and returns the IP rather than a bare 409.
+                    existing = mgr._analyzers.get(name)
+                    if existing:
+                        self._send_json(200, existing)
+                        return
+                last_error = error_str
+                logger.warning("create_analyzer for %s failed (attempt %d/%d): %s",
+                               name, attempt, CREATE_MAX_RETRIES, error_str)
+                if attempt < CREATE_MAX_RETRIES:
+                    time.sleep(CREATE_RETRY_BACKOFF_S * attempt)
+        if result is None:
+            self._send_json(500, {
+                "error": f"provisioning failed for {name} after {CREATE_MAX_RETRIES} "
+                         f"attempts: {last_error}"
+            })
             return
 
         self._send_json(201, result)

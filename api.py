@@ -155,6 +155,30 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 return None
         return cls._network_manager
 
+    def _resolve_instance(self, name: str):
+        """Resolve a /simulate URL segment as a provisioned analyzer *instance*.
+
+        The instance is the single identity key: its registry record carries
+        both the template (message/sender shape) and the per-analyzer source IP,
+        so one lookup yields a coherent identity. Returns
+        ``(template_name, instance_ip)``.
+
+        Falls back to ``(name, None)`` when ``name`` is not a provisioned
+        instance — i.e. a caller addressing a bare template directly (hermetic /
+        QC unit tests that never stand up a Docker network, so there is no IP to
+        sync). This keeps the IP-bearing path single-keyed while preserving the
+        template-only path where there is no instance by design.
+        """
+        try:
+            mgr = self._get_network_manager()
+            info = mgr.get_analyzer(name) if mgr else None
+        except Exception as e:
+            logger.debug("Instance resolution failed for '%s': %s", name, e)
+            info = None
+        if info:
+            return info.get("template") or name, info.get("ip")
+        return name, None
+
     def do_GET(self):
         if self.path == "/health" or self.path == "/":
             self._send_json(200, {
@@ -272,18 +296,22 @@ class MockAPIHandler(BaseHTTPRequestHandler):
     # ── Route handlers ───────────────────────────────────────────
 
     def _handle_hl7(self, analyzer: str, kwargs: Dict):
-        template = _load_template(analyzer)
+        template_name, instance_ip = self._resolve_instance(analyzer)
+        template = _load_template(template_name)
         if not template:
             self._send_json(404, {"error": f"Template not found: {analyzer}"})
             return
         try:
             destination = kwargs.get("destination")
-            source_ip = kwargs.get("source_ip")
+            # The provisioned instance owns the source IP: a push must leave from
+            # the analyzer's own interface so the bridge identifies it by the
+            # connection's source address. Only the caller can override.
+            source_ip = kwargs.get("source_ip") or instance_ip
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
             if qc_mode and not destination:
-                defaults = _default_qc_hl7_route(analyzer)
+                defaults = _default_qc_hl7_route(template_name)
                 destination = defaults.get("destination")
                 source_ip = source_ip or defaults.get("source_ip")
 
@@ -350,7 +378,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(e)})
 
     def _handle_astm_get(self, template_name: str):
-        template = _load_template(template_name)
+        resolved_template, _ = self._resolve_instance(template_name)
+        template = _load_template(resolved_template)
         if not template:
             self._send_json(404, {"error": f"Template not found: {template_name}"})
             return
@@ -359,13 +388,14 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         try:
             msg = ASTMHandler().generate(template, use_seed=True)
-            self._send_json(200, {"status": "generated", "template": template_name, "message": msg})
+            self._send_json(200, {"status": "generated", "template": resolved_template, "message": msg})
         except Exception as e:
             logger.exception("ASTM GET failed for %s", template_name)
             self._send_json(500, {"error": str(e)})
 
     def _handle_astm_post(self, template_name: str):
-        template = _load_template(template_name)
+        resolved_template, instance_ip = self._resolve_instance(template_name)
+        template = _load_template(resolved_template)
         if not template:
             self._send_json(404, {"error": f"Template not found: {template_name}"})
             return
@@ -380,11 +410,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         params = body or {}
         count = min(max(int(params.get("count", 1)), 1), 100)
         destination = params.get("destination")
-        source_ip = params.get("source_ip")
+        # The provisioned instance owns the source IP (see _handle_hl7).
+        source_ip = params.get("source_ip") or instance_ip
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
         if qc_mode and not destination:
-            defaults = _default_qc_astm_route(template_name)
+            defaults = _default_qc_astm_route(resolved_template)
             destination = defaults.get("destination")
             source_ip = source_ip or defaults.get("source_ip")
 
@@ -424,7 +455,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {
             "status": "completed",
-            "template": template_name,
+            "template": resolved_template,
             "count": count,
             "qc": qc_mode,
             "pushed": success_count if destination else None,

@@ -734,8 +734,20 @@ class ASTMProtocolHandler:
         for order in orders:
             samples.setdefault(order['sample_id'], []).append(order['test_code'])
 
+        # Stamp the analyzer's own identity in the H-record sender field so the
+        # bridge can corroborate it against the connection source IP (mirrors
+        # ASTMHandler.generate). A hardcoded sender would defeat content-based
+        # identity on the order-response path.
+        ident = self.astm_template.get("identification", {})
+        astm_header = ident.get("astm_header")
+        if not astm_header:
+            anal = self.astm_template.get("analyzer", {})
+            astm_header = (
+                f"{anal.get('manufacturer', '')}^{anal.get('model', '')}^{anal.get('name', '')}".strip("^")
+                or anal.get("name", "MockAnalyzer")
+            )
         records: List[str] = [
-            "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
+            f"H|\\^&|||{astm_header}|||||||LIS2-A2",
         ]
         patient_seq = 1
         order_seq = 1

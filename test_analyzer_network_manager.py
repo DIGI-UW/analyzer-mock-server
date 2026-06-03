@@ -44,6 +44,10 @@ class Base(unittest.TestCase):
         p = patch.dict(sys.modules, {"docker": MagicMock(types=types), "docker.types": types})
         p.start()
         self.addCleanup(p.stop)
+        # Keep attach-retry backoff out of unit timing.
+        b = patch("analyzer_network_manager.ATTACH_RETRY_BACKOFF_S", 0)
+        b.start()
+        self.addCleanup(b.stop)
 
 
 class TestDeterministicAllocation(Base):
@@ -130,6 +134,19 @@ class TestCreateAnalyzer(Base):
         with self.assertRaises(Exception):
             self.mgr.create_analyzer("demo-x", "tmpl")
         created.remove.assert_called_once()
+
+    def test_transient_connect_failure_is_retried_then_succeeds(self):
+        # A transient Docker-churn attach failure must be retried, not surfaced as
+        # a provisioning failure — this is what prevents the `ip=missing` flake.
+        self.mgr._mock_container = "mock-ctr"
+        created = _net(name=NETWORK_PREFIX + "demo-x")
+        created.connect.side_effect = [Exception("transient: cannot connect"), None]
+        self.docker.networks.create.return_value = created
+        r = self.mgr.create_analyzer("demo-x", "tmpl")
+        self.assertEqual(r["name"], "demo-x")
+        self.assertIn("ip", r)
+        self.assertEqual(created.connect.call_count, 2)  # retried past the transient failure
+        created.remove.assert_not_called()  # provisioning succeeded — no rollback
 
     def test_connect_failure_does_NOT_remove_an_adopted_network(self):
         # We adopted an existing (possibly live/seeded) network; a connect failure

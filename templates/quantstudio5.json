@@ -13,7 +13,7 @@
     "file_pattern": "QS5_*.xls"
   },
   "file_config": {
-    "format": "EXCEL",
+    "format": "XLSX",
     "has_header": true,
     "column_mapping": {
       "sample_id": "Sample Name",
@@ -21,6 +21,7 @@
       "result": "Quantity Mean"
     }
   },
+  "qc_sample_id_pattern": "{level}-{lot}-001",
   "fixture": {
     "file": "fixtures/quantstudio5/results.xls",
     "format": "XLS",

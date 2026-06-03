@@ -29,6 +29,28 @@ def _next_file_sample_id() -> str:
     return validate_accession(f"DEV012699{n:011d}", "FILE generated accession")
 
 
+def _build_qc_xlsx(header, rows) -> bytes:
+    """Build an Office Open XML (.xlsx) workbook holding the QC rows.
+
+    Single sheet named ``Results`` (matches QuantStudio's native sheet name
+    so the bridge's header_scan strategy hits row 1 immediately). Returns
+    the binary bytes ready to write to a file or POST as multipart content.
+
+    Imported lazily so the rest of the module stays importable when
+    openpyxl isn't installed; CSV/TSV paths don't need it.
+    """
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Results"
+    ws.append(list(header))
+    for r in rows:
+        ws.append(list(r))
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:
     out = []
     for f in template.get("fields", []):
@@ -104,16 +126,75 @@ class FileHandler(BaseHandler):
 
         return buf.getvalue()
 
-    def generate_qc(self, template: Dict[str, Any], deviation: Optional[float] = None, **kwargs) -> str:
-        """Generate a CSV QC payload from the template's qc_controls section.
+    # Placeholders the qc_sample_id_pattern accepts. Anything else raises a
+    # clear ValueError instead of leaking a KeyError as a 500.
+    _QC_SAMPLE_PATTERN_PLACEHOLDERS = ("lot", "level", "field_code", "task")
 
-        Each qc_controls entry produces one row whose Sample Name = "QC-{lot}-{level}"
-        and result column = target + (deviation × sd) — matching the OE-side
-        FILE profile's `qcRules`:
-            - SPECIMEN_ID_PREFIX operand=QC (sample name starts with "QC-")
-            - FIELD_EQUALS targetField=QC_TASK operand=STANDARD (Task column)
+    # Format → file extension. Used by callers to name the emitted file
+    # (e.g. /admin/upload filename, /simulate/file/{template} target_dir
+    # output) so the bridge's extension-based dispatch picks the right
+    # parser. Aliases preserved for back-compat with older templates.
+    _QC_FORMAT_EXTENSION = {
+        "CSV": ".csv",
+        "TSV": ".tsv",
+        "TXT": ".csv",
+        "XLSX": ".xlsx",
+        "EXCEL": ".xlsx",
+        "XLS": ".xlsx",  # we always emit xlsx — POI/openpyxl read both, real
+                         #     QuantStudio outputs are .xls but the bridge's
+                         #     WorkbookFactory parses both transparently
+    }
 
-        Raises ValueError if the template has no qc_controls defined.
+    @classmethod
+    def qc_format(cls, template: Dict[str, Any]) -> str:
+        """Resolve the canonical QC format name (CSV/TSV/XLSX) for a template.
+
+        Reads from ``file_config.format`` (case-insensitive); aliases are
+        normalized so callers can rely on exactly one of {CSV, TSV, XLSX}.
+        Defaults to CSV when nothing is declared.
+        """
+        fcfg = template.get("file_config") or {}
+        raw = (fcfg.get("format") or "CSV").upper()
+        if raw in ("XLSX", "EXCEL", "XLS"):
+            return "XLSX"
+        if raw == "TSV":
+            return "TSV"
+        return "CSV"
+
+    @classmethod
+    def qc_extension(cls, template: Dict[str, Any]) -> str:
+        """Return the file extension (with leading dot) the QC content
+        should be written under, given the template's declared format."""
+        return cls._QC_FORMAT_EXTENSION.get(cls.qc_format(template), ".csv")
+
+    def generate_qc(self, template: Dict[str, Any], deviation: Optional[float] = None, **kwargs) -> bytes:
+        """Generate a QC payload from the template's qc_controls section.
+
+        Returns raw bytes whose encoding follows ``file_config.format``:
+
+          - **CSV** (default): comma-delimited UTF-8 text
+          - **TSV**: tab-delimited UTF-8 text
+          - **XLSX** / **EXCEL** / **XLS**: native Office Open XML binary
+            (always emitted as ``.xlsx`` regardless of the declared alias —
+            Apache POI and openpyxl both read .xlsx transparently and that
+            keeps the writer single-implementation)
+
+        Each qc_controls entry produces one row. The sample-name pattern
+        defaults to ``QC-{lot}-{level}`` but can be overridden per template
+        via ``qc_sample_id_pattern`` so the generated samples align with the
+        analyzer's OE-side qcRules:
+
+            - QuantStudio profile uses ``SPECIMEN_ID_PREFIX LPC|HPC|...`` →
+              pattern should put ``{level}`` first (e.g. ``"{level}-{lot}"``)
+            - Mindray BS-200 uses ``SPECIMEN_ID_PREFIX QC`` → default pattern
+              works as-is
+
+        Pattern placeholders supported: ``{lot}`` (lot_number from qc_control),
+        ``{level}`` (level), ``{field_code}`` (field_code), ``{task}`` (task).
+        Result column = target + (deviation × sd).
+
+        Raises ValueError if the template has no qc_controls defined or
+        if ``qc_sample_id_pattern`` references an unsupported placeholder.
         """
         if not self.validate_template(template):
             raise ValueError("Invalid template: missing analyzer or fields")
@@ -125,21 +206,27 @@ class FileHandler(BaseHandler):
             )
 
         fcfg = template.get("file_config") or {}
-        delim = fcfg.get("delimiter", ",")
-        if (fcfg.get("format") or "CSV").upper() == "TSV":
-            delim = "\t"
         col_map = fcfg.get("column_mapping") or {}
         sample_col = col_map.get("sample_id", "Sample Name")
         test_col = col_map.get("test_code", "Target Name")
         result_col = col_map.get("result", "Quantity Mean")
 
+        sample_pattern = template.get("qc_sample_id_pattern") or "QC-{lot}-{level}"
+        # Up-front validation so a bad pattern fails with a clear message
+        # instead of leaking a KeyError as a 500 at row-build time.
+        try:
+            sample_pattern.format(**{k: "" for k in self._QC_SAMPLE_PATTERN_PLACEHOLDERS})
+        except KeyError as e:
+            raise ValueError(
+                f"Unsupported placeholder {e} in qc_sample_id_pattern "
+                f"'{sample_pattern}'. Supported: "
+                + ", ".join("{" + k + "}" for k in self._QC_SAMPLE_PATTERN_PLACEHOLDERS)
+            ) from None
+
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
+        header = [sample_col, test_col, "Task", result_col, "Timestamp"]
 
-        buf = io.StringIO()
-        # Header includes Task column so FIELD_EQUALS QC_TASK=STANDARD matches.
-        w = csv.writer(buf, delimiter=delim if delim and len(delim) == 1 else ",", lineterminator="\n")
-        w.writerow([sample_col, test_col, "Task", result_col, "Timestamp"])
-
+        rows = []
         for ctrl in qc_controls_list:
             field_code = ctrl.get("field_code", "")
             lot = ctrl.get("lot_number", f"LOT-{field_code}-N")
@@ -162,10 +249,23 @@ class FileHandler(BaseHandler):
             else:
                 value = round(random.gauss(target_num, sd_num) if sd_num else target_num, 2)
 
-            sample_name = f"QC-{lot}-{level}"
-            w.writerow([sample_name, field_code, task, value, ts])
+            sample_name = sample_pattern.format(
+                lot=lot, level=level, field_code=field_code, task=task)
+            rows.append([sample_name, field_code, task, value, ts])
 
-        return buf.getvalue()
+        fmt = self.qc_format(template)
+        if fmt == "XLSX":
+            return _build_qc_xlsx(header, rows)
+        # CSV / TSV path — the historical default
+        delim = "\t" if fmt == "TSV" else (fcfg.get("delimiter") or ",")
+        if not delim or len(delim) != 1:
+            delim = ","
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=delim, lineterminator="\n")
+        w.writerow(header)
+        for r in rows:
+            w.writerow(r)
+        return buf.getvalue().encode("utf-8")
 
     def write_to_file(self, template: Dict[str, Any], path: str, **kwargs) -> Optional[str]:
         """Generate and write to path. Creates parent dirs. Returns path or None."""

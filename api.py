@@ -31,6 +31,49 @@ from push import push_hl7_to_destination, push_astm_to_destination
 logger = logging.getLogger(__name__)
 
 
+QC_DEFAULT_ASTM_TEMPLATE = "genexpert_astm"
+QC_DEFAULT_HL7_TEMPLATE = "mindray_bs200"
+QC_DEFAULT_FILE_TEMPLATE = "quantstudio5"
+
+
+def _default_qc_astm_route(template_name: str) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_ASTM_TEMPLATE:
+        return {}
+    return {
+        "destination": os.environ.get(
+            "QC_DEFAULT_ASTM_DESTINATION",
+            "tcp://openelis-analyzer-bridge:12001",
+        ),
+        "source_ip": os.environ.get("QC_DEFAULT_ASTM_SOURCE_IP", "10.42.20.10"),
+    }
+
+
+def _default_qc_hl7_route(template_name: str) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_HL7_TEMPLATE:
+        return {}
+    return {
+        "destination": os.environ.get(
+            "QC_DEFAULT_HL7_DESTINATION",
+            "mllp://openelis-analyzer-bridge:2575",
+        ),
+        "source_ip": os.environ.get("QC_DEFAULT_HL7_SOURCE_IP", "10.42.22.10"),
+    }
+
+
+def _default_qc_file_bridge_upload(template_name: str, template: Dict) -> Dict[str, str]:
+    if template_name != QC_DEFAULT_FILE_TEMPLATE:
+        return {}
+    default_test_code = os.environ.get("QC_DEFAULT_FILE_TEST_CODE")
+    if not default_test_code:
+        controls = template.get("qc_controls") or []
+        if controls:
+            default_test_code = controls[0].get("field_code")
+    bridge_upload = {}
+    if default_test_code:
+        bridge_upload["test_code"] = default_test_code
+    return bridge_upload
+
+
 def _load_template(analyzer: str) -> Optional[Dict]:
     """Load analyzer template — profile-backed first, then local file."""
     try:
@@ -230,9 +273,14 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         try:
             destination = kwargs.get("destination")
+            source_ip = kwargs.get("source_ip")
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
+            if qc_mode and not destination:
+                defaults = _default_qc_hl7_route(analyzer)
+                destination = defaults.get("destination")
+                source_ip = source_ip or defaults.get("source_ip")
 
             gen_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("patient_id", "sample_id", "tests") and v is not None}
@@ -257,7 +305,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     first_message = msg
                 pushed = False
                 if destination:
-                    pushed = push_hl7_to_destination(destination, msg)
+                    pushed = push_hl7_to_destination(destination, msg, source_ip=source_ip)
                     if pushed:
                         pushed_count += 1
                 results.append({
@@ -328,6 +376,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         source_ip = params.get("source_ip")
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
+        if qc_mode and not destination:
+            defaults = _default_qc_astm_route(template_name)
+            destination = defaults.get("destination")
+            source_ip = source_ip or defaults.get("source_ip")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
@@ -437,7 +489,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
                 return
 
+            # Explicit None check — an empty dict {} from the client means
+            # "do not upload"; only fall through to defaults when the field
+            # is omitted entirely.
             bridge_upload = params.get("bridge_upload")
+            if bridge_upload is None:
+                bridge_upload = _default_qc_file_bridge_upload(template_name, template)
             if bridge_upload:
                 try:
                     self._upload_qc_content_to_bridge(
@@ -456,19 +513,26 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
                     return
                 os.makedirs(resolved_dir, exist_ok=True)
-                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}.csv"
+                ext = FileHandler.qc_extension(template)
+                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}{ext}"
                 out_path = os.path.join(resolved_dir, os.path.basename(fname))
-                with open(out_path, "w", encoding="utf-8") as f:
+                with open(out_path, "wb") as f:
                     f.write(content)
                 written_path = out_path
-            self._send_json(200, {
+            qc_format = FileHandler.qc_format(template)
+            response = {
                 "status": "completed",
                 "template": template_name,
                 "qc": True,
                 "qc_deviation": qc_deviation,
                 "written_path": written_path,
-                "content": content,
-            })
+                "format": qc_format,
+            }
+            # XLSX is binary — don't echo the bytes in JSON; return text inline
+            # only for CSV/TSV where it's diagnostic-friendly.
+            if qc_format in ("CSV", "TSV"):
+                response["content"] = content.decode("utf-8")
+            self._send_json(200, response)
             return
 
         fixture_cfg = template.get("fixture")
@@ -779,8 +843,17 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
         import urllib.request, urllib.error, ssl, uuid as _uuid, base64
         boundary = f"----mock-server-qc-{_uuid.uuid4().hex}"
-        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}.csv"
-        file_bytes = content.encode("utf-8")
+        ext = FileHandler.qc_extension(template)
+        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}{ext}"
+        # Pick a Content-Type that matches the bytes — bridge dispatch is
+        # extension-based but a correct MIME helps debugging tools.
+        content_type = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if ext.endswith("xlsx") else
+                        "text/tab-separated-values" if ext.endswith("tsv") else
+                        "text/csv")
+        # generate_qc returns bytes for both text and binary formats — text
+        # paths emit utf-8 encoded bytes; xlsx emits raw OOXML bytes.
+        file_bytes = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8")
 
         parts = []
         parts.append(f"--{boundary}\r\n".encode())
@@ -793,7 +866,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         parts.append(f"--{boundary}\r\n".encode())
         parts.append(
             f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
-            f"Content-Type: text/csv\r\n\r\n".encode()
+            f"Content-Type: {content_type}\r\n\r\n".encode()
         )
         parts.append(file_bytes)
         parts.append(b"\r\n")
@@ -824,16 +897,25 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             bridge_url, template_name, analyzer_id, qc_deviation, resp_status,
         )
 
-        self._send_json(200, {
+        # XLSX content is binary — only include a text preview for delimited
+        # formats. The upload_filename's extension already indicates the
+        # format clearly; binary preview would just be JSON-serialization
+        # noise (and breaks self._send_json).
+        qc_format = FileHandler.qc_format(template)
+        response = {
             "status": "uploaded",
             "template": template_name,
             "qc": True,
             "qc_deviation": qc_deviation,
+            "format": qc_format,
             "bridge_status": resp_status,
-            "bridge_response_preview": resp_body[:500],
+            "bridge_response_preview": resp_body[:500] if isinstance(resp_body, str) else "",
             "upload_filename": upload_filename,
-            "content_preview": content[:500],
-        })
+            "content_size_bytes": len(file_bytes),
+        }
+        if qc_format in ("CSV", "TSV"):
+            response["content_preview"] = file_bytes[:500].decode("utf-8", errors="replace")
+        self._send_json(200, response)
 
     def _handle_create_analyzer(self):
         mgr = self._get_network_manager()

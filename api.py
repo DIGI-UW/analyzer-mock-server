@@ -309,13 +309,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 if first_message is None:
                     first_message = msg
                 pushed = False
+                push_err = None
                 if destination:
-                    pushed = push_hl7_to_destination(destination, msg, source_ip=source_ip)
+                    pushed, push_err = push_hl7_to_destination(destination, msg, source_ip=source_ip)
                     if pushed:
                         pushed_count += 1
                 results.append({
                     "message_number": i + 1,
                     "pushed": pushed,
+                    "error": push_err,
                     "sample_id": _extract_sample_id_from_hl7(msg),
                     "preview": msg.split("\r")[0][:80] + "...",
                 })
@@ -407,13 +409,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             else:
                 msg = handler.generate(template, **gen_kwargs)
             pushed = False
+            push_err = None
             if destination:
-                pushed = push_astm_to_destination(destination, msg, source_ip=source_ip)
+                pushed, push_err = push_astm_to_destination(destination, msg, source_ip=source_ip)
                 if pushed:
                     success_count += 1
             results.append({
                 "message_number": i + 1,
                 "pushed": pushed,
+                "error": push_err,
                 "sample_id": _extract_sample_id_from_astm(msg),
                 "preview": msg.split('\n')[0][:80] + "..." if msg else "",
             })

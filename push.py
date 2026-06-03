@@ -32,52 +32,96 @@ LF = b'\x0A'
 VT = b'\x0B'
 FS = b'\x1C'
 
+# How long a push waits for an analyzer's per-network source IP to become
+# bindable. POST /analyzers attaches the mock container to the new Docker
+# network in a background thread (so the create response isn't blocked by the
+# attach), so a push fired immediately after create can race ahead of the
+# attach. We poll for the IP rather than fail the push on that timing window.
+SOURCE_IP_READY_TIMEOUT_S = 12.0
+SOURCE_IP_READY_INTERVAL_S = 0.25
+
+# Result type: (delivered, error_reason). error_reason is None on success and a
+# human-readable string on failure so callers never see a silent False — the
+# whole point of pushing results through the mock is to know WHY one didn't land.
+PushResult = "tuple[bool, Optional[str]]"
+
+
+def _wait_source_ip_bindable(source_ip: str,
+                             timeout_s: float = SOURCE_IP_READY_TIMEOUT_S,
+                             interval_s: float = SOURCE_IP_READY_INTERVAL_S) -> bool:
+    """Poll until `source_ip` is a bindable local address on this container.
+
+    The mock binds the outgoing socket to the analyzer's per-network IP so the
+    bridge can attribute the message to the right analyzer. That IP only exists
+    once the mock container has been attached to the analyzer's Docker network,
+    which POST /analyzers does asynchronously. Until then `bind()` raises
+    "Cannot assign requested address". A throwaway bind-test is the cheapest
+    readiness probe.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_err: Optional[Exception] = None
+    while True:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind((source_ip, 0))
+            return True
+        except OSError as err:
+            last_err = err
+        finally:
+            probe.close()
+        if time.monotonic() >= deadline:
+            logger.error("[PUSH] source IP %s not bindable after %.1fs: %s",
+                         source_ip, timeout_s, last_err)
+            return False
+        time.sleep(interval_s)
+
 
 def push_hl7_to_destination(destination: str, hl7_message: str,
-                             source_ip: Optional[str] = None) -> bool:
+                             source_ip: Optional[str] = None):
     """Route HL7 push by destination scheme: mllp:// or http(s)://.
 
-    source_ip is forwarded to push_hl7_mllp; ignored for HTTP destinations.
+    Returns (delivered, error_reason). source_ip is forwarded to push_hl7_mllp;
+    ignored for HTTP destinations.
     """
     if destination.startswith("mllp://"):
         addr = destination[len("mllp://"):]
         if ":" not in addr:
-            logger.error("[PUSH-HL7] Invalid MLLP destination (missing port): %s", destination)
-            return False
+            return False, f"invalid MLLP destination (missing port): {destination}"
         host, port_str = addr.rsplit(":", 1)
         try:
             port = int(port_str)
         except ValueError:
-            logger.error("[PUSH-HL7] Invalid MLLP port: %s", port_str)
-            return False
+            return False, f"invalid MLLP port: {port_str}"
         return push_hl7_mllp(host, port, hl7_message, source_ip=source_ip)
-    return push_hl7_http(destination, hl7_message)
+    return push_hl7_http(destination, hl7_message), None
 
 
 def push_astm_to_destination(destination: str, astm_message: str,
-                              source_ip: Optional[str] = None) -> bool:
+                              source_ip: Optional[str] = None):
     """Route ASTM push by destination scheme: tcp:// or http(s)://.
 
-    source_ip is forwarded to push_astm_tcp; ignored for HTTP destinations.
+    Returns (delivered, error_reason). source_ip is forwarded to push_astm_tcp;
+    ignored for HTTP destinations.
     """
     if destination.startswith("tcp://"):
         addr = destination[len("tcp://"):]
         if ":" not in addr:
-            logger.error("[PUSH] Invalid TCP destination (missing port): %s", destination)
-            return False
+            return False, f"invalid TCP destination (missing port): {destination}"
         host, port_str = addr.rsplit(":", 1)
         try:
             port = int(port_str)
         except ValueError:
-            logger.error("[PUSH] Invalid TCP port: %s", port_str)
-            return False
+            return False, f"invalid TCP port: {port_str}"
         return push_astm_tcp(host, port, astm_message, source_ip=source_ip)
-    return push_astm_http(destination, astm_message)
+    return push_astm_http(destination, astm_message), None
 
 
 def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
-                  source_ip: Optional[str] = None) -> bool:
+                  source_ip: Optional[str] = None):
     """Push an HL7 message over MLLP and require positive application ACK.
+
+    Returns (delivered, error_reason) — error_reason is None on a positive ACK,
+    else a string explaining the failure (never a silent False).
 
     source_ip: optional local IP to bind the outgoing socket to. The mock has one
     Docker network interface per registered analyzer; the bridge identifies the
@@ -86,6 +130,10 @@ def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
     the kernel picks the route arbitrarily and the message is attributed to the
     wrong analyzer.
     """
+    if source_ip and not _wait_source_ip_bindable(source_ip):
+        return False, (f"source IP {source_ip} not configured on the mock container "
+                       f"after {SOURCE_IP_READY_TIMEOUT_S:.0f}s — analyzer network attach "
+                       "incomplete (POST /analyzers connects asynchronously)")
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -101,17 +149,17 @@ def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
             chunk = sock.recv(4096)
             if not chunk:
                 logger.error("[PUSH-HL7-MLLP] Peer closed before MLLP terminator from %s:%s", host, port)
-                return False
+                return False, f"peer {host}:{port} closed before MLLP terminator"
             ack += chunk
         ack_text = ack.replace(VT, b"").replace(FS + CR, b"").decode("utf-8", errors="replace")
         if "MSA|AA|" in ack_text:
             logger.info("[PUSH-HL7-MLLP] Positive ACK received from %s:%s", host, port)
-            return True
+            return True, None
         logger.error("[PUSH-HL7-MLLP] Negative/invalid ACK from %s:%s: %s", host, port, ack_text[:200])
-        return False
+        return False, f"negative/invalid ACK from {host}:{port}: {ack_text[:120]}"
     except Exception as e:
         logger.error("[PUSH-HL7-MLLP] Push failed: %s", e, exc_info=True)
-        return False
+        return False, f"MLLP push to {host}:{port} failed: {e}"
     finally:
         if sock:
             try:
@@ -210,8 +258,11 @@ def send_astm_session(sock, records: list, session_label: str = "") -> bool:
 
 
 def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,
-                   source_ip: Optional[str] = None) -> bool:
+                   source_ip: Optional[str] = None):
     """Push ASTM message via raw TCP with ENQ/ACK framing.
+
+    Returns (delivered, error_reason) — error_reason is None on success, else a
+    string explaining the failure (never a silent False).
 
     source_ip: optional local IP to bind the outgoing socket to. The mock
     container has multiple Docker network interfaces (one per registered
@@ -220,6 +271,10 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,
     Linux picks the route arbitrarily and QC ends up associated with the
     wrong analyzer.
     """
+    if source_ip and not _wait_source_ip_bindable(source_ip):
+        return False, (f"source IP {source_ip} not configured on the mock container "
+                       f"after {SOURCE_IP_READY_TIMEOUT_S:.0f}s — analyzer network attach "
+                       "incomplete (POST /analyzers connects asynchronously)")
     if source_ip:
         logger.info("[PUSH-TCP] Connecting to %s:%s (source=%s) for ASTM TCP push", host, port, source_ip)
     else:
@@ -249,16 +304,16 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,
                 sock.bind((source_ip, 0))
             sock.connect((host, port))
             if not send_astm_session(sock, session_records, label):
-                return False
+                return False, f"ASTM session {label or '1/1'} not accepted by {host}:{port} (ENQ/frame NAK or EOT)"
         except socket.timeout:
             logger.error("[PUSH-TCP] Timeout connecting to %s:%s", host, port)
-            return False
+            return False, f"timeout connecting to {host}:{port}"
         except ConnectionRefusedError:
             logger.error("[PUSH-TCP] Connection refused by %s:%s", host, port)
-            return False
+            return False, f"connection refused by {host}:{port}"
         except Exception as e:
             logger.error("[PUSH-TCP] Push failed: %s", e, exc_info=True)
-            return False
+            return False, f"ASTM TCP push to {host}:{port} failed: {e}"
         finally:
             if sock:
                 try:
@@ -269,4 +324,4 @@ def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,
             time.sleep(0.5)
 
     logger.info("[PUSH-TCP] All %d session(s) sent to %s:%s", len(sessions), host, port)
-    return True
+    return True, None

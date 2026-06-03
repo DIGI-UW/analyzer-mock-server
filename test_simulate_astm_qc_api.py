@@ -55,7 +55,7 @@ class TestSimulateAstmQcApi(unittest.TestCase):
         tpl_patcher.start()
         self.addCleanup(tpl_patcher.stop)
 
-        push_patcher = patch.object(api, "push_astm_to_destination", return_value=True)
+        push_patcher = patch.object(api, "push_astm_to_destination", return_value=(True, None))
         self.mock_push = push_patcher.start()
         self.addCleanup(push_patcher.stop)
 

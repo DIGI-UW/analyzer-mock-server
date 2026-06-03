@@ -91,7 +91,7 @@ class TestPushOrderResult(unittest.TestCase):
 
     def test_pushes_oru_r01_echoing_placer_and_filler(self):
         h, _ = _make_handler()
-        with patch('push.push_hl7_mllp', return_value=True) as mock_push:
+        with patch('push.push_hl7_mllp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_PORT': '2575',
@@ -110,14 +110,14 @@ class TestPushOrderResult(unittest.TestCase):
 
     def test_skip_push_when_host_empty(self):
         h, _ = _make_handler()
-        with patch('push.push_hl7_mllp') as mock_push:
+        with patch('push.push_hl7_mllp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {'ORDER_RESULT_PUSH_HOST': ''}):
                 h._push_order_result(ORDER_ORM_O01)
         mock_push.assert_not_called()
 
     def test_skip_push_when_port_invalid(self):
         h, _ = _make_handler()
-        with patch('push.push_hl7_mllp') as mock_push:
+        with patch('push.push_hl7_mllp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_PORT': 'not-a-number',
@@ -128,7 +128,7 @@ class TestPushOrderResult(unittest.TestCase):
     def test_skip_push_when_no_correlation(self):
         h, _ = _make_handler()
         msg_without_orders = "MSH|^~\\&|OE2|LAB|...|||ORM^O01|X|P|2.3.1\r"
-        with patch('push.push_hl7_mllp') as mock_push:
+        with patch('push.push_hl7_mllp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_PORT': '2575',

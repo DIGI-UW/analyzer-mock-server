@@ -788,14 +788,14 @@ class ASTMProtocolHandler:
             f"to {host}:{port} (source={source_ip})"
         )
         try:
-            ok = push_astm_tcp(host, port, message, timeout=10, source_ip=source_ip)
+            ok, push_err = push_astm_tcp(host, port, message, timeout=10, source_ip=source_ip)
             if ok:
                 logger.info(
                     f"[ORDER_IN] Pushed ASTM result message to {host}:{port}"
                 )
             else:
                 logger.warning(
-                    f"[ORDER_IN] push_astm_tcp returned false for {host}:{port}"
+                    f"[ORDER_IN] push_astm_tcp returned false for {host}:{port}: {push_err}"
                 )
         except Exception as e:
             logger.error(
@@ -1450,10 +1450,11 @@ def main():
                         logger.error("Failed to generate message")
                         time.sleep(args.push_interval)
                         continue
-                    if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
+                    push_ok, push_err = push_astm_to_destination(args.push, message, source_ip=args.source_ip)
+                    if push_ok:
                         success_count += 1
                     else:
-                        logger.warning(f"Push #{total_pushed} failed")
+                        logger.warning(f"Push #{total_pushed} failed: {push_err}")
                     time.sleep(args.push_interval)
             except KeyboardInterrupt:
                 logger.info("Continuous push mode stopped by user")

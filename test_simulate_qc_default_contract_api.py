@@ -77,7 +77,7 @@ class TestScenarioOnlyQcApiContract(unittest.TestCase):
 
     def test_astm_qc_uses_default_delivery_when_destination_omitted(self):
         with patch.object(api, "_load_template", return_value=GENEXPERT_TEMPLATE), patch.object(
-            api, "push_astm_to_destination", return_value=True
+            api, "push_astm_to_destination", return_value=(True, None)
         ) as mock_push:
             status, body = self._post(
                 "/simulate/astm/genexpert_astm",
@@ -93,7 +93,7 @@ class TestScenarioOnlyQcApiContract(unittest.TestCase):
 
     def test_hl7_qc_uses_default_delivery_when_destination_omitted(self):
         with patch.object(api, "_load_template", return_value=MINDRAY_TEMPLATE), patch.object(
-            api, "push_hl7_to_destination", return_value=True
+            api, "push_hl7_to_destination", return_value=(True, None)
         ) as mock_push:
             status, body = self._post(
                 "/simulate/hl7/mindray_bs200",

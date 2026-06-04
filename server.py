@@ -734,8 +734,20 @@ class ASTMProtocolHandler:
         for order in orders:
             samples.setdefault(order['sample_id'], []).append(order['test_code'])
 
+        # Stamp the analyzer's own identity in the H-record sender field so the
+        # bridge can corroborate it against the connection source IP (mirrors
+        # ASTMHandler.generate). A hardcoded sender would defeat content-based
+        # identity on the order-response path.
+        ident = self.astm_template.get("identification", {})
+        astm_header = ident.get("astm_header")
+        if not astm_header:
+            anal = self.astm_template.get("analyzer", {})
+            astm_header = (
+                f"{anal.get('manufacturer', '')}^{anal.get('model', '')}^{anal.get('name', '')}".strip("^")
+                or anal.get("name", "MockAnalyzer")
+            )
         records: List[str] = [
-            "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
+            f"H|\\^&|||{astm_header}|||||||LIS2-A2",
         ]
         patient_seq = 1
         order_seq = 1
@@ -788,14 +800,14 @@ class ASTMProtocolHandler:
             f"to {host}:{port} (source={source_ip})"
         )
         try:
-            ok = push_astm_tcp(host, port, message, timeout=10, source_ip=source_ip)
+            ok, push_err = push_astm_tcp(host, port, message, timeout=10, source_ip=source_ip)
             if ok:
                 logger.info(
                     f"[ORDER_IN] Pushed ASTM result message to {host}:{port}"
                 )
             else:
                 logger.warning(
-                    f"[ORDER_IN] push_astm_tcp returned false for {host}:{port}"
+                    f"[ORDER_IN] push_astm_tcp returned false for {host}:{port}: {push_err}"
                 )
         except Exception as e:
             logger.error(
@@ -1450,10 +1462,11 @@ def main():
                         logger.error("Failed to generate message")
                         time.sleep(args.push_interval)
                         continue
-                    if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
+                    push_ok, push_err = push_astm_to_destination(args.push, message, source_ip=args.source_ip)
+                    if push_ok:
                         success_count += 1
                     else:
-                        logger.warning(f"Push #{total_pushed} failed")
+                        logger.warning(f"Push #{total_pushed} failed: {push_err}")
                     time.sleep(args.push_interval)
             except KeyboardInterrupt:
                 logger.info("Continuous push mode stopped by user")
@@ -1466,10 +1479,11 @@ def main():
                 if not message:
                     logger.error("Failed to generate message")
                     continue
-                if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
+                push_ok, push_err = push_astm_to_destination(args.push, message, source_ip=args.source_ip)
+                if push_ok:
                     success_count += 1
                 else:
-                    logger.warning(f"Push {i+1} failed")
+                    logger.warning(f"Push {i+1} failed: {push_err}")
                 if i < args.push_count - 1:
                     time.sleep(args.push_interval)
         

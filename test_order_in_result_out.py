@@ -84,7 +84,7 @@ class TestSendOrderResponse(unittest.TestCase):
         rather than reusing self.conn (the bridge closes its outbound socket
         after EOT, so same-connection push would be dropped)."""
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp', return_value=True) as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_ASTM_PORT': '12001',
@@ -108,7 +108,7 @@ class TestSendOrderResponse(unittest.TestCase):
 
     def test_numeric_field_emits_value_with_unit(self):
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp', return_value=True) as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_ASTM_PORT': '12001',
@@ -121,7 +121,7 @@ class TestSendOrderResponse(unittest.TestCase):
 
     def test_multiple_tests_one_sample_share_pid_block(self):
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp', return_value=True) as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_ASTM_PORT': '12001',
@@ -140,7 +140,7 @@ class TestSendOrderResponse(unittest.TestCase):
         # A faithful analyzer reports a test it cannot run (status X) rather than
         # silently omitting it. Both the known and unknown ordered codes appear.
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp', return_value=True) as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_ASTM_PORT': '12001',
@@ -161,7 +161,7 @@ class TestSendOrderResponse(unittest.TestCase):
         handler, _ = _make_handler(template=False)  # explicit no template
         # Force template to None (False is falsy but not exactly None — explicit set)
         handler.astm_template = None
-        with patch('push.push_astm_tcp') as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             handler.send_order_response([
                 {'sample_id': 'ACC-1', 'test_code': 'MTB-RIF'},
             ])
@@ -169,7 +169,7 @@ class TestSendOrderResponse(unittest.TestCase):
 
     def test_skip_push_when_host_empty(self):
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp') as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {'ORDER_RESULT_PUSH_HOST': ''}):
                 handler.send_order_response([
                     {'sample_id': 'ACC-1', 'test_code': 'MTB-RIF'},
@@ -178,7 +178,7 @@ class TestSendOrderResponse(unittest.TestCase):
 
     def test_skip_push_when_port_invalid(self):
         handler, _ = _make_handler()
-        with patch('push.push_astm_tcp') as mock_push:
+        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
             with patch.dict(os.environ, {
                 'ORDER_RESULT_PUSH_HOST': 'bridge-test',
                 'ORDER_RESULT_PUSH_ASTM_PORT': 'not-a-number',

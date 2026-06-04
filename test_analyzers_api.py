@@ -7,6 +7,7 @@ mocked network manager (Docker is not required).
 
 import json
 import threading
+import time
 import unittest
 import http.client
 from http.server import HTTPServer
@@ -171,6 +172,12 @@ class TestAnalyzersAPI(unittest.TestCase):
             status, _ = self._post_analyzers({"name": "async-2", "template": "t"})
 
         self.assertEqual(status, 201)
+        # The connect runs in the httpd worker thread AFTER the 201 is flushed, so
+        # the client can return before the worker reaches it. Poll with a bounded
+        # deadline instead of racing the worker's scheduling (flakes under load).
+        deadline = time.time() + 5.0
+        while self.mock_mgr.connect_mock_to_analyzer.call_count == 0 and time.time() < deadline:
+            time.sleep(0.01)
         self.mock_mgr.connect_mock_to_analyzer.assert_called_once_with("async-2")
         # Sanity: we patched api.threading.Thread, not the global one
         self.assertIs(threading.Thread, real_thread)
@@ -195,7 +202,11 @@ class TestAnalyzersAPI(unittest.TestCase):
              patch("api.logger") as mock_logger:
             status, _ = self._post_analyzers({"name": "async-3", "template": "t"})
 
-        self.assertEqual(status, 201)
+            self.assertEqual(status, 201)
+            # Same worker-thread race as above — poll for the cross-thread log.
+            deadline = time.time() + 5.0
+            while mock_logger.exception.call_count == 0 and time.time() < deadline:
+                time.sleep(0.01)
         mock_logger.exception.assert_called_once()
         msg = mock_logger.exception.call_args[0][0]
         self.assertIn("connect_mock_to_analyzer raised", msg)

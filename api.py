@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -29,6 +30,12 @@ from protocols.file_handler import FileHandler
 from push import push_hl7_to_destination, push_astm_to_destination
 
 logger = logging.getLogger(__name__)
+
+# Provisioning is convergent/idempotent, so a transient Docker-churn failure is
+# safe to retry — this is what prevents the intermittent `ip=missing` the harness
+# saw (a one-shot create that hit a transient attach error returned no IP).
+CREATE_MAX_RETRIES = 3
+CREATE_RETRY_BACKOFF_S = 0.4
 
 
 QC_DEFAULT_ASTM_TEMPLATE = "genexpert_astm"
@@ -101,6 +108,14 @@ def _load_template(analyzer: str) -> Optional[Dict]:
     return template
 
 
+def _template_not_found(requested: str, resolved: str) -> str:
+    """404 message that names the actually-missing template — and the instance it
+    was resolved from, when an instance name resolved to a different template."""
+    if resolved and resolved != requested:
+        return f"Template not found: '{resolved}' (resolved from instance '{requested}')"
+    return f"Template not found: {requested}"
+
+
 def _safe_file_output_path(target_dir, filename, template_name, default_pattern):
     """Construct safe file output path, stripping path traversal to basename."""
     if not target_dir or not os.path.isdir(target_dir):
@@ -154,6 +169,30 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 logger.error("Failed to initialize AnalyzerNetworkManager: %s", e)
                 return None
         return cls._network_manager
+
+    def _resolve_instance(self, name: str):
+        """Resolve a /simulate URL segment as a provisioned analyzer *instance*.
+
+        The instance is the single identity key: its registry record carries
+        both the template (message/sender shape) and the per-analyzer source IP,
+        so one lookup yields a coherent identity. Returns
+        ``(template_name, instance_ip)``.
+
+        Falls back to ``(name, None)`` when ``name`` is not a provisioned
+        instance — i.e. a caller addressing a bare template directly (hermetic /
+        QC unit tests that never stand up a Docker network, so there is no IP to
+        sync). This keeps the IP-bearing path single-keyed while preserving the
+        template-only path where there is no instance by design.
+        """
+        try:
+            mgr = self._get_network_manager()
+            info = mgr.get_analyzer(name) if mgr else None
+        except Exception as e:
+            logger.debug("Instance resolution failed for '%s': %s", name, e)
+            info = None
+        if info:
+            return info.get("template") or name, info.get("ip")
+        return name, None
 
     def do_GET(self):
         if self.path == "/health" or self.path == "/":
@@ -272,18 +311,22 @@ class MockAPIHandler(BaseHTTPRequestHandler):
     # ── Route handlers ───────────────────────────────────────────
 
     def _handle_hl7(self, analyzer: str, kwargs: Dict):
-        template = _load_template(analyzer)
+        template_name, instance_ip = self._resolve_instance(analyzer)
+        template = _load_template(template_name)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {analyzer}"})
+            self._send_json(404, {"error": _template_not_found(analyzer, template_name)})
             return
         try:
             destination = kwargs.get("destination")
-            source_ip = kwargs.get("source_ip")
+            # The provisioned instance owns the source IP: a push must leave from
+            # the analyzer's own interface so the bridge identifies it by the
+            # connection's source address. Only the caller can override.
+            source_ip = kwargs.get("source_ip") or instance_ip
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
             if qc_mode and not destination:
-                defaults = _default_qc_hl7_route(analyzer)
+                defaults = _default_qc_hl7_route(template_name)
                 destination = defaults.get("destination")
                 source_ip = source_ip or defaults.get("source_ip")
 
@@ -309,13 +352,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 if first_message is None:
                     first_message = msg
                 pushed = False
+                push_err = None
                 if destination:
-                    pushed = push_hl7_to_destination(destination, msg, source_ip=source_ip)
+                    pushed, push_err = push_hl7_to_destination(destination, msg, source_ip=source_ip)
                     if pushed:
                         pushed_count += 1
                 results.append({
                     "message_number": i + 1,
                     "pushed": pushed,
+                    "error": push_err,
                     "sample_id": _extract_sample_id_from_hl7(msg),
                     "preview": msg.split("\r")[0][:80] + "...",
                 })
@@ -348,24 +393,26 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(e)})
 
     def _handle_astm_get(self, template_name: str):
-        template = _load_template(template_name)
+        resolved_template, _ = self._resolve_instance(template_name)
+        template = _load_template(resolved_template)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {template_name}"})
+            self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
             return
         try:
             msg = ASTMHandler().generate(template, use_seed=True)
-            self._send_json(200, {"status": "generated", "template": template_name, "message": msg})
+            self._send_json(200, {"status": "generated", "template": resolved_template, "message": msg})
         except Exception as e:
             logger.exception("ASTM GET failed for %s", template_name)
             self._send_json(500, {"error": str(e)})
 
     def _handle_astm_post(self, template_name: str):
-        template = _load_template(template_name)
+        resolved_template, instance_ip = self._resolve_instance(template_name)
+        template = _load_template(resolved_template)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {template_name}"})
+            self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
@@ -378,11 +425,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         params = body or {}
         count = min(max(int(params.get("count", 1)), 1), 100)
         destination = params.get("destination")
-        source_ip = params.get("source_ip")
+        # The provisioned instance owns the source IP (see _handle_hl7).
+        source_ip = params.get("source_ip") or instance_ip
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
         if qc_mode and not destination:
-            defaults = _default_qc_astm_route(template_name)
+            defaults = _default_qc_astm_route(resolved_template)
             destination = defaults.get("destination")
             source_ip = source_ip or defaults.get("source_ip")
 
@@ -407,20 +455,22 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             else:
                 msg = handler.generate(template, **gen_kwargs)
             pushed = False
+            push_err = None
             if destination:
-                pushed = push_astm_to_destination(destination, msg, source_ip=source_ip)
+                pushed, push_err = push_astm_to_destination(destination, msg, source_ip=source_ip)
                 if pushed:
                     success_count += 1
             results.append({
                 "message_number": i + 1,
                 "pushed": pushed,
+                "error": push_err,
                 "sample_id": _extract_sample_id_from_astm(msg),
                 "preview": msg.split('\n')[0][:80] + "..." if msg else "",
             })
 
         self._send_json(200, {
             "status": "completed",
-            "template": template_name,
+            "template": resolved_template,
             "count": count,
             "qc": qc_mode,
             "pushed": success_count if destination else None,
@@ -946,22 +996,44 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if not re.match(r'^[A-Za-z0-9_-]+$', name):
             self._send_json(400, {"error": "name must be alphanumeric/dash/underscore only"})
             return
-        try:
-            # Connecting the current mock container to a new Docker network can
-            # tear down the in-flight HTTP socket. Return the API response first,
-            # then attach the mock container asynchronously.
-            result = mgr.create_analyzer(name, template, port, connect_mock=False)
-        except Exception as e:
-            error_str = str(e)
-            if "Conflict" in error_str or "already exists" in error_str:
-                # Network exists — return the existing analyzer info if cached
-                existing = mgr._analyzers.get(name)
-                if existing:
-                    self._send_json(200, existing)
-                else:
-                    self._send_json(409, {"error": error_str})
+        # Provisioning is idempotent, so retry transient Docker-churn failures
+        # rather than ever returning a response without an IP (the `ip=missing`
+        # flake). Connecting the current mock container to a new network can tear
+        # down the in-flight HTTP socket, so the mock attach is deferred to the
+        # async step below; only the deterministic IP is needed in the response.
+        result = None
+        last_error = None
+        last_was_conflict = False
+        for attempt in range(1, CREATE_MAX_RETRIES + 1):
+            try:
+                result = mgr.create_analyzer(name, template, port, connect_mock=False)
+                break
+            except Exception as e:
+                error_str = str(e)
+                last_was_conflict = "Conflict" in error_str or "already exists" in error_str
+                if last_was_conflict:
+                    # Network exists — return cached info immediately if we have
+                    # it; otherwise retry so create_analyzer adopts it (idempotent)
+                    # and returns the IP rather than a bare 409.
+                    existing = mgr._analyzers.get(name)
+                    if existing:
+                        self._send_json(200, existing)
+                        return
+                last_error = error_str
+                logger.warning("create_analyzer for %s failed (attempt %d/%d): %s",
+                               name, attempt, CREATE_MAX_RETRIES, error_str)
+                if attempt < CREATE_MAX_RETRIES:
+                    time.sleep(CREATE_RETRY_BACKOFF_S * attempt)
+        if result is None:
+            # A persistent "already exists" is a client-visible conflict (409),
+            # not a server error (500) — preserve the pre-retry 409 semantics.
+            if last_was_conflict:
+                self._send_json(409, {"error": last_error})
             else:
-                self._send_json(500, {"error": error_str})
+                self._send_json(500, {
+                    "error": f"provisioning failed for {name} after {CREATE_MAX_RETRIES} "
+                             f"attempts: {last_error}"
+                })
             return
 
         self._send_json(201, result)

@@ -38,6 +38,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,8 @@ FIXED_SUBNETS: Dict[str, int] = {
 DYNAMIC_SUBNET_BASE = 50   # Dynamic (hash-derived) slots live in [BASE, MAX]
 DYNAMIC_SUBNET_MAX = 250   # (won't collide with the fixed 20-23 range)
 MAX_SUBNET_ATTEMPTS = 30   # Probe budget when a chosen /24 collides with a different network
+ATTACH_MAX_RETRIES = 4     # Container-attach is the one step that flakes under Docker churn
+ATTACH_RETRY_BACKOFF_S = 0.5
 
 
 class AnalyzerNetworkManager:
@@ -276,16 +279,32 @@ class AnalyzerNetworkManager:
         """Idempotently attach `container` to `network` at `ip`.
 
         No-op when already connected at `ip`; reconnects at `ip` if attached at a
-        different address (e.g. the network was recreated). Raises on a real
-        connect failure so the caller can roll back.
+        different address (e.g. the network was recreated). The connect is the one
+        step that flakes transiently under Docker network churn (the historical
+        `ip=missing` provisioning failure), so it is retried with backoff; only a
+        persistent failure is raised so the caller can roll back.
         """
-        try:
-            network.connect(container, ipv4_address=ip)
-            logger.info("Connected %s (%s) to %s at %s", label, container, network.name, ip)
-            return
-        except Exception as err:
-            if "already" not in str(err).lower():
-                raise
+        last_err = None
+        for attempt in range(1, ATTACH_MAX_RETRIES + 1):
+            try:
+                network.connect(container, ipv4_address=ip)
+                logger.info("Connected %s (%s) to %s at %s", label, container, network.name, ip)
+                return
+            except Exception as err:
+                if "already" in str(err).lower():
+                    last_err = None
+                    break  # attached — fall through to reconcile/confirm
+                last_err = err
+                logger.warning("Attach %s (%s) to %s failed (attempt %d/%d): %s",
+                               label, container, network.name, attempt, ATTACH_MAX_RETRIES, err)
+                if attempt < ATTACH_MAX_RETRIES:
+                    time.sleep(ATTACH_RETRY_BACKOFF_S * attempt)
+                    try:
+                        network.reload()  # refresh Docker state before retrying
+                    except Exception:
+                        pass
+        if last_err is not None:
+            raise last_err
         # Already attached — confirm the IP, reconcile if it drifted. Best-effort.
         try:
             network.reload()

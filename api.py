@@ -108,6 +108,14 @@ def _load_template(analyzer: str) -> Optional[Dict]:
     return template
 
 
+def _template_not_found(requested: str, resolved: str) -> str:
+    """404 message that names the actually-missing template — and the instance it
+    was resolved from, when an instance name resolved to a different template."""
+    if resolved and resolved != requested:
+        return f"Template not found: '{resolved}' (resolved from instance '{requested}')"
+    return f"Template not found: {requested}"
+
+
 def _safe_file_output_path(target_dir, filename, template_name, default_pattern):
     """Construct safe file output path, stripping path traversal to basename."""
     if not target_dir or not os.path.isdir(target_dir):
@@ -306,7 +314,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         template_name, instance_ip = self._resolve_instance(analyzer)
         template = _load_template(template_name)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {analyzer}"})
+            self._send_json(404, {"error": _template_not_found(analyzer, template_name)})
             return
         try:
             destination = kwargs.get("destination")
@@ -388,7 +396,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         resolved_template, _ = self._resolve_instance(template_name)
         template = _load_template(resolved_template)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {template_name}"})
+            self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
@@ -404,7 +412,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         resolved_template, instance_ip = self._resolve_instance(template_name)
         template = _load_template(resolved_template)
         if not template:
-            self._send_json(404, {"error": f"Template not found: {template_name}"})
+            self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
@@ -995,13 +1003,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         # async step below; only the deterministic IP is needed in the response.
         result = None
         last_error = None
+        last_was_conflict = False
         for attempt in range(1, CREATE_MAX_RETRIES + 1):
             try:
                 result = mgr.create_analyzer(name, template, port, connect_mock=False)
                 break
             except Exception as e:
                 error_str = str(e)
-                if "Conflict" in error_str or "already exists" in error_str:
+                last_was_conflict = "Conflict" in error_str or "already exists" in error_str
+                if last_was_conflict:
                     # Network exists — return cached info immediately if we have
                     # it; otherwise retry so create_analyzer adopts it (idempotent)
                     # and returns the IP rather than a bare 409.
@@ -1015,10 +1025,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 if attempt < CREATE_MAX_RETRIES:
                     time.sleep(CREATE_RETRY_BACKOFF_S * attempt)
         if result is None:
-            self._send_json(500, {
-                "error": f"provisioning failed for {name} after {CREATE_MAX_RETRIES} "
-                         f"attempts: {last_error}"
-            })
+            # A persistent "already exists" is a client-visible conflict (409),
+            # not a server error (500) — preserve the pre-retry 409 semantics.
+            if last_was_conflict:
+                self._send_json(409, {"error": last_error})
+            else:
+                self._send_json(500, {
+                    "error": f"provisioning failed for {name} after {CREATE_MAX_RETRIES} "
+                             f"attempts: {last_error}"
+                })
             return
 
         self._send_json(201, result)

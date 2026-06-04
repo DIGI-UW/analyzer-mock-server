@@ -1479,10 +1479,11 @@ def main():
                 if not message:
                     logger.error("Failed to generate message")
                     continue
-                if push_astm_to_destination(args.push, message, source_ip=args.source_ip):
+                push_ok, push_err = push_astm_to_destination(args.push, message, source_ip=args.source_ip)
+                if push_ok:
                     success_count += 1
                 else:
-                    logger.warning(f"Push {i+1} failed")
+                    logger.warning(f"Push {i+1} failed: {push_err}")
                 if i < args.push_count - 1:
                     time.sleep(args.push_interval)
         

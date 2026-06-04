@@ -333,7 +333,7 @@ class MLLPProtocolHandler:
         except OSError:
             source_ip = None
         try:
-            ok = push_hl7_mllp(host, port, oru, timeout=10, source_ip=source_ip)
+            ok, push_err = push_hl7_mllp(host, port, oru, timeout=10, source_ip=source_ip)
             if ok:
                 logger.info(
                     "[ORDER_IN] Pushed ORU^R01 to %s:%s (placer=%s, filler=%s)",
@@ -341,8 +341,8 @@ class MLLPProtocolHandler:
                 )
             else:
                 logger.warning(
-                    "[ORDER_IN] push_hl7_mllp returned false for %s:%s (placer=%s, filler=%s)",
-                    host, port, placer, filler,
+                    "[ORDER_IN] push_hl7_mllp failed for %s:%s (placer=%s, filler=%s): %s",
+                    host, port, placer, filler, push_err,
                 )
         except Exception as e:
             logger.error(

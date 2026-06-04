@@ -93,7 +93,8 @@ def push_hl7_to_destination(destination: str, hl7_message: str,
         except ValueError:
             return False, f"invalid MLLP port: {port_str}"
         return push_hl7_mllp(host, port, hl7_message, source_ip=source_ip)
-    return push_hl7_http(destination, hl7_message), None
+    ok = push_hl7_http(destination, hl7_message)
+    return ok, None if ok else f"HTTP push to {destination} failed"
 
 
 def push_astm_to_destination(destination: str, astm_message: str,
@@ -113,7 +114,8 @@ def push_astm_to_destination(destination: str, astm_message: str,
         except ValueError:
             return False, f"invalid TCP port: {port_str}"
         return push_astm_tcp(host, port, astm_message, source_ip=source_ip)
-    return push_astm_http(destination, astm_message), None
+    ok = push_astm_http(destination, astm_message)
+    return ok, None if ok else f"HTTP push to {destination} failed"
 
 
 def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,

@@ -150,6 +150,16 @@ def test_name_sql(code: str, loinc: str | None, seeded: dict[str, str]) -> str:
     return seeded.get(code, code)
 
 
+def test_where_sql(code: str, loinc: str | None, seeded: dict[str, str]) -> str:
+    """SQL predicate locating the OE test. Match on LOINC OR name: some catalogs
+    carry the LOINC (e.g. Madagascar), others only the display name with a null
+    LOINC (e.g. the develop demo catalog). Trying both resolves either."""
+    name = test_name_sql(code, loinc, seeded)
+    if loinc:
+        return f"(loinc = '{esc(loinc)}' OR name = '{esc(name)}')"
+    return f"name = '{esc(name)}'"
+
+
 def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int, int]:
     """Returns (sql_string, new_test_count, qc_lot_count)."""
 
@@ -210,9 +220,20 @@ def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int,
         "'org.openelisglobal.plugins.analyzer.genericastm.GenericASTMAnalyzer'",
         "    LIMIT 1;",
         "",
+        "    -- Self-provision the Generic ASTM type when the plugin isn't loaded.",
+        "    -- In the bridge-mandatory flow the bridge parses ASTM->FHIR, so OE",
+        "    -- needs only this row for analyzer.analyzer_type_id to resolve.",
         "    IF v_generic_astm_type_id IS NULL THEN",
-        "        RAISE EXCEPTION 'Generic ASTM analyzer type not found. "
-        "Ensure GenericASTM plugin is loaded.';",
+        "        INSERT INTO clinlims.analyzer_type",
+        "        (id, name, description, protocol, plugin_class_name, "
+        "is_generic_plugin, is_active, last_updated)",
+        "        VALUES (nextval('clinlims.analyzer_type_seq'), 'Generic ASTM', "
+        "'Auto-provisioned by analyzer seed', 'ASTM_LIS2_A2', "
+        "'org.openelisglobal.plugins.analyzer.genericastm.GenericASTMAnalyzer', "
+        "TRUE, TRUE, NOW())",
+        "        RETURNING id INTO v_generic_astm_type_id;",
+        "        RAISE NOTICE 'Provisioned Generic ASTM analyzer_type (id=%)', "
+        "v_generic_astm_type_id;",
         "    END IF;",
         "",
     ]
@@ -352,13 +373,13 @@ def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int,
             loinc = field.get("loinc")
             if not code:
                 continue
-            tn = test_name_sql(code, loinc, seeded_tests)
             lines.append(
                 "    INSERT INTO clinlims.analyzer_test_map "
-                "(analyzer_id, analyzer_type_id, analyzer_test_name, test_id, last_updated)"
+                "(analyzer_id, analyzer_test_name, test_id, last_updated)"
                 " VALUES ("
-                f"v_analyzer_id, v_generic_astm_type_id, '{esc(code)}', "
-                f"(SELECT id FROM clinlims.test WHERE name = '{esc(tn)}' LIMIT 1), "
+                f"v_analyzer_id, '{esc(code)}', "
+                f"(SELECT id FROM clinlims.test "
+                f"WHERE {test_where_sql(code, loinc, seeded_tests)} LIMIT 1), "
                 f"'{now}'"
                 ") ON CONFLICT DO NOTHING;"
             )
@@ -390,16 +411,22 @@ def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int,
                 lines.append("")
                 lines.append(f"    -- {code}: lot={lot_number}, target={target}, SD={std_dev}")
 
-                # Skip if this field already exists for this analyzer
+                # Resolve test_id by LOINC (catalog-agnostic), else by name
+                where = test_where_sql(code, loinc, seeded_tests)
+                notice = f"LOINC {loinc}" if loinc else f"name {esc(tn)}"
                 lines.append(
-                    f"    IF NOT EXISTS (SELECT 1 FROM clinlims.analyzer_field "
-                    f"WHERE analyzer_id = v_analyzer_id AND field_name = '{esc(code)}') THEN"
+                    f"    SELECT id INTO v_test_id FROM clinlims.test WHERE {where} LIMIT 1;"
                 )
-
-                # Resolve test_id for this field
+                # Seed QC only when the test resolves; skip (don't abort) when the
+                # catalog lacks it, so the seed stays portable across OE catalogs.
+                lines.append("    IF v_test_id IS NULL THEN")
                 lines.append(
-                    f"        SELECT id INTO v_test_id FROM clinlims.test "
-                    f"WHERE name = '{esc(tn)}' LIMIT 1;"
+                    f"        RAISE NOTICE 'Skip QC {esc(code)} on {name}: "
+                    f"no catalog test ({notice})';"
+                )
+                lines.append(
+                    f"    ELSIF NOT EXISTS (SELECT 1 FROM clinlims.analyzer_field "
+                    f"WHERE analyzer_id = v_analyzer_id AND field_name = '{esc(code)}') THEN"
                 )
 
                 # analyzer_field: NUMERIC (the test code)
@@ -483,14 +510,13 @@ def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int,
 
                 lines.append("    END IF;")
 
-                # Westgard rules (8 per test/instrument, idempotent via ON CONFLICT)
-                lines.append(
-                    f"    SELECT id INTO v_test_id FROM clinlims.test "
-                    f"WHERE name = '{esc(tn)}' LIMIT 1;"
-                )
+                # Westgard rules (8 per test/instrument, idempotent via ON CONFLICT).
+                # v_test_id is still set from the resolve above; guard so an
+                # unresolved analyte doesn't insert a NULL-test rule.
+                lines.append("    IF v_test_id IS NOT NULL THEN")
                 for rule_code, severity, corrective in WESTGARD_RULES:
                     lines.append(
-                        "    INSERT INTO clinlims.westgard_rule_config "
+                        "        INSERT INTO clinlims.westgard_rule_config "
                         "(id, test_id, instrument_id, rule_code, enabled, severity, "
                         "requires_corrective_action, sys_user_id, last_updated)"
                         " VALUES ("
@@ -499,6 +525,7 @@ def generate_sql(templates: list[tuple[str, dict]], now: str) -> tuple[str, int,
                         f"{'true' if corrective else 'false'}, v_sys_user_id, NOW()"
                         ") ON CONFLICT (test_id, instrument_id, rule_code) DO NOTHING;"
                     )
+                lines.append("    END IF;")
 
                 qc_lot_count += 1
 

@@ -111,6 +111,7 @@ class TestCreateAnalyzer(Base):
         self.assertEqual(r["subnet"], f"10.42.{expected}.0/24")
         self.assertEqual(r["ip"], f"10.42.{expected}.10")
         self.docker.networks.create.assert_called_once()
+        self.assertTrue(self.docker.networks.create.call_args.kwargs["internal"])
 
     def test_namespaced_stack_creates_its_own_network_and_address_space(self):
         with patch.dict(

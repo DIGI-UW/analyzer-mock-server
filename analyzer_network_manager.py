@@ -242,7 +242,12 @@ class AnalyzerNetworkManager:
                 subnet = f"{self._subnet_prefix}.{subnet_id}.0/24"
                 try:
                     ipam = docker.types.IPAMConfig(pool_configs=[docker.types.IPAMPool(subnet=subnet)])
-                    network = self.docker.networks.create(network_name, driver="bridge", ipam=ipam)
+                    # These links carry analyzer traffic only. Keeping them internal
+                    # prevents each attachment from replacing the simulator or
+                    # bridge container's existing default route.
+                    network = self.docker.networks.create(
+                        network_name, driver="bridge", ipam=ipam, internal=True
+                    )
                     created_here = True
                     logger.info("Created network %s (subnet %s)", network_name, subnet)
                     break

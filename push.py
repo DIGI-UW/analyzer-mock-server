@@ -8,6 +8,7 @@ Handles pushing messages to destinations via various protocols:
 """
 
 import logging
+import os
 import socket
 import ssl
 import time
@@ -16,6 +17,15 @@ import urllib.request
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Charset for the ASTM TCP payload. ASTM is a byte protocol and analyzers differ:
+# a Cepheid GeneXpert at a French-language site sends Latin-1 result text such as
+# "NON DETECTE" with accents. ISO-8859-1 is the default because it is identical to
+# ASCII for every byte below 0x80 — so ASCII fixtures are unaffected — while still
+# putting accented characters on the wire as the single bytes a real analyzer sends.
+# Encoding as ASCII instead silently rewrote them to '?', which made it impossible
+# to exercise a receiver's handling of non-ASCII payloads (see MG-97).
+ASTM_TCP_ENCODING = os.environ.get("ASTM_TCP_ENCODING", "iso-8859-1")
 
 # ASTM control characters
 ENQ = b'\x05'
@@ -233,7 +243,7 @@ def send_astm_session(sock, records: list, session_label: str = "") -> bool:
 
     for i, record in enumerate(records):
         frame_number = (i + 1) % 8
-        content_bytes = (record.strip() + '\r').encode('ascii', errors='replace')
+        content_bytes = (record.strip() + '\r').encode(ASTM_TCP_ENCODING, errors='replace')
         frame_num_bytes = str(frame_number).encode()
         is_last = (i == len(records) - 1)
         terminator = ETX if is_last else ETB

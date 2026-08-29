@@ -4,6 +4,7 @@ Unit tests for AnalyzerNetworkManager — deterministic, idempotent provisioning
 Docker is mocked; no real daemon required.
 """
 
+import os
 import sys
 import threading
 import time
@@ -51,6 +52,28 @@ class Base(unittest.TestCase):
 
 
 class TestDeterministicAllocation(Base):
+    def test_namespace_and_subnet_prefix_are_stack_scoped(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ANALYZER_NETWORK_NAMESPACE": "oe2-r3-analyzer",
+                "ANALYZER_SUBNET_PREFIX": "10.88",
+            },
+        ):
+            manager = AnalyzerNetworkManager()
+
+        self.assertEqual(manager._network_prefix, "mock-analyzer-oe2-r3-analyzer-")
+        self.assertEqual(manager._subnet_prefix, "10.88")
+
+    def test_invalid_stack_network_configuration_fails_fast(self):
+        with patch.dict(os.environ, {"ANALYZER_NETWORK_NAMESPACE": "not valid!"}):
+            with self.assertRaisesRegex(ValueError, "ANALYZER_NETWORK_NAMESPACE"):
+                AnalyzerNetworkManager()
+
+        with patch.dict(os.environ, {"ANALYZER_SUBNET_PREFIX": "192.168"}):
+            with self.assertRaisesRegex(ValueError, "ANALYZER_SUBNET_PREFIX"):
+                AnalyzerNetworkManager()
+
     def test_fixed_exact_match(self):
         self.assertEqual(self.mgr._subnet_id_for("genexpert"), FIXED_SUBNETS["genexpert"])
 
@@ -88,6 +111,27 @@ class TestCreateAnalyzer(Base):
         self.assertEqual(r["subnet"], f"10.42.{expected}.0/24")
         self.assertEqual(r["ip"], f"10.42.{expected}.10")
         self.docker.networks.create.assert_called_once()
+        self.assertTrue(self.docker.networks.create.call_args.kwargs["internal"])
+
+    def test_namespaced_stack_creates_its_own_network_and_address_space(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ANALYZER_NETWORK_NAMESPACE": "oe2-r3-analyzer",
+                "ANALYZER_SUBNET_PREFIX": "10.88",
+            },
+        ):
+            manager = AnalyzerNetworkManager()
+        manager._docker = self.docker
+        manager._mock_container = ""
+        manager._bridge_container = ""
+        self.docker.networks.create.return_value = _net()
+
+        result = manager.create_analyzer("genexpert", "tmpl", port=9600)
+
+        self.assertEqual(result["network"], "mock-analyzer-oe2-r3-analyzer-genexpert")
+        self.assertEqual(result["subnet"], "10.88.20.0/24")
+        self.assertEqual(result["ip"], "10.88.20.10")
 
     def test_idempotent_adopts_existing_subnet_without_recreating(self):
         # The network already exists with a DIFFERENT subnet than the deterministic

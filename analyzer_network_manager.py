@@ -1,9 +1,12 @@
 """
 Deterministic, idempotent Docker network management for mock analyzers.
 
-Each mock analyzer gets its own Docker network (10.42.N.0/24) so it has a
-distinct source IP — the bridge identifies analyzers by source IP. The mock
-container and bridge container are both attached to each analyzer's network.
+Each mock analyzer gets its own Docker network so it has a distinct source IP —
+the bridge identifies analyzers by source IP. The mock container and bridge
+container are both attached to each analyzer's network. Single-stack behavior
+defaults to ``mock-analyzer-*`` networks on ``10.42.N.0/24``. Parallel stacks
+can set ``ANALYZER_NETWORK_NAMESPACE`` and ``ANALYZER_SUBNET_PREFIX`` to keep
+their Docker names and address spaces independent.
 
 Dynamic but deterministic:
 - The subnet for an analyzer is a PURE FUNCTION of its name (see
@@ -23,6 +26,8 @@ Requires:
 - Docker socket mounted: /var/run/docker.sock
 - `docker` Python package installed
 - Env vars: MOCK_CONTAINER_NAME, BRIDGE_CONTAINER_NAME
+- Optional isolation env vars: ANALYZER_NETWORK_NAMESPACE,
+  ANALYZER_SUBNET_PREFIX (for example ``oe2-r3`` and ``10.88``)
 
 Usage:
     manager = AnalyzerNetworkManager()
@@ -63,11 +68,13 @@ def _synchronized(method):
     return wrapper
 
 
-# Subnet allocation: 10.42.{N}.0/24 — a separate range from analyzer-net
-# (172.21.1.0/24) to avoid Docker routing conflicts.
+# Default subnet allocation: 10.42.{N}.0/24 — a separate range from analyzer-net
+# (172.21.1.0/24) to avoid Docker routing conflicts. Isolated worktree stacks
+# select a different private 10.x prefix through ANALYZER_SUBNET_PREFIX.
 ANALYZER_IP_SUFFIX = 10  # Analyzer (mock) gets .10 on each subnet
 BRIDGE_IP_SUFFIX = 2     # Bridge gets .2 (.1 is the Docker gateway)
 NETWORK_PREFIX = "mock-analyzer-"
+DEFAULT_SUBNET_PREFIX = "10.42"
 
 # Fixed subnet assignments for the canonical analyzers — stable, human-readable
 # IPs. Everything else gets a deterministic hash-derived slot in the dynamic
@@ -96,6 +103,19 @@ class AnalyzerNetworkManager:
         self._analyzers: Dict[str, dict] = {}
         self._mock_container = os.environ.get("MOCK_CONTAINER_NAME", os.environ.get("HOSTNAME", ""))
         self._bridge_container = os.environ.get("BRIDGE_CONTAINER_NAME", "")
+        namespace = os.environ.get("ANALYZER_NETWORK_NAMESPACE", "").strip().lower()
+        if namespace and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", namespace):
+            raise ValueError(
+                "ANALYZER_NETWORK_NAMESPACE must contain only lowercase letters, "
+                "numbers, dots, underscores, or hyphens"
+            )
+        self._network_prefix = f"{NETWORK_PREFIX}{namespace}-" if namespace else NETWORK_PREFIX
+
+        subnet_prefix = os.environ.get("ANALYZER_SUBNET_PREFIX", DEFAULT_SUBNET_PREFIX).strip()
+        match = re.fullmatch(r"10\.(\d{1,3})", subnet_prefix)
+        if not match or not 1 <= int(match.group(1)) <= 254:
+            raise ValueError("ANALYZER_SUBNET_PREFIX must be a private 10.x prefix with x in 1..254")
+        self._subnet_prefix = subnet_prefix
 
     @property
     def docker(self):
@@ -133,10 +153,11 @@ class AnalyzerNetworkManager:
         return DYNAMIC_SUBNET_BASE + (digest % span)
 
     @staticmethod
-    def _subnet_id_of(network) -> Optional[int]:
-        """The N from a network's 10.42.N.0/24 IPAM subnet, or None if absent."""
+    def _subnet_id_of(network, subnet_prefix: str = DEFAULT_SUBNET_PREFIX) -> Optional[int]:
+        """The N from a network's configured 10.x.N.0/24 subnet, or None."""
+        pattern = rf"^{re.escape(subnet_prefix)}\.(\d+)\.0/24$"
         for entry in (network.attrs.get("IPAM", {}).get("Config") or []):
-            match = re.match(r"^10\.42\.(\d+)\.0/24$", entry.get("Subnet", "") or "")
+            match = re.match(pattern, entry.get("Subnet", "") or "")
             if match:
                 return int(match.group(1))
         return None
@@ -149,7 +170,7 @@ class AnalyzerNetworkManager:
             return None
 
     def _subnet_in_use(self, subnet_id: int) -> bool:
-        target = f"10.42.{subnet_id}.0/24"
+        target = f"{self._subnet_prefix}.{subnet_id}.0/24"
         try:
             for network in self.docker.networks.list():
                 # IPAM.Config can be explicitly null (not just missing) when a
@@ -193,7 +214,7 @@ class AnalyzerNetworkManager:
         Returns:
             dict with name, ip, network, subnet, template, port
         """
-        network_name = f"{NETWORK_PREFIX}{name}"
+        network_name = f"{self._network_prefix}{name}"
 
         # Fast path: provisioned in this process AND still present in Docker.
         cached = self._analyzers.get(name)
@@ -208,16 +229,17 @@ class AnalyzerNetworkManager:
 
         if network is not None:
             # Adopt the existing network's actual subnet (Docker = truth).
-            subnet_id = self._subnet_id_of(network)
+            subnet_id = self._subnet_id_of(network, self._subnet_prefix)
             if subnet_id is None:
-                logger.warning("Existing %s has no parseable 10.42.x subnet; recreating", network_name)
+                logger.warning("Existing %s has no parseable %s.x subnet; recreating",
+                               network_name, self._subnet_prefix)
                 self._cleanup_network(network_name)
                 network = None
 
         if network is None:
             subnet_id = self._subnet_id_for(name)
             for _attempt in range(MAX_SUBNET_ATTEMPTS):
-                subnet = f"10.42.{subnet_id}.0/24"
+                subnet = f"{self._subnet_prefix}.{subnet_id}.0/24"
                 try:
                     ipam = docker.types.IPAMConfig(pool_configs=[docker.types.IPAMPool(subnet=subnet)])
                     network = self.docker.networks.create(network_name, driver="bridge", ipam=ipam)
@@ -244,9 +266,9 @@ class AnalyzerNetworkManager:
                     f"after {MAX_SUBNET_ATTEMPTS} attempts"
                 )
 
-        subnet = f"10.42.{subnet_id}.0/24"
-        analyzer_ip = f"10.42.{subnet_id}.{ANALYZER_IP_SUFFIX}"
-        bridge_ip = f"10.42.{subnet_id}.{BRIDGE_IP_SUFFIX}"
+        subnet = f"{self._subnet_prefix}.{subnet_id}.0/24"
+        analyzer_ip = f"{self._subnet_prefix}.{subnet_id}.{ANALYZER_IP_SUFFIX}"
+        bridge_ip = f"{self._subnet_prefix}.{subnet_id}.{BRIDGE_IP_SUFFIX}"
 
         try:
             if connect_mock and self._mock_container:
@@ -345,7 +367,7 @@ class AnalyzerNetworkManager:
         """Remove an analyzer's Docker network (cached or orphaned). Idempotent —
         returns True if the network is gone afterwards."""
         self._analyzers.pop(name, None)
-        return self._cleanup_network(f"{NETWORK_PREFIX}{name}")
+        return self._cleanup_network(f"{self._network_prefix}{name}")
 
     def list_analyzers(self) -> List[dict]:
         """List all active mock analyzers (from the in-process cache)."""
@@ -374,7 +396,7 @@ class AnalyzerNetworkManager:
         try:
             for network in self.docker.networks.list():
                 nm = getattr(network, "name", "") or network.attrs.get("Name", "")
-                if not nm.startswith(NETWORK_PREFIX):
+                if not nm.startswith(self._network_prefix):
                     continue
                 if network.attrs.get("Containers"):
                     continue  # live — keep

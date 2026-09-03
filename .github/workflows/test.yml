@@ -9,7 +9,7 @@ on:
     inputs:
       bridge_ref:
         description: "Bridge ref containing the versioned priority profiles"
-        default: "7a012aaf5eb7f3c6fc99934a9c07dd7fbc57e22f"
+        default: "164f4efac85ea07a57dcd1be80df381a7f6a6431"
         type: string
 
 jobs:
@@ -24,13 +24,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: DIGI-UW/openelis-analyzer-bridge
-          sparse-checkout: contracts/analyzer/v1/fixtures
+          sparse-checkout: src/main/resources/analyzer-profiles
           path: bridge
-          ref: ${{ inputs.bridge_ref || '7a012aaf5eb7f3c6fc99934a9c07dd7fbc57e22f' }}
+          ref: ${{ inputs.bridge_ref || '164f4efac85ea07a57dcd1be80df381a7f6a6431' }}
 
       - name: Set profiles path for tests
         run: |
-          echo "ANALYZER_BRIDGE_PROFILES_DIR=${{ github.workspace }}/bridge/contracts/analyzer/v1/fixtures" >> $GITHUB_ENV
+          echo "ANALYZER_BRIDGE_PROFILES_DIR=${{ github.workspace }}/bridge/src/main/resources/analyzer-profiles" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5

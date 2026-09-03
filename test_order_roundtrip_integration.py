@@ -23,6 +23,7 @@ Topology per test:
 
 import os
 import socket
+import sys
 import threading
 import time
 
@@ -320,7 +321,7 @@ def _drive_astm_order(template, accession, codes, timeout=5.0):
     }
     client, server = _socketpair_tcp()
     handler = ASTMProtocolHandler(
-        conn=server, addr=("127.0.0.1", 0), fields_config={},
+        conn=server, addr=("127.0.0.1", 0),
         response_delay_ms=0, astm_template=template,
     )
     t = threading.Thread(target=handler.handle, daemon=True)
@@ -395,6 +396,10 @@ class TestHl7OrderRoundtrip:
         assert "ACC-INT-3" in captured, "originating accession must be echoed (OBR-3/ORC) for correlation"
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="requires Linux loopback aliases; covered by the Docker cross-process harness",
+)
 class TestResultPushSourceInterface:
     """The mock is attached to one Docker network per analyzer; the bridge identifies
     the source analyzer by the push connection's SOURCE IP. The result push MUST source
@@ -414,7 +419,7 @@ class TestResultPushSourceInterface:
                "ORDER_RESULT_PUSH_ASTM_PORT": str(capture.port)}
         client, server = _socketpair_tcp("127.0.0.2")  # mock's per-analyzer interface
         handler = ASTMProtocolHandler(
-            conn=server, addr=("127.0.0.1", 0), fields_config={},
+            conn=server, addr=("127.0.0.1", 0),
             response_delay_ms=0, astm_template=GENEXPERT_ASTM,
         )
         t = threading.Thread(target=handler.handle, daemon=True)

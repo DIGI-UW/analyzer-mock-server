@@ -63,6 +63,25 @@ def _recv_mllp_frame(sock: socket.socket, timeout: float = 5.0) -> str:
     return data[:idx].decode("utf-8")
 
 
+def _recv_mllp_frames(sock: socket.socket, count: int, timeout: float = 5.0):
+    """Read multiple frames without discarding coalesced TCP data."""
+    sock.settimeout(timeout)
+    data = b""
+    terminator = FS + CR
+    while data.count(terminator) < count:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("Socket closed before all MLLP frames arrived")
+        data += chunk
+
+    frames = []
+    for raw in data.split(terminator)[:count]:
+        if raw.startswith(VT):
+            raw = raw[1:]
+        frames.append(raw.decode("utf-8"))
+    return frames
+
+
 def _segments(msg: str):
     """Split HL7 message into segments."""
     return [s for s in msg.split("\r") if s.strip()]
@@ -119,6 +138,8 @@ class TestMLLPListener:
             assert msh.startswith("MSH|"), f"Expected MSH segment, got: {msh}"
             msh_9 = _field(msh, 8)
             assert msh_9.startswith("ACK"), f"MSH-9 should be ACK type, got: {msh_9}"
+            assert _field(msh, 4) == "ANALYZER"
+            assert _field(msh, 5) == "FACILITY"
 
             # MSA segment
             msa = segs[1]
@@ -240,8 +261,7 @@ class TestMLLPListener:
             client.sendall(combined)
 
             # Read two ACKs
-            ack1 = _recv_mllp_frame(client)
-            ack2 = _recv_mllp_frame(client)
+            ack1, ack2 = _recv_mllp_frames(client, 2)
 
             segs1 = _segments(ack1)
             segs2 = _segments(ack2)

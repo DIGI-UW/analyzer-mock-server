@@ -1,83 +1,106 @@
-# ASTM Mock Server - Agent Instructions
+# Analyzer Mock Server Agent Guide
 
-This file provides context and instructions for AI agents working on the ASTM Mock Server project.
+## Purpose
 
-## Project Overview
+This repository simulates laboratory analyzers for integration and acceptance
+testing. It emits deterministic analyzer-native traffic and is not a runtime
+configuration authority.
 
-This project is a lightweight, Python-based mock server that simulates an ASTM LIS2-A2 compatible laboratory analyzer. It is used to test the OpenELIS ASTM Bridge.
+## Ownership Boundary
 
-**Core Purpose**: To provide a rigorous, standards-compliant (CLSI LIS1-A) endpoint for validating ASTM protocol handling in OpenELIS.
+The only supported result path is:
 
-## Governance & Principles
-
-Refer to [.specify/memory/constitution.md](.specify/memory/constitution.md) for the project's core principles. Key constraints:
-- **Strict Standards Compliance**: Must implement mandatory checksums, frame sequencing, and timeouts.
-- **Container-Native**: Designed for Docker/Swarm.
-- **Simplicity**: Minimal dependencies (standard library preferred).
-
-## Setup & Environment
-
-- **Language**: Python 3 (3.9+ recommended)
-- **Dependencies**: `pip install -r requirements.txt` (Mainly `pytest` for testing; server uses standard library).
-
-## Common Commands
-
-### Development
-```bash
-# Start server locally (default port 5000)
-python server.py
-
-# Start with verbose logging (RECOMMENDED for debugging)
-python server.py --verbose
-
-# Start with custom analyzer type
-python server.py --analyzer-type CHEMISTRY
+```text
+Analyzer mock -> Analyzer Bridge -> normalized result contract -> OpenELIS
 ```
 
-### Testing
-**Integration Tests (Primary Verification)**
-This script verifies the full ASTM handshake and data transfer protocol.
+- Analyzer Bridge owns profiles, durable connections, listeners, parsing,
+  probes, FILE watching, connection identity, and normalized transport.
+- OpenELIS owns lab-facing orchestration, local catalog bindings, audit,
+  activation intent, held-result review, and operational quality control.
+- The mock owns protocol-faithful traffic generation, representative fixture
+  files, deterministic values, and isolated analyzer network identities.
+
+Never add a direct result path from the mock to OpenELIS, OpenELIS database
+seeding, a Bridge upload shortcut for FILE traffic, or a second profile
+contract.
+
+## Profiles And Templates
+
+Bridge profiles are authoritative. A profile has two jobs:
+
+1. define communication and runtime behavior for one analyzer type;
+2. supply defaults for creating a new Bridge connection.
+
+A profile-backed mock template pins one exact Bridge profile revision through
+`profileRef`. Set `ANALYZER_BRIDGE_PROFILES_DIR` to the Bridge profile
+catalog. The adapter must fail closed when that exact revision cannot be
+resolved.
+
+Profile-backed templates may contain simulator-owned seed values and captured
+fixtures. They must not duplicate analyzer identity, protocol, mappings, units,
+result types, qualitative vocabularies, or FILE layout from the profile.
+
+Production code must not special-case a profile ID, revision, manufacturer,
+model, test code, fixture name, or vendor-specific value. Named analyzers belong
+in profile data and parameterized test fixtures only.
+
+## Supported Traffic
+
+- ASTM uses framed TCP sessions.
+- HL7 uses MLLP sessions.
+- FILE traffic is written into the directory watched by a saved Bridge
+  connection.
+- The HTTP API is a test-control surface, not a result transport.
+
+ASTM and HL7 POST requests require explicit Bridge destinations. FILE POST
+requests require `target_dir`. Do not invent ports, host names, source
+addresses, analyzer types, or profile defaults.
+
+## Development
+
+Use Python 3 and `uv`:
+
 ```bash
-# Run communication pathway test
-python test_communication.py --host localhost --port 5000
+uv run --with-requirements requirements.txt python -m pytest
 ```
 
-**Unit Tests**
+Start a listener with an explicit template:
+
 ```bash
-# Run pytest suite
-python -m pytest
+export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
+export ASTM_TEMPLATE=genexpert_astm
+python3 server.py --port 5000 --simulate-api-port 8081
 ```
 
-### Docker
-```bash
-# Build image
-docker build -t astm-mock-server .
+## Testing
 
-# Run container
-docker run -p 5000:5000 astm-mock-server
-```
+Use the narrowest owning layer:
 
-## Code Style & Conventions
+- protocol unit tests for framing, parsing, generated fields, and errors;
+- real socket tests for ASTM TCP and HL7 MLLP behavior;
+- fixture tests for FILE format fidelity;
+- profile adapter tests for exact Bridge profile resolution;
+- Bridge cross-process tests for priority analyzer traffic and normalized
+  output;
+- visible Playwright stories only in the assembled OpenELIS acceptance stack.
 
-- **Style**: Follow PEP 8.
-- **Docstrings**: Ensure all functions and classes have clear docstrings explaining their role in the ASTM protocol.
-- **Logging**: Use `print` or `logging` to output detailed protocol states (e.g., `[RX] <ENQ>`, `[TX] <ACK>`).
-- **Protocol Implementation**:
-  - Always validate Checksums.
-  - Always enforce Frame Numbers (1-7, wrap to 1).
-  - Handle Timeouts (15s/30s) explicitly.
+Begin behavior changes with a failing test, make the smallest green change, then
+refactor while green. Tests must assert behavior. Do not add source-text or
+filesystem scans for code that should be removed.
 
-## Key Files
+GeneXpert ASTM and Hain FluoroCycler are the current priority cross-process
+fixtures. Other analyzer templates are not accepted profiles until their Bridge
+profiles and traffic have equivalent evidence.
 
-- `server.py`: Main entry point. Contains `ASTMProtocolHandler` class and `ThreadedTCPServer`.
-- `fields.json`: Configuration for analyzer fields (test definitions).
-- `test_communication.py`: Client simulator for testing the server.
-- `COMMUNICATION_PATHWAY.md`: Detailed protocol specification.
-- `ACCESS.md`: Guide for accessing the server in various environments.
+## Validation
 
-## Troubleshooting
+Before a PR is review-ready:
 
-- **Connection Refused**: Check if port 5000 is occupied or if the Docker container is running.
-- **NAK Responses**: Indicates checksum error or invalid frame sequence. Check logs for `[RX] ...` to see what was received.
-- **Timeout**: Ensure the client sends `ENQ` to start and `EOT` to finish.
-
+1. Run focused tests for each changed behavior.
+2. Run the complete mock test suite.
+3. Run Python compilation and `git diff --check`.
+4. Run the Bridge cross-process harness against this exact mock checkout.
+5. Inspect logs and retained failure artifacts.
+6. Confirm no result bypass, copied profile authority, hardcoded profile
+   behavior, or obsolete runtime remains.

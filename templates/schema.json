@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://openelis-global.org/astm-mock-server/template-schema",
   "title": "Analyzer Message Template",
-  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports ASTM, HL7, RS232, FILE protocols with field definitions and deterministic seed values.",
+  "description": "Schema for analyzer simulator templates. Supports ASTM, HL7, RS232, and FILE traffic with deterministic seed values.",
   "type": "object",
   "oneOf": [
     {
@@ -54,7 +54,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Full analyzer name as registered in OpenELIS"
+          "description": "Analyzer display name"
         },
         "model": {
           "type": "string",
@@ -87,22 +87,18 @@
         },
         "transport": {
           "type": "string",
-          "enum": ["TCP", "HTTP", "SERIAL", "FILE"],
+          "enum": ["TCP", "SERIAL", "FILE"],
           "description": "Transport mechanism"
         }
       }
     },
     "identification": {
       "type": "object",
-      "description": "How OpenELIS identifies this analyzer (ASTM header, HL7 sender, IP, file pattern)",
+      "description": "Analyzer-side protocol identity and file matching fields",
       "properties": {
         "astm_header": {
           "type": "string",
           "description": "ASTM H-segment sender identification (field 5)"
-        },
-        "msh_sender": {
-          "type": "string",
-          "description": "HL7 MSH-3 field (legacy, use hl7_sending_app)"
         },
         "hl7_sending_app": {
           "type": "string",
@@ -111,6 +107,14 @@
         "hl7_sending_facility": {
           "type": "string",
           "description": "HL7 MSH-4 sending facility"
+        },
+        "hl7_receiving_app": {
+          "type": "string",
+          "description": "HL7 MSH-5 receiving application"
+        },
+        "hl7_receiving_facility": {
+          "type": "string",
+          "description": "HL7 MSH-6 receiving facility"
         },
         "ip_pattern": {
           "type": "string",

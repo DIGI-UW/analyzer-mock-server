@@ -27,9 +27,8 @@ Requires:
 Usage:
     manager = AnalyzerNetworkManager()
     manager.reconcile_orphans()                      # once, at startup
-    result = manager.create_analyzer("bc5380", "mindray_bc5380")
-    # result = {"name": "bc5380", "ip": "10.42.21.10", "network": "mock-analyzer-bc5380"}
-    manager.remove_analyzer("bc5380")
+    result = manager.create_analyzer("lab-analyzer-1", "profile-fixture")
+    manager.remove_analyzer("lab-analyzer-1")
 """
 
 import functools
@@ -69,17 +68,8 @@ ANALYZER_IP_SUFFIX = 10  # Analyzer (mock) gets .10 on each subnet
 BRIDGE_IP_SUFFIX = 2     # Bridge gets .2 (.1 is the Docker gateway)
 NETWORK_PREFIX = "mock-analyzer-"
 
-# Fixed subnet assignments for the canonical analyzers — stable, human-readable
-# IPs. Everything else gets a deterministic hash-derived slot in the dynamic
-# range below (also stable per name, just not human-assigned).
-FIXED_SUBNETS: Dict[str, int] = {
-    "genexpert": 20,
-    "bc5380": 21,
-    "bs200": 22,
-    "bs300": 23,
-}
-DYNAMIC_SUBNET_BASE = 50   # Dynamic (hash-derived) slots live in [BASE, MAX]
-DYNAMIC_SUBNET_MAX = 250   # (won't collide with the fixed 20-23 range)
+DYNAMIC_SUBNET_BASE = 20
+DYNAMIC_SUBNET_MAX = 250
 MAX_SUBNET_ATTEMPTS = 30   # Probe budget when a chosen /24 collides with a different network
 ATTACH_MAX_RETRIES = 4     # Container-attach is the one step that flakes under Docker churn
 ATTACH_RETRY_BACKOFF_S = 0.5
@@ -120,14 +110,12 @@ class AnalyzerNetworkManager:
 
         PURE function of the name: same name → same subnet on every run,
         independent of creation order, concurrency, or what else is allocated.
-        Canonical analyzers use FIXED_SUBNETS; everything else gets a stable
-        hash-derived slot in the dynamic range. Two distinct dynamic names could
-        in principle hash to the same slot; that rare collision is resolved at
+        Every analyzer gets a stable hash-derived slot in the dynamic range.
+        Two distinct names could in principle hash to the same slot; that rare
+        collision is resolved at
         create time by a bounded forward probe (see create_analyzer).
         """
         normalized = name.lower()
-        if normalized in FIXED_SUBNETS:
-            return FIXED_SUBNETS[normalized]
         span = DYNAMIC_SUBNET_MAX - DYNAMIC_SUBNET_BASE + 1
         digest = int(hashlib.sha1(normalized.encode("utf-8")).hexdigest(), 16)
         return DYNAMIC_SUBNET_BASE + (digest % span)
@@ -184,8 +172,8 @@ class AnalyzerNetworkManager:
           the same analyzer always lands on the same IP across runs.
 
         Args:
-            name: Unique analyzer name (e.g., "bc5380")
-            template_name: Mock template to associate (e.g., "mindray_bc5380")
+            name: Unique analyzer instance name
+            template_name: Mock template associated with the instance
             port: Analyzer listen port (informational)
             connect_mock: attach the mock container now (api.py defers this to an
                 async step to avoid tearing down the in-flight HTTP socket)

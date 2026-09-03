@@ -166,8 +166,8 @@ def test_hl7_handler_delimiter_sanity():
 # --- Abbott template semantics ---
 
 
-def test_abbott_template_msh_sender():
-    """Abbott template produces MSH-3=ARCHITECT, MSH-4=LAB for OpenELIS routing."""
+def test_abbott_template_hl7_sender_identity():
+    """Abbott template produces its configured MSH-3 and MSH-4 identity."""
     from template_loader import TemplateLoader
     from protocols.hl7_handler import generate_oru_r01
 
@@ -247,7 +247,7 @@ def test_abbott_template_patient_and_sample_ids():
 
 # --- Golden fixture semantics (key fields only) ---
 
-# Expected key fields from abbott-architect-result.hl7 semantics (OpenELIS Abbott plugin)
+# Expected key fields from the representative Abbott analyzer message.
 ABBOTT_GOLDEN_SEMANTICS = {
     "MSH": {"sending_app": "ARCHITECT", "sending_facility": "LAB", "message_type": "ORU^R01"},
     "OBX": [{"code": "HIV", "value": "NEGATIVE"}, {"code": "HBSAG", "value": "POSITIVE"}],

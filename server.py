@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-ASTM LIS2-A2 Mock Server for OpenELIS Analyzer Testing
-
-This server simulates an ASTM-compatible laboratory analyzer for testing
-the OpenELIS analyzer field mapping feature.
+"""Profile-driven laboratory analyzer simulator.
 
 Reference Documents:
 - specs/004-astm-analyzer-mapping/research.md Section 1 (ASTM Protocol)
@@ -18,11 +14,11 @@ ASTM LIS2-A2 Protocol Overview:
 6. Roles can reverse for bidirectional communication
 
 Usage:
-    python server.py [--port PORT] [--analyzer-type TYPE]
+    ASTM_TEMPLATE=<template> python server.py [--port PORT]
 
 Environment Variables:
     ASTM_PORT: Server port (default: 5000)
-    ANALYZER_TYPE: Analyzer type from fields.json (default: HEMATOLOGY)
+    ASTM_TEMPLATE: Required template name for a single listener
     RESPONSE_DELAY_MS: Simulated response delay in milliseconds (default: 100)
 """
 
@@ -39,12 +35,12 @@ import logging
 import argparse
 from typing import Optional, Dict, List, Any
 
-from protocols.astm_handler import generate_astm_message, ASTMHandler
+from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler, generate_oru_r01
 from protocols.mllp_listener import MLLPProtocolHandler
 from protocols.serial_handler import SerialHandler, send_astm_over_serial
 from protocols.file_handler import FileHandler
-from push import push_hl7_http, push_astm_to_destination
+from push import push_hl7_to_destination, push_astm_to_destination
 from api import start_api_server
 
 # Optional: template loader for HL7 --hl7 push and /simulate/hl7 API (Abbott, etc.)
@@ -77,7 +73,6 @@ FS = b'\x1C'   # MLLP End Block
 
 # Server Configuration
 DEFAULT_PORT = 5000
-DEFAULT_ANALYZER_TYPE = 'HEMATOLOGY'
 DEFAULT_RESPONSE_DELAY_MS = 100
 
 # CLSI LIS1-A Timeout Requirements
@@ -110,29 +105,19 @@ RESTRICTED_CHARS = [
 class ASTMProtocolHandler:
     """Handles ASTM LIS2-A2 protocol communication for a single client.
 
-    Supports both legacy fields.json and template-driven ASTM generation.
-    When astm_template is provided (or resolved from local_port + port_to_template),
-    field query responses and data generation use ASTMHandler.generate() for
-    spec-compliant messages (GeneXpert, etc.).
+    The handler requires a template, resolved directly or from the listener's
+    port mapping. The template controls message generation and protocol behavior.
     """
 
-    def __init__(self, conn: socket.socket, addr: tuple, fields_config: Dict,
+    def __init__(self, conn: socket.socket, addr: tuple,
                  response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS,
-                 astm_template: Optional[Dict] = None,
-                 local_port: Optional[int] = None,
-                 port_to_template: Optional[Dict[int, str]] = None):
+                 astm_template: Optional[Dict] = None):
         self.conn = conn
         self.addr = addr
-        self.fields_config = fields_config
         self.response_delay_ms = response_delay_ms
-        if port_to_template and local_port is not None:
-            template_name = port_to_template.get(local_port) or os.environ.get("ASTM_TEMPLATE")
-            self.astm_template = _load_template(template_name) if template_name else None
-            if self.astm_template and template_name:
-                name = self.astm_template.get("analyzer", {}).get("name", template_name)
-                logger.info("Connection on port %s: using template %s (%s)", local_port, template_name, name)
-        else:
-            self.astm_template = astm_template
+        self.astm_template = astm_template
+        if not self.astm_template:
+            raise ValueError("ASTM analyzer listener requires a valid template")
         self.frame_number = 0
         self.last_accepted_frame = 0  # Track last accepted frame number per CLSI LIS1-A
         self.retransmit_count = 0  # Track retransmissions per CLSI LIS1-A
@@ -564,13 +549,10 @@ class ASTMProtocolHandler:
         return True
         
     def send_field_query_response(self):
-        """Send available fields or a full template-based ASTM message in response to a query.
+        """Send a template-based ASTM message in response to a query.
 
-        When astm_template is set (via ASTM_TEMPLATE env var), generates a full
-        spec-compliant ASTM message using ASTMHandler. This is the pull-based flow:
-        bridge connects as client, mock responds with template-generated data.
-
-        When no template is set, falls back to legacy field list response.
+        The Bridge connects as the client and the mock responds with data derived
+        from the configured analyzer template.
         """
         logger.info(f"[FIELD_QUERY] Sending response to {self.addr}")
 
@@ -588,55 +570,17 @@ class ASTMProtocolHandler:
             logger.warning("[FIELD_QUERY] Timeout waiting for ACK")
             return
 
-        if self.astm_template:
-            # Template mode: generate full ASTM message and send as framed records
-            logger.info(f"[FIELD_QUERY] Using template: {self.astm_template.get('analyzer', {}).get('name', 'unknown')}")
-            try:
-                message = ASTMHandler().generate(self.astm_template, use_seed=True)
-                records = [r for r in message.strip().split('\n') if r.strip()]
-                for i, record in enumerate(records):
-                    if not self._send_frame(record.strip()):
-                        logger.warning(f"[FIELD_QUERY] Send failed at record {i+1}/{len(records)}")
-                        break
-                logger.info(f"[FIELD_QUERY] Sent {len(records)} template records to {self.addr}")
-            except Exception as e:
-                logger.error(f"[FIELD_QUERY] Template generation failed: {e}", exc_info=True)
-                # Fall through to EOT
-        else:
-            # Legacy mode: send field list from fields.json
-            header_record = f"H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2"
-            self._send_frame(header_record)
-
-            frame_seq = 1
-            analyzer_type = os.getenv('ANALYZER_TYPE', DEFAULT_ANALYZER_TYPE)
-            fields = self.fields_config.get(analyzer_type, [])
-
-            if not fields and self.fields_config:
-                analyzer_type = list(self.fields_config.keys())[0]
-                fields = self.fields_config[analyzer_type]
-
-            logger.info(f"[FIELD_QUERY] Sending {len(fields)} fields for {analyzer_type}")
-
-            for field in fields:
-                field_name = field.get('name', 'Unknown')
-                display_name = field.get('displayName', field_name)
-                field_type = field.get('type', 'NUMERIC')
-                unit = field.get('unit', '')
-                astm_ref = field.get('astmRef', f'^^^{field_name}')
-
-                if display_name != field_name and '^' not in astm_ref:
-                    test_id = f"{astm_ref}^{display_name}"
-                else:
-                    test_id = astm_ref
-
-                record = f"R|{frame_seq}|{test_id}||{unit}|||{field_type}"
-                if not self._send_frame(record):
-                    logger.warning(f"[FIELD_QUERY] Send failed at frame {frame_seq}")
+        logger.info(f"[FIELD_QUERY] Using template: {self.astm_template.get('analyzer', {}).get('name', 'unknown')}")
+        try:
+            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            records = [r for r in message.strip().split('\n') if r.strip()]
+            for i, record in enumerate(records):
+                if not self._send_frame(record.strip()):
+                    logger.warning(f"[FIELD_QUERY] Send failed at record {i+1}/{len(records)}")
                     break
-                frame_seq += 1
-
-            if not self._send_frame("L|1|N"):
-                logger.warning("[FIELD_QUERY] Terminator frame send failed")
+            logger.info(f"[FIELD_QUERY] Sent {len(records)} template records to {self.addr}")
+        except Exception as e:
+            logger.error(f"[FIELD_QUERY] Template generation failed: {e}", exc_info=True)
 
         # End transmission
         self._send(EOT)
@@ -659,17 +603,8 @@ class ASTMProtocolHandler:
             return
 
         try:
-            if self.astm_template:
-                message = ASTMHandler().generate(self.astm_template, use_seed=True)
-                records = [r for r in message.strip().split('\n') if r.strip()]
-            else:
-                records = [
-                    "H|\\^&|||MockAnalyzer^ASTM-Mock^1.0|||||||LIS2-A2",
-                    "P|1|PAT-RESULTS||DOE^JANE",
-                    "O|1|ACC-RESULTS",
-                    "R|1|^^^GLUCOSE|102.5|mg/dL",
-                    "L|1|N",
-                ]
+            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            records = [r for r in message.strip().split('\n') if r.strip()]
 
             for i, record in enumerate(records):
                 if not self._send_frame(record.strip()):
@@ -685,9 +620,8 @@ class ASTMProtocolHandler:
     def send_order_response(self, orders: List[Dict[str, str]]):
         """After receiving an inbound LIS order, push matching result records
         back via a FRESH TCP connection to the bridge's ASTM listener. The
-        originating sample_id is echoed verbatim in the response O-record
-        (ASTM field 3) — that is the protocol-native correlation OpenELIS's
-        inbound result import keys on.
+        originating sample_id is echoed verbatim in the response O-record so
+        the normalized result retains protocol-native order correlation.
 
         Same-connection push doesn't work end-to-end: the bridge's outbound
         forwarder closes the TCP socket after sending EOT, so any response
@@ -695,10 +629,8 @@ class ASTMProtocolHandler:
         opens a fresh MLLP connection back to bridge:2575 (see
         _push_order_result in protocols/mllp_listener.py).
 
-        Destination defaults to the bridge's inbound ASTM listener:
-          ORDER_RESULT_PUSH_HOST=openelis-analyzer-bridge
-          ORDER_RESULT_PUSH_ASTM_PORT=12001
-        Empty host disables the push (useful for standalone dev runs).
+        The harness must provide ORDER_RESULT_PUSH_HOST and
+        ORDER_RESULT_PUSH_ASTM_PORT from the saved Bridge connection under test.
 
         Result values come from the loaded ASTM template's
         `fields[].seedValue` (NUMERIC) or `seedQualitative` (other). A test code
@@ -706,14 +638,13 @@ class ASTMProtocolHandler:
         result status X = cannot obtain result) rather than being silently
         omitted or failing the whole response — so the mismatch stays visible.
         """
-        if not self.astm_template:
-            logger.warning("[ORDER_IN] No template loaded; cannot generate result records")
-            return
-
-        host = os.environ.get("ORDER_RESULT_PUSH_HOST", "openelis-analyzer-bridge")
-        port_raw = os.environ.get("ORDER_RESULT_PUSH_ASTM_PORT", "12001")
-        if not host:
-            logger.info("[ORDER_IN] ORDER_RESULT_PUSH_HOST empty; ASTM result push disabled")
+        host = os.environ.get("ORDER_RESULT_PUSH_HOST")
+        port_raw = os.environ.get("ORDER_RESULT_PUSH_ASTM_PORT")
+        if not host or not port_raw:
+            logger.info(
+                "[ORDER_IN] ASTM result push requires ORDER_RESULT_PUSH_HOST and "
+                "ORDER_RESULT_PUSH_ASTM_PORT"
+            )
             return
         try:
             port = int(port_raw)
@@ -885,22 +816,36 @@ class ASTMMockServer:
     """
 
     def __init__(self, port: int = DEFAULT_PORT,
-                 analyzer_type: str = DEFAULT_ANALYZER_TYPE,
                  response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS,
                  port_to_template: Optional[Dict[int, str]] = None):
         self.port = port
-        self.analyzer_type = analyzer_type
         self.response_delay_ms = response_delay_ms
-        self.fields_config = self._load_fields_config()
         if port_to_template is None:
             port_to_template = _load_port_templates(port)
         self.port_to_template = port_to_template
+        self.templates_by_port: Dict[int, Dict] = {}
         if port_to_template:
             self.ports = sorted(port_to_template.keys())
+            for listener_port, template_name in port_to_template.items():
+                template = _load_template(template_name)
+                if not template:
+                    raise ValueError(
+                        f"Cannot resolve template {template_name} for port {listener_port}"
+                    )
+                protocol = template.get("protocol", {}).get("type", "").upper()
+                if protocol not in {"ASTM", "HL7"}:
+                    raise ValueError(
+                        f"Template {template_name} uses unsupported listener protocol {protocol}"
+                    )
+                self.templates_by_port[listener_port] = template
             self.astm_template = None
         else:
             self.ports = [port]
             self.astm_template = self._load_astm_template()
+            if not self.astm_template:
+                raise ValueError(
+                    "Analyzer listener requires ASTM_TEMPLATE or a port-to-template mapping"
+                )
         self.running = False
         self.server_sockets: List[socket.socket] = []
         self.client_threads: List[threading.Thread] = []
@@ -922,36 +867,6 @@ class ASTMMockServer:
             logger.warning(f"ASTM_TEMPLATE={template_name} not found in templates/")
         return template
         
-    def _load_fields_config(self) -> Dict:
-        """Load analyzer field configuration from JSON file."""
-        config_path = os.path.join(os.path.dirname(__file__), 'fields.json')
-        
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading fields.json: {e}")
-                
-        # Return default configuration if file not found
-        return self._get_default_fields()
-        
-    def _get_default_fields(self) -> Dict:
-        """Return default field configuration."""
-        return {
-            "HEMATOLOGY": [
-                {"name": "WBC", "astmRef": "R|1|^^^WBC", "type": "NUMERIC", "unit": "10^3/μL"},
-                {"name": "RBC", "astmRef": "R|1|^^^RBC", "type": "NUMERIC", "unit": "10^6/μL"},
-                {"name": "HGB", "astmRef": "R|1|^^^HGB", "type": "NUMERIC", "unit": "g/dL"},
-                {"name": "HCT", "astmRef": "R|1|^^^HCT", "type": "NUMERIC", "unit": "%"},
-                {"name": "PLT", "astmRef": "R|1|^^^PLT", "type": "NUMERIC", "unit": "10^3/μL"}
-            ],
-            "CHEMISTRY": [
-                {"name": "Glucose", "astmRef": "R|1|^^^GLUCOSE", "type": "NUMERIC", "unit": "mg/dL"},
-                {"name": "Creatinine", "astmRef": "R|1|^^^CREATININE", "type": "NUMERIC", "unit": "mg/dL"}
-            ]
-        }
-        
     def start(self):
         """Start the mock server (single or multi-port)."""
         self.running = True
@@ -968,21 +883,20 @@ class ASTMMockServer:
             self.stop()
 
     def _start_single_port(self):
-        """Single-port mode: one socket, one template (legacy)."""
+        """Run one ASTM listener from its configured template."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('0.0.0.0', self.port))
         sock.listen(MAX_CONNECTIONS)
         self.server_sockets.append(sock)
         logger.info("ASTM Mock Server started on port %s", self.port)
-        logger.info("Analyzer type: %s", self.analyzer_type)
         logger.info("Response delay: %sms", self.response_delay_ms)
         while self.running:
             try:
                 sock.settimeout(1.0)
                 conn, addr = sock.accept()
                 handler = ASTMProtocolHandler(
-                    conn, addr, self.fields_config, self.response_delay_ms,
+                    conn, addr, self.response_delay_ms,
                     astm_template=self.astm_template
                 )
                 thread = threading.Thread(target=handler.handle, daemon=True)
@@ -997,14 +911,7 @@ class ASTMMockServer:
         Returns 'HL7' or 'ASTM' (default). Both are equal citizens —
         the template's protocol.type field determines the handler.
         """
-        template_name = self.port_to_template.get(port)
-        if template_name:
-            template = _load_template(template_name)
-            if template:
-                proto = template.get("protocol", {}).get("type", "").upper()
-                if proto == "HL7":
-                    return "HL7"
-        return "ASTM"
+        return self.templates_by_port[port]["protocol"]["type"].upper()
 
     def _start_multi_port(self):
         """Multi-port mode: one socket per port, protocol-aware handler dispatch.
@@ -1042,19 +949,16 @@ class ASTMMockServer:
 
                     if proto == "HL7":
                         template_name = self.port_to_template.get(local_port)
-                        template = _load_template(template_name) if template_name else None
                         handler = MLLPProtocolHandler(
                             conn, addr,
-                            template=template,
+                            template=self.templates_by_port[local_port],
                             template_name=template_name,
                             response_delay_ms=self.response_delay_ms,
                         )
                     else:
                         handler = ASTMProtocolHandler(
-                            conn, addr, self.fields_config, self.response_delay_ms,
-                            astm_template=None,
-                            local_port=local_port,
-                            port_to_template=self.port_to_template
+                            conn, addr, self.response_delay_ms,
+                            astm_template=self.templates_by_port[local_port],
                         )
 
                     thread = threading.Thread(target=handler.handle, daemon=True)
@@ -1111,17 +1015,14 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
     protocol-aware dispatch: each port maps to a template, and the template's
     protocol.type (ASTM or HL7) determines the connection handler.
 
-    Env vars (checked in order):
-      PORT_TEMPLATES          — protocol-agnostic (preferred)
-      ASTM_PORT_TEMPLATES     — backward-compatible alias
+    PORT_TEMPLATES may provide the mapping as JSON.
 
     If no env var and ASTM_TEMPLATE is set, returns {default_port: ASTM_TEMPLATE}.
     """
     base = os.path.dirname(os.path.abspath(__file__))
     port_to_template: Dict[int, str] = {}
 
-    # PORT_TEMPLATES is the preferred env var; ASTM_PORT_TEMPLATES is kept for compat
-    env_json = os.environ.get("PORT_TEMPLATES") or os.environ.get("ASTM_PORT_TEMPLATES")
+    env_json = os.environ.get("PORT_TEMPLATES")
     if env_json is not None:
         try:
             raw = json.loads(env_json)
@@ -1133,7 +1034,7 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
                         except (ValueError, TypeError):
                             logger.warning("Skipping non-numeric port key %r", k)
         except json.JSONDecodeError as e:
-            logger.warning("Invalid ASTM_PORT_TEMPLATES JSON: %s", e)
+            logger.warning("Invalid PORT_TEMPLATES JSON: %s", e)
     else:
         config_path = os.path.join(base, "config", "port_templates.json")
         if os.path.exists(config_path):
@@ -1159,19 +1060,13 @@ def _load_port_templates(default_port: int) -> Dict[int, str]:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='ASTM LIS2-A2 Mock Server for OpenELIS Analyzer Testing'
+        description='Profile-driven laboratory analyzer simulator'
     )
     parser.add_argument(
         '--port', '-p',
         type=int,
         default=int(os.environ.get('ASTM_PORT', DEFAULT_PORT)),
         help=f'Server port (default: {DEFAULT_PORT})'
-    )
-    parser.add_argument(
-        '--analyzer-type', '-t',
-        type=str,
-        default=os.environ.get('ANALYZER_TYPE', DEFAULT_ANALYZER_TYPE),
-        help=f'Analyzer type (default: {DEFAULT_ANALYZER_TYPE})'
     )
     parser.add_argument(
         '--response-delay', '-d',
@@ -1188,14 +1083,14 @@ def main():
         '--push', '-P',
         type=str,
         metavar='URL',
-        help='Push mode: Send ASTM message to OpenELIS at URL (e.g., https://localhost:8443)'
+        help='Push mode: send analyzer traffic to a Bridge destination (tcp:// or mllp://)'
     )
     parser.add_argument(
         '--template',
         type=str,
         metavar='NAME',
         default=os.environ.get('ASTM_TEMPLATE'),
-        help='Template name to use for push mode (e.g. horiba_pentra60). Uses fields.json if not set.'
+        help='Template name for ASTM push or single-listener mode.'
     )
     parser.add_argument(
         '--qc',
@@ -1218,8 +1113,7 @@ def main():
         help='Local IP to bind the outgoing TCP socket to. The mock has '
              'multiple Docker network interfaces (one per registered '
              'analyzer); the bridge identifies analyzers by source IP, so '
-             'multi-analyzer setups must specify this to route correctly. '
-             'Example: --source-ip 10.42.20.10 for the genexpert network.'
+             'multi-analyzer setups must specify this to route correctly.'
     )
     parser.add_argument(
         '--dry-run',
@@ -1253,31 +1147,31 @@ def main():
         '--simulate-api-port',
         type=int,
         metavar='PORT',
-        help='M4: Start simulate API (GET/POST /simulate/hl7/{analyzer}) for CI/CD (e.g., 8081)'
+        help='Start the simulator control API (e.g., 8081)'
     )
     parser.add_argument(
         '--serial-port',
         type=str,
         metavar='PATH',
-        help='M4: Serial simulation mode: send ASTM over port (e.g. /dev/pts/X via socat)'
+        help='Serial simulation mode: send ASTM over port (e.g. /dev/pts/X via socat)'
     )
     parser.add_argument(
         '--serial-analyzer',
         type=str,
-        default='horiba_pentra60',
-        help='M4: Template name for --serial-port (default: horiba_pentra60)'
+        default=None,
+        help='Template name required with --serial-port'
     )
     parser.add_argument(
         '--generate-files',
         type=str,
         metavar='DIR',
-        help='M4: File generation mode: write CSV to DIR (use with --generate-files-analyzer)'
+        help='FILE generation mode: write output to DIR'
     )
     parser.add_argument(
         '--generate-files-analyzer',
         type=str,
-        default='quantstudio7',
-        help='M4: Template for --generate-files (default: quantstudio7)'
+        default=None,
+        help='Template name required with --generate-files'
     )
     parser.add_argument(
         '--hl7',
@@ -1288,18 +1182,20 @@ def main():
         '--hl7-template',
         type=str,
         metavar='NAME',
-        default=os.environ.get('HL7_TEMPLATE', 'abbott_architect_hl7'),
-        help='HL7 template name (default: abbott_architect_hl7 or HL7_TEMPLATE env)'
+        default=os.environ.get('HL7_TEMPLATE'),
+        help='HL7 template name required with --hl7'
     )
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # M4: File generation mode
     if getattr(args, 'generate_files', None):
         out_dir = args.generate_files
-        analyzer = getattr(args, 'generate_files_analyzer', None) or 'quantstudio7'
+        analyzer = getattr(args, 'generate_files_analyzer', None)
+        if not analyzer:
+            logger.error("--generate-files requires --generate-files-analyzer")
+            return 1
         template = _load_template(analyzer)
         if not template:
             logger.error("Template not found: %s", analyzer)
@@ -1314,10 +1210,12 @@ def main():
             return 0
         return 1
 
-    # M4: Serial simulation mode
     if getattr(args, 'serial_port', None):
         port_path = args.serial_port
-        analyzer = getattr(args, 'serial_analyzer', None) or 'horiba_pentra60'
+        analyzer = getattr(args, 'serial_analyzer', None)
+        if not analyzer:
+            logger.error("--serial-port requires --serial-analyzer")
+            return 1
         template = _load_template(analyzer)
         if not template:
             logger.error("Template not found: %s", analyzer)
@@ -1333,8 +1231,11 @@ def main():
         ok = send_astm_over_serial(port_path, msg, baud=baud)
         return 0 if ok else 1
 
-    # HL7 push mode: Send ORU^R01 to OpenELIS (template-driven, e.g. Abbott)
+    # HL7 push mode: send ORU^R01 to a Bridge MLLP listener.
     if args.hl7 and args.push:
+        if not args.hl7_template:
+            logger.error("--hl7 requires --hl7-template")
+            return 1
         if not HAS_HL7_SIM:
             logger.error("HL7 simulation not available (template_loader or hl7_handler missing)")
             return 1
@@ -1353,7 +1254,7 @@ def main():
         print("=" * 60)
         print("  ASTM Mock Server - HL7 Push Mode")
         print("=" * 60)
-        print(f"  OpenELIS URL: {args.push}")
+        print(f"  Bridge destination: {args.push}")
         print(f"  HL7 Template: {args.hl7_template}")
         print(f"  Message Count: {args.push_count}")
         print(f"  Interval: {args.push_interval}s")
@@ -1366,13 +1267,15 @@ def main():
                 while True:
                     total_sent += 1
                     msg = generate_oru_r01(template, deterministic=True)
-                    if push_hl7_http(args.push, msg):
+                    pushed, _ = push_hl7_to_destination(args.push, msg)
+                    if pushed:
                         success_count += 1
                     time.sleep(args.push_interval)
             else:
                 for i in range(args.push_count):
                     msg = generate_oru_r01(template, deterministic=True)
-                    if push_hl7_http(args.push, msg):
+                    pushed, _ = push_hl7_to_destination(args.push, msg)
+                    if pushed:
                         success_count += 1
                     total_sent += 1
                     if i < args.push_count - 1:
@@ -1386,52 +1289,38 @@ def main():
         print("=" * 60)
         return 0 if (not args.push_continuous and success_count == args.push_count) or (args.push_continuous and total_sent > 0) else 1
 
-    # Push mode: Send ASTM messages to OpenELIS
+    # Push mode: send ASTM messages to a Bridge TCP listener.
     if args.push:
         print("=" * 60)
         print("  ASTM Mock Server - Push Mode")
         print("=" * 60)
         mode_label = "QC" if args.qc else "Patient"
-        print(f"  OpenELIS URL: {args.push}")
-        print(f"  Template:     {args.template or '(fields.json / --analyzer-type)'}")
+        print(f"  Bridge destination: {args.push}")
+        print(f"  Template:     {args.template or '(missing)'}")
         print(f"  Mode:         {mode_label}")
         print(f"  Message Count: {args.push_count}")
         print(f"  Interval: {args.push_interval}s")
         print("=" * 60)
         print()
 
-        if args.qc and not args.template:
-            logger.error("--qc requires --template (fields.json has no qc_controls)")
+        if not args.template:
+            logger.error("ASTM push requires --template")
             return 1
 
-        # Resolve message generator: template-driven or legacy fields.json
-        push_template = None
-        if args.template:
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', f'{args.template}.json')
-            if not os.path.exists(template_path):
-                logger.error(f"Template not found: {template_path}")
-                return 1
-            with open(template_path, 'r') as f:
-                push_template = json.load(f)
-            if push_template.get('protocol', {}).get('type') != 'ASTM':
-                logger.error(f"Template '{args.template}' is not an ASTM template")
-                return 1
-            logger.info(f"Using template: {push_template['analyzer']['name']} [{mode_label}]")
+        push_template = _load_template(args.template)
+        if not push_template:
+            logger.error("Template not found: %s", args.template)
+            return 1
+        if push_template.get('protocol', {}).get('type') != 'ASTM':
+            logger.error(f"Template '{args.template}' is not an ASTM template")
+            return 1
+        logger.info(f"Using template: {push_template['analyzer']['name']} [{mode_label}]")
 
         def generate_push_message() -> Optional[str]:
-            if push_template:
-                handler = ASTMHandler()
-                if args.qc:
-                    return handler.generate_qc(push_template, deviation=args.qc_deviation)
-                return handler.generate(push_template)
-            fields_file = os.path.join(os.path.dirname(__file__), 'fields.json')
-            try:
-                with open(fields_file, 'r') as f:
-                    fields_config = json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading fields.json: {e}")
-                return None
-            return generate_astm_message(analyzer_type=args.analyzer_type, fields_config=fields_config)
+            handler = ASTMHandler()
+            if args.qc:
+                return handler.generate_qc(push_template, deviation=args.qc_deviation)
+            return handler.generate(push_template)
 
         # Dry run: print message and exit
         if args.dry_run:
@@ -1505,14 +1394,13 @@ def main():
 
     # Server mode: Listen for connections
     print("=" * 60)
-    print("  ASTM LIS2-A2 Mock Server for OpenELIS")
+    print("  Profile-driven analyzer simulator")
     port_to_template = _load_port_templates(args.port)
     print("=" * 60)
     if port_to_template:
         print(f"  Ports: {sorted(port_to_template.keys())} (port-to-template)")
     else:
         print(f"  Port: {args.port}")
-    print(f"  Analyzer Type: {args.analyzer_type}")
     print(f"  Response Delay: {args.response_delay}ms")
     if api_port:
         print(f"  API Server: {api_port}")
@@ -1523,7 +1411,6 @@ def main():
 
     server = ASTMMockServer(
         port=args.port,
-        analyzer_type=args.analyzer_type,
         response_delay_ms=args.response_delay,
         port_to_template=port_to_template if port_to_template else None
     )

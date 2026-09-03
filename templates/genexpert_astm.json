@@ -13,7 +13,7 @@
     },
     "profileRef": {
         "profileId": "genexpert-astm",
-        "revision": 3
+        "revision": 4
     },
     "fieldOverrides": {
         "MTB-RIF": {

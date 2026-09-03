@@ -1,13 +1,10 @@
-# ASTM Mock Server Dependencies
-# For testing analyzer integration with OpenELIS
-# Reference: specs/004-astm-analyzer-mapping/plan.md
-# M4: specs/011-madagascar-analyzer-integration - multi-protocol simulator
+# Analyzer mock server dependencies
 
 # Testing
 pytest>=7.0.0
 jsonschema>=4.0.0
 
-# RS232 virtual serial simulation (M4)
+# RS232 virtual serial simulation
 pyserial>=3.5
 
 # Docker API for dynamic analyzer network management
@@ -16,7 +13,6 @@ docker>=7.0.0
 # Fixture file parsing (Excel formats)
 openpyxl>=3.1.0
 xlrd>=2.0.1
-
 
 
 

@@ -111,6 +111,17 @@ class TestSimulateAstmQcApi(unittest.TestCase):
         # Normal patient result has no Q action code at O.12
         self.assertNotIn("|Q|", wire)
 
+    def test_explicit_result_scenario_is_emitted_on_the_wire(self):
+        status, _ = self._post({
+            "destination": "tcp://bridge:12001",
+            "results": [{"test_code": "UNMAPPED-MTB", "value": "REVIEW REQUIRED"}],
+        })
+
+        self.assertEqual(status, 200)
+        wire = self.mock_push.call_args[0][1]
+        self.assertIn("UNMAPPED-MTB", wire)
+        self.assertIn("REVIEW REQUIRED", wire)
+
     def test_source_ip_omitted_passes_none(self):
         self._post({"destination": "tcp://bridge:12001"})
         kwargs = self.mock_push.call_args[1]

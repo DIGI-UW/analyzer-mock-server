@@ -38,7 +38,7 @@ class TestLoadPortTemplates(unittest.TestCase):
 
     def setUp(self):
         self._saved_env = {}
-        for key in ('ASTM_PORT_TEMPLATES', 'ASTM_TEMPLATE', 'ASTM_PORT'):
+        for key in ('PORT_TEMPLATES', 'ASTM_TEMPLATE', 'ASTM_PORT'):
             if key in os.environ:
                 self._saved_env[key] = os.environ[key]
 
@@ -46,11 +46,11 @@ class TestLoadPortTemplates(unittest.TestCase):
         for key in list(os.environ.keys()):
             if key in self._saved_env:
                 os.environ[key] = self._saved_env[key]
-            elif key in ('ASTM_PORT_TEMPLATES', 'ASTM_TEMPLATE', 'ASTM_PORT'):
+            elif key in ('PORT_TEMPLATES', 'ASTM_TEMPLATE', 'ASTM_PORT'):
                 os.environ.pop(key, None)
 
     def test_env_override(self):
-        os.environ['ASTM_PORT_TEMPLATES'] = '{"9600": "genexpert_astm", "9601": "mindray_ba88a"}'
+        os.environ['PORT_TEMPLATES'] = '{"9600": "genexpert_astm", "9601": "mindray_ba88a"}'
         result = server_module._load_port_templates(5000)
         self.assertIn(9600, result)
         self.assertIn(9601, result)
@@ -58,7 +58,7 @@ class TestLoadPortTemplates(unittest.TestCase):
         self.assertEqual(result[9601], 'mindray_ba88a')
 
     def test_fallback_single_port(self):
-        os.environ['ASTM_PORT_TEMPLATES'] = '{}'
+        os.environ['PORT_TEMPLATES'] = '{}'
         os.environ['ASTM_TEMPLATE'] = 'genexpert_astm'
         result = server_module._load_port_templates(9600)
         self.assertEqual(result, {9600: 'genexpert_astm'})
@@ -68,7 +68,7 @@ class TestLoadPortTemplates(unittest.TestCase):
         config_path = os.path.join(base, 'config', 'port_templates.json')
         if not os.path.exists(config_path):
             self.skipTest('config/port_templates.json not present')
-        os.environ.pop('ASTM_PORT_TEMPLATES', None)
+        os.environ.pop('PORT_TEMPLATES', None)
         os.environ.pop('ASTM_TEMPLATE', None)
         result = server_module._load_port_templates(5000)
         self.assertGreater(len(result), 0)

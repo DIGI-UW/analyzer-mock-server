@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 from analyzer_network_manager import (
     DYNAMIC_SUBNET_BASE,
     DYNAMIC_SUBNET_MAX,
-    FIXED_SUBNETS,
     NETWORK_PREFIX,
     AnalyzerNetworkManager,
 )
@@ -51,16 +50,15 @@ class Base(unittest.TestCase):
 
 
 class TestDeterministicAllocation(Base):
-    def test_fixed_exact_match(self):
-        self.assertEqual(self.mgr._subnet_id_for("genexpert"), FIXED_SUBNETS["genexpert"])
-
-    def test_fixed_case_insensitive(self):
-        self.assertEqual(self.mgr._subnet_id_for("GeneXpert"), FIXED_SUBNETS["genexpert"])
-
-    def test_substring_is_not_the_fixed_subnet(self):
-        s = self.mgr._subnet_id_for("demo-genexpert-site1")
-        self.assertNotEqual(s, FIXED_SUBNETS["genexpert"])
+    def test_every_name_uses_the_dynamic_range(self):
+        s = self.mgr._subnet_id_for("genexpert")
         self.assertTrue(DYNAMIC_SUBNET_BASE <= s <= DYNAMIC_SUBNET_MAX)
+
+    def test_name_matching_is_case_insensitive(self):
+        self.assertEqual(
+            self.mgr._subnet_id_for("Analyzer-Instance-A"),
+            self.mgr._subnet_id_for("analyzer-instance-a"),
+        )
 
     def test_same_name_same_subnet_across_calls_and_instances(self):
         a = self.mgr._subnet_id_for("demo-outbound-gx")

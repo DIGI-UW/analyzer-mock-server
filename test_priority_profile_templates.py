@@ -8,10 +8,10 @@ from template_loader import TemplateLoader
 
 
 PRIORITY_PROFILE_REFS = {
-    "genexpert_astm": {"profileId": "genexpert-astm", "revision": 1},
-    "hain_fluorocycler": {"profileId": "fluorocycler-xt", "revision": 1},
-    "quantstudio5": {"profileId": "quantstudio", "revision": 1},
-    "quantstudio7": {"profileId": "quantstudio", "revision": 1},
+    "genexpert_astm": {"profileId": "genexpert-astm", "revision": 3},
+    "hain_fluorocycler": {"profileId": "fluorocycler-xt", "revision": 3},
+    "quantstudio5": {"profileId": "quantstudio", "revision": 3},
+    "quantstudio7": {"profileId": "quantstudio", "revision": 3},
 }
 
 

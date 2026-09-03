@@ -179,6 +179,28 @@ class TestReconcileOrphans(Base):
         foreign.remove.assert_not_called()
 
 
+class TestRemoveAnalyzer(Base):
+    def test_keeps_analyzer_visible_until_network_removal_completes(self):
+        self.mgr._analyzers["demo-x"] = {"name": "demo-x"}
+
+        def cleanup(_network_name):
+            self.assertIsNotNone(self.mgr.get_analyzer("demo-x"))
+            return True
+
+        self.mgr._cleanup_network = MagicMock(side_effect=cleanup)
+
+        self.assertTrue(self.mgr.remove_analyzer("demo-x"))
+        self.assertIsNone(self.mgr.get_analyzer("demo-x"))
+
+    def test_failed_network_removal_keeps_analyzer_visible_for_retry(self):
+        analyzer = {"name": "demo-x"}
+        self.mgr._analyzers["demo-x"] = analyzer
+        self.mgr._cleanup_network = MagicMock(return_value=False)
+
+        self.assertFalse(self.mgr.remove_analyzer("demo-x"))
+        self.assertEqual(self.mgr.get_analyzer("demo-x"), analyzer)
+
+
 class TestConcurrency(Base):
     def test_concurrent_distinct_analyzers_get_distinct_subnets(self):
         # Deterministic per-name allocation means concurrent creates of DIFFERENT

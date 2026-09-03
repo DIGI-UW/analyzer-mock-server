@@ -1,15 +1,4 @@
 {
-    "analyzer": {
-        "name": "Cepheid GeneXpert",
-        "model": "GeneXpert",
-        "manufacturer": "Cepheid",
-        "category": "MOLECULAR"
-    },
-    "protocol": {
-        "type": "ASTM",
-        "version": "E-1394-97",
-        "transport": "TCP"
-    },
     "identification": {
         "astm_header": "GENEXPERT^GeneXpert^4.6.0"
     },
@@ -22,17 +11,18 @@
         "enable_qc": false,
         "proactive_enq": true
     },
-    "profile": "astm/genexpert-astm",
+    "profileRef": {
+        "profileId": "genexpert-astm",
+        "revision": 1
+    },
     "fieldOverrides": {
         "MTB-RIF": {
             "name": "Xpert MTB/RIF",
-            "possibleValues": ["MTB DETECTED", "NOT DETECTED", "HIGH", "MEDIUM", "LOW", "VERY LOW", "INDETERMINATE", "ERROR", "NO RESULT"],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
         "RIF": {
             "name": "Xpert MTB/RIF Rif Resistance",
-            "possibleValues": ["DETECTED", "NOT DETECTED", "INDETERMINATE"],
             "seedQualitative": "NOT DETECTED",
             "version": "2.1"
         },
@@ -47,7 +37,6 @@
         },
         "COVID19": {
             "name": "Xpert Xpress SARS-CoV-2",
-            "possibleValues": ["POSITIVE", "NEGATIVE", "INDETERMINATE", "ERROR"],
             "seedQualitative": "NEGATIVE",
             "version": "1.0"
         }

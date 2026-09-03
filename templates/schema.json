@@ -4,15 +4,40 @@
   "title": "Analyzer Message Template",
   "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports ASTM, HL7, RS232, FILE protocols with field definitions and deterministic seed values.",
   "type": "object",
-  "required": ["analyzer", "protocol"],
   "oneOf": [
-    { "required": ["fields"], "description": "Legacy: inline assay fields." },
-    { "required": ["profile"], "description": "Profile-backed: assay menu derived from the canonical profile referenced by `profile` (single source of truth)." }
+    {
+      "required": ["analyzer", "protocol", "fields"],
+      "not": { "required": ["profileRef"] },
+      "description": "Standalone simulator fixture with inline analyzer, protocol, and assay data."
+    },
+    {
+      "required": ["profileRef"],
+      "not": {
+        "anyOf": [
+          { "required": ["analyzer"] },
+          { "required": ["protocol"] },
+          { "required": ["fields"] }
+        ]
+      },
+      "description": "Profile-backed fixture whose analyzer, protocol, and assay data come from one exact Bridge profile revision."
+    }
   ],
   "properties": {
-    "profile": {
-      "type": "string",
-      "description": "Reference to a canonical profile (e.g. 'hl7/mindray-bc5380'); profile_adapter derives `fields` from it. Mutually exclusive with inline `fields`."
+    "profileRef": {
+      "type": "object",
+      "description": "Exact immutable Bridge profile revision used by a profile-backed analyzer simulation.",
+      "required": ["profileId", "revision"],
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     },
     "seedValues": {
       "type": "object",

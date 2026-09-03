@@ -38,14 +38,7 @@ CREATE_MAX_RETRIES = 3
 CREATE_RETRY_BACKOFF_S = 0.4
 
 
-QC_DEFAULT_ASTM_TEMPLATE = "genexpert_astm"
-QC_DEFAULT_HL7_TEMPLATE = "mindray_bs200"
-QC_DEFAULT_FILE_TEMPLATE = "quantstudio5"
-
-
-def _default_qc_astm_route(template_name: str) -> Dict[str, str]:
-    if template_name != QC_DEFAULT_ASTM_TEMPLATE:
-        return {}
+def _default_qc_astm_route() -> Dict[str, str]:
     return {
         "destination": os.environ.get(
             "QC_DEFAULT_ASTM_DESTINATION",
@@ -55,9 +48,7 @@ def _default_qc_astm_route(template_name: str) -> Dict[str, str]:
     }
 
 
-def _default_qc_hl7_route(template_name: str) -> Dict[str, str]:
-    if template_name != QC_DEFAULT_HL7_TEMPLATE:
-        return {}
+def _default_qc_hl7_route() -> Dict[str, str]:
     return {
         "destination": os.environ.get(
             "QC_DEFAULT_HL7_DESTINATION",
@@ -67,9 +58,7 @@ def _default_qc_hl7_route(template_name: str) -> Dict[str, str]:
     }
 
 
-def _default_qc_file_bridge_upload(template_name: str, template: Dict) -> Dict[str, str]:
-    if template_name != QC_DEFAULT_FILE_TEMPLATE:
-        return {}
+def _default_qc_file_bridge_upload(template: Dict) -> Dict[str, str]:
     default_test_code = os.environ.get("QC_DEFAULT_FILE_TEST_CODE")
     if not default_test_code:
         controls = template.get("qc_controls") or []
@@ -82,10 +71,7 @@ def _default_qc_file_bridge_upload(template_name: str, template: Dict) -> Dict[s
 
 
 def _load_template(analyzer: str) -> Optional[Dict]:
-    """Load an analyzer's mock template: transport/fixtures from
-    templates/<analyzer>.json, assay `fields` derived from the canonical profile
-    it references (`profile` key) — single source of truth. Templates without a
-    `profile` key fall back to their own `fields` (legacy, pending migration)."""
+    """Load a template and resolve any declared profile before returning it."""
     base = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base, "templates", f"{analyzer}.json")
     if not os.path.exists(path):
@@ -104,6 +90,8 @@ def _load_template(analyzer: str) -> Optional[Dict]:
             return merged
     except Exception as e:
         logger.warning("Failed to derive profile-backed template for %s: %s", analyzer, e)
+        if template.get("profileRef"):
+            return None
 
     return template
 
@@ -130,6 +118,21 @@ def _safe_file_output_path(target_dir, filename, template_name, default_pattern)
     else:
         fname = f"sim_{template_name}_{uuid.uuid4().hex[:8]}.csv"
     return os.path.join(target_dir, fname)
+
+
+FILE_OUTPUT_ROOTS = ("/data/analyzer-imports", "/tmp")
+
+
+def _is_allowed_file_output_dir(target_dir: str) -> bool:
+    resolved_dir = os.path.realpath(target_dir)
+    for root in FILE_OUTPUT_ROOTS:
+        resolved_root = os.path.realpath(root)
+        try:
+            if os.path.commonpath((resolved_dir, resolved_root)) == resolved_root:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _extract_sample_id_from_hl7(msg: str) -> Optional[str]:
@@ -300,11 +303,24 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             if not mgr:
                 self._send_json(500, {"error": "Docker API not available"})
                 return
-            removed = mgr.remove_analyzer(name)
-            if removed:
-                self._send_json(200, {"removed": True, "name": name})
-            else:
+            if not mgr.get_analyzer(name):
                 self._send_json(404, {"removed": False, "error": f"Analyzer '{name}' not found"})
+                return
+
+            # The simulator is attached to the analyzer network so it can send
+            # from the instrument's source IP. Removing that network before the
+            # HTTP response completes drops the caller's in-flight connection.
+            # Acknowledge teardown first, then perform it off the request thread.
+            self._send_json(202, {"removalScheduled": True, "name": name})
+
+            def _remove_after_response():
+                try:
+                    if not mgr.remove_analyzer(name):
+                        logger.warning("Scheduled removal failed for analyzer %s", name)
+                except Exception:
+                    logger.exception("Scheduled removal raised for analyzer %s", name)
+
+            threading.Thread(target=_remove_after_response, daemon=True).start()
             return
         self.send_error(404, "Not Found")
 
@@ -326,7 +342,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
             if qc_mode and not destination:
-                defaults = _default_qc_hl7_route(template_name)
+                defaults = _default_qc_hl7_route()
                 destination = defaults.get("destination")
                 source_ip = source_ip or defaults.get("source_ip")
 
@@ -430,7 +446,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
         if qc_mode and not destination:
-            defaults = _default_qc_astm_route(resolved_template)
+            defaults = _default_qc_astm_route()
             destination = defaults.get("destination")
             source_ip = source_ip or defaults.get("source_ip")
 
@@ -549,7 +565,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             # is omitted entirely.
             bridge_upload = params.get("bridge_upload")
             if bridge_upload is None:
-                bridge_upload = _default_qc_file_bridge_upload(template_name, template)
+                bridge_upload = _default_qc_file_bridge_upload(template)
             if bridge_upload:
                 try:
                     self._upload_qc_content_to_bridge(
@@ -562,11 +578,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
             written_path = None
             if target_dir:
-                resolved_dir = os.path.realpath(target_dir)
-                allowed_roots = ["/data/analyzer-imports", "/tmp"]
-                if not any(resolved_dir.startswith(root) for root in allowed_roots):
-                    self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
+                if not _is_allowed_file_output_dir(target_dir):
+                    self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
                     return
+                resolved_dir = os.path.realpath(target_dir)
                 os.makedirs(resolved_dir, exist_ok=True)
                 ext = FileHandler.qc_extension(template)
                 fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}{ext}"
@@ -661,11 +676,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if target_dir:
             # Validate target_dir: resolve to real path to prevent path traversal.
             # Only allow output under /data/analyzer-imports (Docker) or /tmp (tests).
-            resolved_dir = os.path.realpath(target_dir)
-            allowed_roots = ["/data/analyzer-imports", "/tmp"]
-            if not any(resolved_dir.startswith(root) for root in allowed_roots):
-                self._send_json(400, {"error": f"target_dir must be under {allowed_roots}"})
+            if not _is_allowed_file_output_dir(target_dir):
+                self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
                 return
+            resolved_dir = os.path.realpath(target_dir)
             os.makedirs(resolved_dir, exist_ok=True)
             ext = os.path.splitext(fixture_path)[1]
             filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
@@ -834,6 +848,14 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "Uploaded fixture %s to bridge %s (analyzer %s, testCode=%s) — status %d",
             fixture_rel, bridge_url, analyzer_id, test_code, resp_status,
         )
+
+        if not 200 <= resp_status < 300:
+            self._send_json(502, {
+                "error": "Bridge rejected fixture upload",
+                "bridge_status": resp_status,
+                "bridge_response_preview": resp_body[:500],
+            })
+            return
 
         self._send_json(200, {
             "status": "uploaded",

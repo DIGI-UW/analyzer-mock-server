@@ -344,8 +344,10 @@ class AnalyzerNetworkManager:
     def remove_analyzer(self, name: str) -> bool:
         """Remove an analyzer's Docker network (cached or orphaned). Idempotent —
         returns True if the network is gone afterwards."""
-        self._analyzers.pop(name, None)
-        return self._cleanup_network(f"{NETWORK_PREFIX}{name}")
+        removed = self._cleanup_network(f"{NETWORK_PREFIX}{name}")
+        if removed:
+            self._analyzers.pop(name, None)
+        return removed
 
     def list_analyzers(self) -> List[dict]:
         """List all active mock analyzers (from the in-process cache)."""

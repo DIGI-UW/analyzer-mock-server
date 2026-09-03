@@ -1,27 +1,16 @@
 #!/usr/bin/env python3
-"""
-Profile-backed template derivation.
+"""Derive analyzer-mock fields from an exact Bridge profile revision.
 
-The canonical analyzer profile (projects/analyzer-profiles/{astm,hl7,file}/*.json)
-is the single source of truth for an analyzer's assay menu: each
-`default_test_mappings` entry carries the analyzer test_code, its LOINC, unit, and
-(once enriched) `result_type` + value domain. The mock derives its result `fields`
-from that profile.
-
-A "transport template" (templates/*.json) carries only the messaging/framing
-mechanics (protocol, astm_config, HL7 sending app/facility, file format) plus
-mock-side test fixtures (deterministic `seedValues` keyed by code, testPatient,
-testSample). It references its profile via a `profile` key, e.g.
-`"profile": "hl7/mindray-bc5380"`.
-
-`load_profile_backed_template` merges the two: profile → fields, template →
-everything else. This eliminates the historical drift where assay coverage was
-hand-maintained in templates separately from the profiles.
+Profile-backed templates pin an immutable Bridge profile with ``profileRef``.
+The adapter resolves the exact ID and catalog revision and fails closed if the
+catalog does not contain exactly one match. Transport mechanics and deterministic
+simulation values remain mock-owned.
 """
 
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -29,23 +18,80 @@ logger = logging.getLogger(__name__)
 # Default qualitative vocabulary when a profile mapping declares a qualitative
 # result_type but no explicit `values`. Aligns (case-insensitively) with the
 # common OE2 dictionary entries Detected/Not Detected.
-DEFAULT_QUALITATIVE_VALUES = ["DETECTED", "NOT DETECTED"]
-
 _QUALITATIVE_TYPES = {"qualitative", "ordinal", "nominal", "ord", "nom", "qual"}
+_PROFILE_OWNED_FIELD_KEYS = {"code", "loinc", "unit", "type", "possibleValues"}
+_PROFILE_OWNED_TEMPLATE_KEYS = {
+    "analyzer",
+    "protocol",
+    "fields",
+    "fileFormat",
+    "file_config",
+    "columns",
+}
+_MOCK_COLUMN_KEYS = {
+    "sampleId": "sample_id",
+    "testCode": "test_code",
+    "result": "result",
+}
 
 
-def _profiles_root() -> str:
-    """Root of the canonical profiles tree (contains astm/ hl7/ file/ subdirs).
+class ProfileResolutionError(RuntimeError):
+    """The requested immutable Bridge profile revision cannot be resolved."""
 
-    In the deployed mock this is mounted and pointed at by ANALYZER_PROFILES_DIR.
-    Locally (tests/dev) it resolves to <repo>/projects/analyzer-profiles — three
-    dirnames up from this file: tools/analyzer-mock-server/profile_adapter.py.
-    """
-    env = os.environ.get("ANALYZER_PROFILES_DIR")
-    if env:
-        return env
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(repo_root, "projects", "analyzer-profiles")
+
+def _bridge_profiles_root() -> Path:
+    configured = os.environ.get("ANALYZER_BRIDGE_PROFILES_DIR")
+    if not configured:
+        raise ProfileResolutionError(
+            "ANALYZER_BRIDGE_PROFILES_DIR is required for a versioned profileRef"
+        )
+    root = Path(configured)
+    if not root.is_dir():
+        raise ProfileResolutionError(f"Bridge profile catalog does not exist: {root}")
+    return root
+
+
+def _load_exact_bridge_profile(profile_ref: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(profile_ref, dict):
+        raise ProfileResolutionError("profileRef must contain profileId and revision")
+
+    profile_id = profile_ref.get("profileId")
+    revision = profile_ref.get("revision")
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise ProfileResolutionError("profileRef.profileId must be a non-empty string")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise ProfileResolutionError("profileRef.revision must be a positive integer")
+
+    matches = []
+    for path in sorted(_bridge_profiles_root().rglob("*.json")):
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                candidate = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ProfileResolutionError(f"Cannot read Bridge profile document {path}: {exc}") from exc
+
+        if (
+            candidate.get("profileMeta", {}).get("id") == profile_id
+            and candidate.get("catalog", {}).get("revision") == revision
+        ):
+            matches.append((path, candidate))
+
+    exact_ref = f"{profile_id}@{revision}"
+    if not matches:
+        raise ProfileResolutionError(f"Bridge profile {exact_ref} was not found")
+    if len(matches) > 1:
+        paths = ", ".join(str(path) for path, _ in matches)
+        raise ProfileResolutionError(
+            f"Bridge profile {exact_ref} matched multiple documents: {paths}"
+        )
+
+    profile = matches[0][1]
+    fingerprint = profile.get("catalog", {}).get("revisionFingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        raise ProfileResolutionError(
+            f"Bridge profile {exact_ref} has no catalog revision fingerprint"
+        )
+    return profile
 
 
 def _default_negative(values: List[str]) -> str:
@@ -57,6 +103,36 @@ def _default_negative(values: List[str]) -> str:
     return values[-1] if values else "NOT DETECTED"
 
 
+def _required_profile_text(profile: Dict[str, Any], key: str, source_label: str) -> str:
+    value = profile.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ProfileResolutionError(
+            f"Analyzer profile {source_label} must declare non-empty {key}"
+        )
+    return value
+
+
+def _profile_file_config(profile: Dict[str, Any]) -> Dict[str, Any]:
+    defaults = profile.get("configDefaults") or {}
+    protocol = profile.get("protocol") or {}
+    config: Dict[str, Any] = {}
+
+    file_format = defaults.get("fileFormat") or protocol.get("format")
+    if isinstance(file_format, str) and file_format.strip():
+        config["format"] = file_format
+    if isinstance(defaults.get("hasHeader"), bool):
+        config["has_header"] = defaults["hasHeader"]
+
+    columns: Dict[str, str] = {}
+    for header, normalized_key in (profile.get("column_mapping") or {}).items():
+        mock_key = _MOCK_COLUMN_KEYS.get(normalized_key)
+        if mock_key and mock_key not in columns:
+            columns[mock_key] = header
+    if columns:
+        config["column_mapping"] = columns
+    return config
+
+
 def load_profile_backed_template(
     template_name: str, transport_template: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
@@ -64,15 +140,36 @@ def load_profile_backed_template(
     assay `fields` built from its referenced canonical profile.
 
     Returns the merged template, or None if the transport template declares no
-    `profile` (i.e. it is not yet profile-backed and the caller should fall back).
+    profile reference and the caller should use its inline fields.
     """
-    profile_ref = transport_template.get("profile")
-    if not profile_ref:
+    exact_profile_ref = transport_template.get("profileRef")
+    if not exact_profile_ref:
         return None
 
-    profile_path = os.path.join(_profiles_root(), f"{profile_ref}.json")
-    with open(profile_path, "r", encoding="utf-8") as fh:
-        profile = json.load(fh)
+    duplicate_keys = sorted(_PROFILE_OWNED_TEMPLATE_KEYS.intersection(transport_template))
+    if "file_pattern" in (transport_template.get("identification") or {}):
+        duplicate_keys.append("identification.file_pattern")
+    if duplicate_keys:
+        names = ", ".join(duplicate_keys)
+        raise ProfileResolutionError(
+            f"Profile-backed mock template {template_name} duplicates profile-owned fields: {names}"
+        )
+
+    profile = _load_exact_bridge_profile(exact_profile_ref)
+    profile_id = profile["profileMeta"]["id"]
+    revision = profile["catalog"]["revision"]
+    source_label = f"{profile_id}@{revision}"
+
+    protocol_profile = profile.get("protocol")
+    if not isinstance(protocol_profile, dict):
+        raise ProfileResolutionError(
+            f"Analyzer profile {source_label} must declare protocol"
+        )
+    protocol_name = protocol_profile.get("name")
+    if not isinstance(protocol_name, str) or not protocol_name.strip():
+        raise ProfileResolutionError(
+            f"Analyzer profile {source_label} must declare protocol.name"
+        )
 
     seed_values = transport_template.get("seedValues", {})
     # Per-code simulation-fidelity overrides (mock test data, NOT coverage): e.g. a
@@ -99,7 +196,11 @@ def load_profile_backed_template(
             "name": mapping.get("test_name_hint", code),
         }
         if result_type in _QUALITATIVE_TYPES:
-            values = mapping.get("values") or DEFAULT_QUALITATIVE_VALUES
+            values = mapping.get("values")
+            if not isinstance(values, list) or not values:
+                raise ProfileResolutionError(
+                    f"Analyzer profile {source_label} qualitative test {code} must declare result values"
+                )
             field["type"] = "QUALITATIVE"
             field["possibleValues"] = values
             seed_q = seed_values.get(code)
@@ -112,20 +213,36 @@ def load_profile_backed_template(
             field["seedValue"] = seed_values.get(code, 0)
         overrides = field_overrides.get(code)
         if overrides:
+            owned_overrides = _PROFILE_OWNED_FIELD_KEYS.intersection(overrides)
+            if owned_overrides:
+                names = ", ".join(sorted(owned_overrides))
+                raise ProfileResolutionError(
+                    f"Mock override for {source_label} test {code} changes profile-owned fields: {names}"
+                )
             field.update(overrides)
         fields.append(field)
 
     merged: Dict[str, Any] = dict(transport_template)
     merged["fields"] = fields
-    # Fill the analyzer block from the profile if the transport template omitted it.
-    if "analyzer" not in merged:
-        merged["analyzer"] = {
-            "name": profile.get("analyzer_name", template_name),
-            "manufacturer": profile.get("manufacturer", "Unknown"),
-            "category": profile.get("category", "UNKNOWN"),
-        }
+    merged["resolvedProfile"] = {
+        "profileId": profile["profileMeta"]["id"],
+        "revision": profile["catalog"]["revision"],
+        "revisionFingerprint": profile["catalog"]["revisionFingerprint"],
+    }
+    merged["analyzer"] = {
+        "name": _required_profile_text(profile, "analyzer_name", source_label),
+        "model": _required_profile_text(profile, "model", source_label),
+        "manufacturer": _required_profile_text(profile, "manufacturer", source_label),
+        "category": _required_profile_text(profile, "category", source_label),
+    }
+    merged["protocol"] = {"type": protocol_name}
+    protocol_version = protocol_profile.get("version")
+    if isinstance(protocol_version, str) and protocol_version.strip():
+        merged["protocol"]["version"] = protocol_version
+    if protocol_name == "FILE":
+        merged["file_config"] = _profile_file_config(profile)
     logger.info(
         "Profile-backed template '%s' from %s: %d assays",
-        template_name, profile_ref, len(fields),
+        template_name, source_label, len(fields),
     )
     return merged

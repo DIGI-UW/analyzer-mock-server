@@ -14,14 +14,112 @@
     "hl7_sending_app": "MINDRAY",
     "hl7_sending_facility": "BC-5380"
   },
-  "profile": "hl7/mindray-bc5380",
-  "seedValues": {
-    "WBC": 7.5,
-    "HGB": 14.2,
-    "PLT": 250,
-    "LYMPH": 2.1,
-    "MONO": 0.5
-  },
+  "fields": [
+    {
+      "code": "WBC",
+      "name": "White Blood Cells",
+      "loinc": "6690-2",
+      "unit": "10^3/uL",
+      "type": "NUMERIC",
+      "seedValue": 7.5
+    },
+    {
+      "code": "RBC",
+      "name": "Red Blood Cells",
+      "loinc": "789-8",
+      "unit": "10^6/uL",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "HGB",
+      "name": "Hemoglobin",
+      "loinc": "718-7",
+      "unit": "g/dL",
+      "type": "NUMERIC",
+      "seedValue": 14.2
+    },
+    {
+      "code": "HCT",
+      "name": "Hematocrit",
+      "loinc": "4544-3",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "MCV",
+      "name": "Mean Corpuscular Volume",
+      "loinc": "787-2",
+      "unit": "fL",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "MCH",
+      "name": "Mean Corpuscular Hemoglobin",
+      "loinc": "785-6",
+      "unit": "pg",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "MCHC",
+      "name": "Mean Corpuscular Hemoglobin Concentration",
+      "loinc": "786-4",
+      "unit": "g/dL",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "PLT",
+      "name": "Platelet Count",
+      "loinc": "777-3",
+      "unit": "10^3/uL",
+      "type": "NUMERIC",
+      "seedValue": 250
+    },
+    {
+      "code": "NEUT",
+      "name": "Neutrophils",
+      "loinc": "751-8",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "LYMPH",
+      "name": "Lymphocytes",
+      "loinc": "736-9",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 2.1
+    },
+    {
+      "code": "MONO",
+      "name": "Monocytes",
+      "loinc": "742-7",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 0.5
+    },
+    {
+      "code": "EOS",
+      "name": "Eosinophils",
+      "loinc": "711-2",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 0
+    },
+    {
+      "code": "BASO",
+      "name": "Basophils",
+      "loinc": "704-7",
+      "unit": "%",
+      "type": "NUMERIC",
+      "seedValue": 0
+    }
+  ],
   "testPatient": {
     "id": "PAT001",
     "name": "DOE^JOHN",

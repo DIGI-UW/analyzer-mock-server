@@ -80,7 +80,7 @@ class TestScenarioOnlyQcApiContract(unittest.TestCase):
             api, "push_astm_to_destination", return_value=(True, None)
         ) as mock_push:
             status, body = self._post(
-                "/simulate/astm/genexpert_astm",
+                "/simulate/astm/arbitrary_astm_profile",
                 {"qc": True, "qc_deviation": 3.5},
             )
 
@@ -96,7 +96,7 @@ class TestScenarioOnlyQcApiContract(unittest.TestCase):
             api, "push_hl7_to_destination", return_value=(True, None)
         ) as mock_push:
             status, body = self._post(
-                "/simulate/hl7/mindray_bs200",
+                "/simulate/hl7/arbitrary_hl7_profile",
                 {"qc": True, "qc_deviation": 3.5},
             )
 
@@ -123,7 +123,7 @@ class TestScenarioOnlyQcApiContract(unittest.TestCase):
             MockAPIHandler, "_upload_qc_content_to_bridge", autospec=True, side_effect=_fake_upload
         ) as mock_upload:
             status, body = self._post(
-                "/simulate/file/quantstudio5",
+                "/simulate/file/arbitrary_file_profile",
                 {"qc": True, "qc_deviation": 3.0},
             )
 

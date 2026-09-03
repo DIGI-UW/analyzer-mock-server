@@ -2,14 +2,14 @@ name: Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
     inputs:
-      parent_ref:
-        description: 'Parent repo ref for analyzer profiles (branch, tag, or SHA)'
-        default: 'develop'
+      bridge_ref:
+        description: "Bridge ref containing the versioned priority profiles"
+        default: "7a012aaf5eb7f3c6fc99934a9c07dd7fbc57e22f"
         type: string
 
 jobs:
@@ -20,27 +20,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout analyzer profiles from parent repo
+      - name: Checkout versioned priority profiles from Bridge
         uses: actions/checkout@v4
         with:
-          repository: DIGI-UW/OpenELIS-Global-2
-          sparse-checkout: projects/analyzer-profiles
-          path: parent
-          # Default: develop (latest merged profiles).
-          # Override via workflow_dispatch input for linked PRs with profile changes.
-          ref: ${{ inputs.parent_ref || 'develop' }}
+          repository: DIGI-UW/openelis-analyzer-bridge
+          sparse-checkout: contracts/analyzer/v1/fixtures
+          path: bridge
+          ref: ${{ inputs.bridge_ref || '7a012aaf5eb7f3c6fc99934a9c07dd7fbc57e22f' }}
 
       - name: Set profiles path for tests
-        # ANALYZER_PROFILES_DIR is the profiles ROOT; the adapter appends the
-        # protocol subdir (astm/hl7/file) itself. Pointing it at /hl7 made paths
-        # resolve to <dir>/hl7/... and broke profile loading in CI.
-        run: echo "ANALYZER_PROFILES_DIR=${{ github.workspace }}/parent/projects/analyzer-profiles" >> $GITHUB_ENV
+        run: |
+          echo "ANALYZER_BRIDGE_PROFILES_DIR=${{ github.workspace }}/bridge/contracts/analyzer/v1/fixtures" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -60,11 +56,11 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest test_hl7.py test_protocols.py -v --tb=short
+          python -m pytest test_hl7.py test_protocols.py test_priority_profile_templates.py test_bridge_profile_adapter.py test_analyzers_api.py test_analyzer_network_manager.py test_simulate_qc_default_contract_api.py -v --tb=short
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile server.py template_loader.py profile_adapter.py
+          python -m py_compile server.py template_loader.py profile_adapter.py api.py analyzer_network_manager.py
           python -m py_compile protocols/*.py
           python -m py_compile generate_file.py
           echo "All Python files have valid syntax"

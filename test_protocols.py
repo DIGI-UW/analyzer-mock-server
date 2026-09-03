@@ -399,9 +399,9 @@ class TestFileHandler(unittest.TestCase):
     def test_generate_hain_fluorocycler(self):
         t = _load_template("hain_fluorocycler")
         csv = FileHandler().generate(t)
-        self.assertIn("SampleID", csv)
+        self.assertIn("Sample ID", csv)
         self.assertIn("TargetName", csv)
-        self.assertIn("CP", csv)
+        self.assertIn("Calc. Conc.", csv)
         self.assertRegex(csv, r"DEV01\d{15}")
 
     def test_invalid_file_sample_override_fails_loudly(self):
@@ -481,7 +481,7 @@ class TestFileSimulateAPI(unittest.TestCase):
         self._assert_fixture_parses("multiskan_fc")
 
     def test_post_simulate_file_write_target_dir(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
             payload = json.dumps({"target_dir": tmpdir, "filename": "sim.csv"})
             headers = {"Content-Type": "application/json"}
             conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -499,7 +499,7 @@ class TestFileSimulateAPI(unittest.TestCase):
 
     def test_post_simulate_file_sanitizes_path_traversal_filename(self):
         """Path traversal in filename is stripped to basename (safe write)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
             payload = json.dumps({"target_dir": tmpdir, "filename": "../evil.csv"})
             headers = {"Content-Type": "application/json"}
             conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -534,24 +534,24 @@ class TestFileSimulateAPI(unittest.TestCase):
 
 
 class TestProfileAdapterQualitativeLogic(unittest.TestCase):
-    """Hermetic gate for the adapter's result_type→seed mapping.
-
-    Pins the LOGIC against a SYNTHETIC profile (built in a temp dir and pointed at
-    via ANALYZER_PROFILES_DIR) with no dependency on the canonical analyzer-profiles
-    tree. This is the mock-OWNED unit gate that runs in standalone CI regardless of
-    which OE2 ref is present; the REAL GeneXpert profile values are gated by the
-    integrated (OE2-monorepo) harness E2E. Keeps qualitative coverage even when
-    test_qualitative_seed_value skips on an un-enriched profile checkout.
-    """
+    """Hermetic gate for exact Bridge profile result-type seed mapping."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        astm_dir = os.path.join(self._tmp.name, "astm")
-        os.makedirs(astm_dir)
-        with open(os.path.join(astm_dir, "synth.json"), "w") as fh:
+        with open(os.path.join(self._tmp.name, "synth.json"), "w") as fh:
             json.dump(
                 {
+                    "profileMeta": {"id": "synth", "displayName": "Synthetic"},
+                    "analyzer_name": "Synthetic Analyzer",
+                    "manufacturer": "Synthetic Manufacturer",
+                    "model": "Synthetic Model",
+                    "category": "MOLECULAR",
+                    "protocol": {"name": "ASTM", "version": "LIS2-A2"},
+                    "catalog": {
+                        "revision": 1,
+                        "revisionFingerprint": "sha256:synthetic",
+                    },
                     "default_test_mappings": [
                         {
                             "test_code": "QUAL1",
@@ -564,21 +564,24 @@ class TestProfileAdapterQualitativeLogic(unittest.TestCase):
                 },
                 fh,
             )
-        self._prev = os.environ.get("ANALYZER_PROFILES_DIR")
-        os.environ["ANALYZER_PROFILES_DIR"] = self._tmp.name
+        self._prev = os.environ.get("ANALYZER_BRIDGE_PROFILES_DIR")
+        os.environ["ANALYZER_BRIDGE_PROFILES_DIR"] = self._tmp.name
         self.addCleanup(self._restore_env)
 
     def _restore_env(self):
         if self._prev is None:
-            os.environ.pop("ANALYZER_PROFILES_DIR", None)
+            os.environ.pop("ANALYZER_BRIDGE_PROFILES_DIR", None)
         else:
-            os.environ["ANALYZER_PROFILES_DIR"] = self._prev
+            os.environ["ANALYZER_BRIDGE_PROFILES_DIR"] = self._prev
 
     def test_qualitative_seeds_negative_vocab_quantitative_seeds_zero(self):
         from profile_adapter import load_profile_backed_template
 
         merged = load_profile_backed_template(
-            "synth", {"profile": "astm/synth", "protocol": {"type": "ASTM"}}
+            "synth",
+            {
+                "profileRef": {"profileId": "synth", "revision": 1},
+            },
         )
         fields = {f["code"]: f for f in merged["fields"]}
         # qualitative result_type -> QUALITATIVE field seeded to the negative vocab

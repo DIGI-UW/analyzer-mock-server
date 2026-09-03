@@ -4,8 +4,6 @@ Fixture file parser — extracts metadata (accessions, results) from real analyz
 Supports CSV, XLSX (.xlsx via openpyxl), and XLS (.xls via xlrd).
 Used by the mock server to return parsed metadata alongside dropped fixture files,
 so E2E tests never need to hardcode expected values.
-
-Control row filtering uses the same prefixes as the bridge's FileResultParser.
 """
 
 import csv
@@ -16,21 +14,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-CONTROL_PREFIXES = [
-    # Molecular (QuantStudio, FluoroCycler)
-    "CNEG", "CPOS", "NTC", "PTC",
-    # ELISA plate readers (Tecan, Multiskan)
-    "NEG", "POS", "NC", "PC", "BLANC", "BLANK",
-]
-
-
-def _is_control(sample_id: str) -> bool:
-    upper = sample_id.upper().strip()
-    return any(upper.startswith(prefix) for prefix in CONTROL_PREFIXES)
-
-
 def parse_fixture(fixture_path: str, fixture_config: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Parse a fixture file and return patient (non-control) results.
+    """Parse a fixture file and return every analyzer result row.
 
     Args:
         fixture_path: Absolute path to the fixture file.
@@ -91,9 +76,6 @@ def _parse_csv(
 
         if not sample_id or not result_val:
             continue
-        if _is_control(sample_id):
-            continue
-
         entry = {"sampleId": sample_id, "result": result_val}
         if test_col and row.get(test_col):
             entry["testCode"] = row[test_col].strip()
@@ -152,9 +134,6 @@ def _parse_xlsx(path: str, col_map: Dict[str, str]) -> List[Dict[str, str]]:
 
         if not sample_id or not result_val:
             continue
-        if _is_control(sample_id):
-            continue
-
         entry = {"sampleId": sample_id, "result": result_val}
         if "testCode" in col_indices and row[col_indices["testCode"]]:
             entry["testCode"] = str(row[col_indices["testCode"]]).strip()
@@ -208,9 +187,6 @@ def _parse_xls(path: str, col_map: Dict[str, str]) -> List[Dict[str, str]]:
 
         if not sample_id or not result_val:
             continue
-        if _is_control(sample_id):
-            continue
-
         entry = {"sampleId": sample_id, "result": result_val}
         if "testCode" in col_indices:
             val = str(ws.cell_value(row_idx, col_indices["testCode"])).strip()

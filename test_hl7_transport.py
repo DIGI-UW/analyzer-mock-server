@@ -68,6 +68,28 @@ def test_push_hl7_destination_routes_mllp_scheme():
     assert ok is True
 
 
+def test_hl7_destination_rejects_non_mllp_scheme():
+    """HL7 analyzer traffic requires an MLLP destination."""
+    ok, error = push_module.push_hl7_to_destination(
+        "https://example.invalid/results",
+        "MSH|^~\\&|MINDRAY|BS-300|OE|LAB|20260310120000||ORU^R01|CTRL3|P|2.3.1\r",
+    )
+
+    assert ok is False
+    assert error and "mllp://" in error
+
+
+def test_astm_destination_rejects_non_tcp_scheme():
+    """ASTM analyzer traffic requires a TCP destination."""
+    ok, error = push_module.push_astm_to_destination(
+        "https://example.invalid/results",
+        "H|\\^&|||GENEXPERT\rL|1|N\r",
+    )
+
+    assert ok is False
+    assert error and "tcp://" in error
+
+
 # --- source-IP readiness (the analyzer-network attach race) ---------------
 
 def test_wait_source_ip_bindable_local_ip():

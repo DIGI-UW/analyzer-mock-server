@@ -4,16 +4,12 @@ Transport push functions for the analyzer mock server.
 Handles pushing messages to destinations via various protocols:
 - ASTM over TCP (ENQ/ACK framing)
 - HL7 over MLLP (VT/FS framing)
-- HTTP POST to OpenELIS
 """
 
 import logging
 import os
 import socket
-import ssl
 import time
-import urllib.error
-import urllib.request
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -88,10 +84,9 @@ def _wait_source_ip_bindable(source_ip: str,
 
 def push_hl7_to_destination(destination: str, hl7_message: str,
                              source_ip: Optional[str] = None):
-    """Route HL7 push by destination scheme: mllp:// or http(s)://.
+    """Route HL7 analyzer traffic to a Bridge MLLP listener.
 
-    Returns (delivered, error_reason). source_ip is forwarded to push_hl7_mllp;
-    ignored for HTTP destinations.
+    Returns (delivered, error_reason). source_ip is forwarded to push_hl7_mllp.
     """
     if destination.startswith("mllp://"):
         addr = destination[len("mllp://"):]
@@ -103,16 +98,14 @@ def push_hl7_to_destination(destination: str, hl7_message: str,
         except ValueError:
             return False, f"invalid MLLP port: {port_str}"
         return push_hl7_mllp(host, port, hl7_message, source_ip=source_ip)
-    ok = push_hl7_http(destination, hl7_message)
-    return ok, None if ok else f"HTTP push to {destination} failed"
+    return False, f"HL7 result destination must use mllp://host:port: {destination}"
 
 
 def push_astm_to_destination(destination: str, astm_message: str,
                               source_ip: Optional[str] = None):
-    """Route ASTM push by destination scheme: tcp:// or http(s)://.
+    """Route ASTM analyzer traffic to a Bridge TCP listener.
 
-    Returns (delivered, error_reason). source_ip is forwarded to push_astm_tcp;
-    ignored for HTTP destinations.
+    Returns (delivered, error_reason). source_ip is forwarded to push_astm_tcp.
     """
     if destination.startswith("tcp://"):
         addr = destination[len("tcp://"):]
@@ -124,8 +117,7 @@ def push_astm_to_destination(destination: str, astm_message: str,
         except ValueError:
             return False, f"invalid TCP port: {port_str}"
         return push_astm_tcp(host, port, astm_message, source_ip=source_ip)
-    ok = push_astm_http(destination, astm_message)
-    return ok, None if ok else f"HTTP push to {destination} failed"
+    return False, f"ASTM result destination must use tcp://host:port: {destination}"
 
 
 def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
@@ -178,56 +170,6 @@ def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,
                 sock.close()
             except Exception:
                 pass
-
-
-def push_hl7_http(openelis_url: str, hl7_message: str, timeout: int = 30) -> bool:
-    """Push an HL7 ORU^R01 message to OpenELIS via HTTP POST."""
-    if openelis_url.rstrip('/').endswith('/hl7') or '/analyzer/' in openelis_url:
-        endpoint = openelis_url if openelis_url.startswith('http') else f"https://{openelis_url}"
-    else:
-        endpoint = f"{openelis_url.rstrip('/')}/api/OpenELIS-Global/analyzer/hl7"
-    try:
-        logger.info("[PUSH-HL7] Pushing ORU^R01 to %s", endpoint)
-        req = urllib.request.Request(
-            endpoint, data=hl7_message.encode('utf-8'),
-            headers={'Content-Type': 'text/plain; charset=utf-8'}, method='POST')
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as response:
-            if response.getcode() == 200:
-                logger.info("[PUSH-HL7] Push successful")
-                return True
-            logger.error("[PUSH-HL7] Push failed: HTTP %s", response.getcode())
-            return False
-    except Exception as e:
-        logger.error("[PUSH-HL7] Push failed: %s", e, exc_info=True)
-        return False
-
-
-def push_astm_http(openelis_url: str, astm_message: str, timeout: int = 30) -> bool:
-    """Push an ASTM message to OpenELIS via HTTP POST."""
-    endpoint = f"{openelis_url}/api/OpenELIS-Global/analyzer/astm"
-    try:
-        logger.info("[PUSH] Pushing ASTM message to %s", endpoint)
-        req = urllib.request.Request(
-            endpoint, data=astm_message.encode('utf-8'),
-            headers={'Content-Type': 'text/plain; charset=utf-8'}, method='POST')
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as response:
-            if response.getcode() == 200:
-                logger.info("[PUSH] Push successful (HTTP %s)", response.getcode())
-                return True
-            logger.error("[PUSH] Push failed: HTTP %s", response.getcode())
-            return False
-    except urllib.error.HTTPError as e:
-        logger.error("[PUSH] HTTP error %s: %s", e.code, e.reason)
-        return False
-    except Exception as e:
-        logger.error("[PUSH] Push failed: %s", e, exc_info=True)
-        return False
 
 
 def send_astm_session(sock, records: list, session_label: str = "") -> bool:

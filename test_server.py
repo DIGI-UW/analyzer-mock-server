@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-ASTM Mock Server Tests - TDD RED Phase
-
-These tests are written BEFORE the server implementation per Constitution V
-(Test-Driven Development) and testing-roadmap.md.
-
-Reference Documents:
-- specs/004-astm-analyzer-mapping/research.md Section 1 (ASTM Protocol)
-- specs/004-astm-analyzer-mapping/spec.md FR-001, FR-002
+"""Self-contained ASTM listener and protocol behavior tests.
 
 ASTM LIS2-A2 Control Characters:
 - ENQ (0x05): Enquiry - Start of transmission
@@ -20,17 +12,19 @@ ASTM LIS2-A2 Control Characters:
 - CR (0x0D): Carriage Return (record separator)
 - LF (0x0A): Line Feed
 
-Run tests: python -m pytest test_server.py -v
-Or: python test_server.py (runs unittest)
+The module starts its own template-driven listener on an ephemeral port. Tests
+never depend on a developer process already listening on port 5000.
 """
 
 import unittest
 import socket
 import threading
 import time
-import json
 import os
 import sys
+from unittest.mock import patch
+
+import server
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,9 +41,44 @@ CR = b'\x0D'
 LF = b'\x0A'
 
 # Test configuration
-TEST_HOST = 'localhost'
-TEST_PORT = 5000
+TEST_HOST = '127.0.0.1'
+TEST_PORT = 0
 CONNECTION_TIMEOUT = 5  # seconds
+_TEST_SERVER = None
+_TEST_SERVER_THREAD = None
+
+
+def setUpModule():
+    global TEST_PORT, _TEST_SERVER, _TEST_SERVER_THREAD
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind((TEST_HOST, 0))
+    TEST_PORT = probe.getsockname()[1]
+    probe.close()
+
+    _TEST_SERVER = server.ASTMMockServer(
+        port=TEST_PORT,
+        response_delay_ms=0,
+        port_to_template={TEST_PORT: "horiba_pentra60"},
+    )
+    _TEST_SERVER_THREAD = threading.Thread(target=_TEST_SERVER.start, daemon=True)
+    _TEST_SERVER_THREAD.start()
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((TEST_HOST, TEST_PORT), timeout=0.1):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError("Self-contained ASTM test listener did not start")
+
+
+def tearDownModule():
+    if _TEST_SERVER:
+        _TEST_SERVER.stop()
+    if _TEST_SERVER_THREAD:
+        _TEST_SERVER_THREAD.join(timeout=3)
 
 
 class TestASTMServerConnection(unittest.TestCase):
@@ -61,12 +90,10 @@ class TestASTMServerConnection(unittest.TestCase):
     
     @classmethod
     def setUpClass(cls):
-        """Check if server is running before tests."""
+        """Verify the module-owned listener is running."""
         cls.server_available = cls._check_server_available()
         if not cls.server_available:
-            print(f"\nWARNING: ASTM mock server not running on {TEST_HOST}:{TEST_PORT}")
-            print("Start the server first: python server.py")
-            print("Tests will be skipped.\n")
+            raise RuntimeError("Self-contained ASTM test listener is unavailable")
     
     @classmethod
     def _check_server_available(cls):
@@ -79,11 +106,6 @@ class TestASTMServerConnection(unittest.TestCase):
             return result == 0
         except Exception:
             return False
-    
-    def setUp(self):
-        """Skip tests if server not available."""
-        if not self.server_available:
-            self.skipTest("ASTM mock server not running")
     
     def _create_socket(self):
         """Create a socket with timeout."""
@@ -405,30 +427,23 @@ class TestASTMServerConfiguration(unittest.TestCase):
     """
     
     def test_default_port_is_5000(self):
-        """Server should default to port 5000."""
-        # This is a configuration test - validates expected defaults
-        expected_port = 5000
-        self.assertEqual(TEST_PORT, expected_port)
+        """The command-line listener default remains port 5000."""
+        self.assertEqual(server.DEFAULT_PORT, 5000)
     
-    def test_fields_config_file_format(self):
-        """
-        fields.json MUST have valid format with required properties.
-        """
-        config_path = os.path.join(os.path.dirname(__file__), 'fields.json')
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            
-            # Should have at least one analyzer type
-            self.assertTrue(len(config) > 0, "Config should have analyzer types")
-            
-            # Each analyzer type should have fields
-            for analyzer_type, fields in config.items():
-                self.assertIsInstance(fields, list, 
-                    f"{analyzer_type} should have list of fields")
-                for field in fields:
-                    self.assertIn('name', field, "Field must have name")
-                    self.assertIn('type', field, "Field must have type")
+    def test_server_requires_template_configuration(self):
+        with patch.object(server, "_load_port_templates", return_value={}), patch.dict(
+            os.environ, {}, clear=True
+        ):
+            with self.assertRaisesRegex(ValueError, "template"):
+                server.ASTMMockServer(port=0)
+
+    def test_server_rejects_unresolvable_port_template(self):
+        with patch.object(server, "_load_template", return_value=None):
+            with self.assertRaisesRegex(ValueError, "missing-template"):
+                server.ASTMMockServer(
+                    port=0,
+                    port_to_template={5000: "missing-template"},
+                )
 
 
 class TestASTMServerTimeout(unittest.TestCase):
@@ -648,8 +663,7 @@ class TestASTMStandardsCompliance(unittest.TestCase):
     
     def test_frame_number_wraps_correctly(self):
         """
-        Server MUST handle frame number wrapping correctly (1-7, then wraps to 1).
-        Per CLSI LIS1-A: frame numbers are 1-7, then wrap to 1.
+        Server MUST handle the modulo-8 frame sequence correctly.
         """
         sock = self._create_socket()
         try:
@@ -662,9 +676,10 @@ class TestASTMStandardsCompliance(unittest.TestCase):
                 response = self._send_frame(sock, frame_num, f"H|\\^&|||Test^Frame{frame_num}^1.0|||||||LIS2-A2")
                 self.assertEqual(response, ACK, f"Frame {frame_num} should be accepted")
             
-            # After frame 7, next frame should be 1 (wraps)
+            response = self._send_frame(sock, 0, "H|\\^&|||Test^Frame0^1.0|||||||LIS2-A2")
+            self.assertEqual(response, ACK, "Frame 0 after frame 7 should be accepted")
             response = self._send_frame(sock, 1, "H|\\^&|||Test^Frame1^1.0|||||||LIS2-A2")
-            self.assertEqual(response, ACK, "Frame 1 after frame 7 should be accepted (wrapped)")
+            self.assertEqual(response, ACK, "Frame 1 after frame 0 should be accepted")
         finally:
             sock.close()
 
@@ -679,5 +694,3 @@ if __name__ == '__main__':
     
     # Run tests
     unittest.main(verbosity=2)
-
-

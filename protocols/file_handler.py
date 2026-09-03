@@ -181,8 +181,8 @@ class FileHandler(BaseHandler):
 
         Each qc_controls entry produces one row. The sample-name pattern
         defaults to ``QC-{lot}-{level}`` but can be overridden per template
-        via ``qc_sample_id_pattern`` so the generated samples align with the
-        analyzer's OE-side qcRules:
+        via ``qc_sample_id_pattern`` so the generated rows match the analyzer
+        traffic represented by the fixture:
 
             - QuantStudio profile uses ``SPECIMEN_ID_PREFIX LPC|HPC|...`` →
               pattern should put ``{level}`` first (e.g. ``"{level}-{lot}"``)

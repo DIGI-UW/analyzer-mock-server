@@ -19,6 +19,7 @@ fail the assertion — and the contrast test proves exactly that.
 
 import http.client
 import json
+import sys
 import threading
 import unittest
 from http.server import HTTPServer
@@ -44,6 +45,10 @@ class _FakeManager:
         return self._mapping.get(name)
 
 
+@unittest.skipIf(
+    sys.platform == "darwin",
+    "requires Linux loopback aliases; covered by the Docker cross-process harness",
+)
 class TestSimulateSourcesFromProvisionedIp(unittest.TestCase):
 
     @classmethod
@@ -65,7 +70,7 @@ class TestSimulateSourcesFromProvisionedIp(unittest.TestCase):
         # the template (message/sender shape) and the source IP.
         mgr = _FakeManager({
             "demo-bs200": {"template": "mindray_bs200", "ip": ANALYZER_IFACE_IP},
-            "demo-genexpert": {"template": "genexpert_astm", "ip": ANALYZER_IFACE_IP},
+            "demo-astm": {"template": "horiba_pentra60", "ip": ANALYZER_IFACE_IP},
         })
         p = patch.object(MockAPIHandler, "_get_network_manager",
                          classmethod(lambda cls: mgr))
@@ -102,7 +107,7 @@ class TestSimulateSourcesFromProvisionedIp(unittest.TestCase):
         capture = _AstmCaptureServer()
         try:
             status, body = self._post(
-                "/simulate/astm/demo-genexpert",
+                "/simulate/astm/demo-astm",
                 {"destination": f"tcp://127.0.0.1:{capture.port}"},
             )
             capture.wait(10)

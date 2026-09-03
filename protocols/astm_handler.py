@@ -80,6 +80,48 @@ def _normalize_fields_from_template(template: Dict[str, Any]) -> List[Dict[str, 
     return out
 
 
+def _select_result_scenario(
+    fields: List[Dict[str, Any]], results: Optional[List[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """Build one requested analyzer run without changing the profile-backed template."""
+    if results is None:
+        return fields
+    if not isinstance(results, list) or not results:
+        raise ValueError("results must be a non-empty list")
+
+    fields_by_code = {field.get("code"): field for field in fields}
+    selected = []
+    for result in results:
+        if not isinstance(result, dict):
+            raise ValueError("each result must be an object")
+        code = str(result.get("test_code") or "").strip()
+        if not code:
+            raise ValueError("each result requires test_code")
+        if "value" not in result or result["value"] is None:
+            raise ValueError(f"result {code} requires value")
+
+        field = dict(fields_by_code.get(code) or {
+            "name": code,
+            "code": code,
+            "displayName": "Unexpected analyzer result",
+            "astmRef": f"^^^{code}",
+            "type": result.get("type", "QUALITATIVE"),
+            "unit": result.get("unit", ""),
+            "normalRange": "",
+            "possibleValues": [],
+            "complementaryResults": [],
+        })
+        value = result["value"]
+        if field.get("type") == "NUMERIC":
+            field["seedValue"] = value
+        else:
+            field["type"] = "QUALITATIVE"
+            field["possibleValues"] = [str(value)]
+            field["seedQualitative"] = str(value)
+        selected.append(field)
+    return selected
+
+
 def _generate_value(field: Dict[str, Any], use_seed: bool = False) -> Any:
     """Generate a result value for a field based on its type."""
     typ = field.get("type", "NUMERIC")
@@ -116,8 +158,8 @@ def _generate_value(field: Dict[str, Any], use_seed: bool = False) -> Any:
 def _build_test_id(field: Dict[str, Any], has_astm_config: bool) -> str:
     """Build the R.3 Universal Test ID field.
 
-    Without astm_config (legacy): ^^^CODE or ^^^CODE^DisplayName
-    With astm_config (GeneXpert-style): 8-component ^^^CODE^Name^Version^^
+    Compact form: ^^^CODE or ^^^CODE^DisplayName
+    Extended form: 8-component ^^^CODE^Name^Version^^
       where component 8 is empty for main results, filled by
       _build_complementary_test_id for sub-results (e.g., Conc/LOG).
     """
@@ -175,7 +217,7 @@ def _build_astm_message(
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
     if not sample_id:
-        # Legacy generate_astm_message() and similar call paths omit sample_id; mint a valid accession.
+        # Mint a valid accession when the caller does not supply one.
         sample_id = _next_astm_sample_id("00", now)
     sample_id = validate_accession(sample_id, "ASTM sample_id")
     if not patient_name:
@@ -338,6 +380,7 @@ def _build_qc_astm_message(
     qc_controls: Dict[str, Dict[str, Any]],
     deviation: Optional[float] = None,
     category: str = "",
+    has_astm_config: bool = False,
 ) -> str:
     """Build an ASTM QC message with Q segments per LIS2-A2.
 
@@ -409,7 +452,8 @@ def _build_qc_astm_message(
         if isinstance(value, (int, float)) and value < 0:
             value = 0.0
 
-        segments.append(f"R|{seq}|^^^{code}|{value}|{unit}|{normal_range}|N||F|{timestamp}")
+        test_id = _build_test_id(field, has_astm_config)
+        segments.append(f"R|{seq}|{test_id}|{value}|{unit}|{normal_range}|N||F|{timestamp}")
         segments.append(f"Q|{seq}|{code}^{lot}^{level}|{value}|{unit}|{timestamp}")
         seq += 1
 
@@ -421,7 +465,7 @@ def _build_qc_astm_message(
 
 
 class ASTMHandler(BaseHandler):
-    """ASTM LIS2-A2 message generation. Supports template and legacy fields.json."""
+    """ASTM LIS2-A2 message generation from an analyzer template."""
 
     protocol_type = "ASTM"
 
@@ -441,7 +485,9 @@ class ASTMHandler(BaseHandler):
             if not name:
                 name = anal.get("name", "MockAnalyzer")
 
-        fields = _normalize_fields_from_template(template)
+        fields = _select_result_scenario(
+            _normalize_fields_from_template(template), kwargs.get("results")
+        )
 
         # Determine if we should use seed values for deterministic output
         use_seed = kwargs.get("use_seed", False)
@@ -522,47 +568,5 @@ class ASTMHandler(BaseHandler):
             qc_controls=qc_controls,
             deviation=kwargs.get("deviation"),
             category=anal.get("category", ""),
+            has_astm_config=bool(template.get("astm_config")),
         )
-
-
-def generate_astm_message(
-    analyzer_type: str,
-    fields_config: Dict[str, List[Dict[str, Any]]],
-    patient_id: Optional[str] = None,
-    sample_id: Optional[str] = None,
-    patient_name: Optional[str] = None,
-    patient_dob: Optional[str] = None,
-    patient_sex: Optional[str] = None,
-) -> str:
-    """
-    Legacy entry point: generate ASTM from analyzer_type + fields_config (fields.json).
-
-    Preserves backward compatibility with existing push/API mode.
-    """
-    fields = fields_config.get(analyzer_type, [])
-    if not fields and fields_config:
-        analyzer_type = next(iter(fields_config))
-        fields = fields_config[analyzer_type]
-        logger.warning("No fields for analyzer type, using %s", analyzer_type)
-    if not fields:
-        logger.error("No fields configuration available")
-        return ""
-
-    names = {
-        "HEMATOLOGY": "Sysmex^XN-1000^V1.0",
-        "CHEMISTRY": "Beckman^AU5800^V2.1",
-        "IMMUNOLOGY": "Roche^Cobas^V1.5",
-        "MICROBIOLOGY": "BD^Phoenix^V2.0",
-    }
-    analyzer_name = names.get(analyzer_type, f"MockAnalyzer^{analyzer_type}^1.0")
-    panel = "CBC" if analyzer_type == "HEMATOLOGY" else "CHEM" if analyzer_type == "CHEMISTRY" else analyzer_type
-    return _build_astm_message(
-        analyzer_name=analyzer_name,
-        fields=fields,
-        panel_name=panel,
-        patient_id=patient_id,
-        sample_id=sample_id,
-        patient_name=patient_name,
-        patient_dob=patient_dob,
-        patient_sex=patient_sex,
-    )

@@ -10,7 +10,8 @@
     "transport": "TCP"
   },
   "identification": {
-    "msh_sender": "SYSMEX",
+    "hl7_sending_app": "SYSMEX",
+    "hl7_sending_facility": "LAB",
     "ip_pattern": "192.168.1.*"
   },
   "fields": [

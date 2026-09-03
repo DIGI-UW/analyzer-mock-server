@@ -5,9 +5,8 @@ When the bridge sends an LIS-initiated ASTM order, the mock parses the
 sample_id + test_code, then pushes a matching result via a fresh TCP
 connection to the bridge's ASTM listener (mirror of the HL7 path that opens
 a fresh MLLP connection to bridge:2575). The originating sample_id is echoed
-verbatim in the response O-record (ASTM field 3) so OpenELIS's existing
-accession-keyed inbound result import correlates back to the originating
-sample.
+verbatim in the response O-record (ASTM field 3) so the normalized result
+retains the originating sample correlation.
 """
 
 import os
@@ -44,7 +43,6 @@ def _make_handler(template=None):
     handler = server.ASTMProtocolHandler(
         conn=conn,
         addr=('127.0.0.1', 12345),
-        fields_config={},
         response_delay_ms=0,
         astm_template=template if template is not None else GENEXPERT_TEMPLATE,
     )
@@ -78,6 +76,17 @@ class TestProcessOrderRecord(unittest.TestCase):
 
 
 class TestSendOrderResponse(unittest.TestCase):
+
+    def test_does_not_invent_bridge_destination(self):
+        handler, _ = _make_handler()
+        with patch('push.push_astm_tcp') as mock_push, patch.dict(
+            os.environ, {}, clear=True
+        ):
+            handler.send_order_response([
+                {'sample_id': 'ACC-12345', 'test_code': 'MTB-RIF'},
+            ])
+
+        mock_push.assert_not_called()
 
     def test_pushes_via_fresh_connection_to_bridge_listener(self):
         """Mock pushes ASTM result via push_astm_tcp to the configured destination
@@ -156,16 +165,6 @@ class TestSendOrderResponse(unittest.TestCase):
         unknown_record = [r for r in message.split('\n') if '^^^UNKNOWN' in r][0]
         self.assertTrue(unknown_record.rstrip().endswith('X'),
                         f"unknown-code R-record must carry error status X; got: {unknown_record!r}")
-
-    def test_no_template_aborts_without_pushing(self):
-        handler, _ = _make_handler(template=False)  # explicit no template
-        # Force template to None (False is falsy but not exactly None — explicit set)
-        handler.astm_template = None
-        with patch('push.push_astm_tcp', return_value=(True, None)) as mock_push:
-            handler.send_order_response([
-                {'sample_id': 'ACC-1', 'test_code': 'MTB-RIF'},
-            ])
-        mock_push.assert_not_called()
 
     def test_skip_push_when_host_empty(self):
         handler, _ = _make_handler()

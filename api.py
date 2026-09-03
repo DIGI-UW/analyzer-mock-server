@@ -38,38 +38,6 @@ CREATE_MAX_RETRIES = 3
 CREATE_RETRY_BACKOFF_S = 0.4
 
 
-def _default_qc_astm_route() -> Dict[str, str]:
-    return {
-        "destination": os.environ.get(
-            "QC_DEFAULT_ASTM_DESTINATION",
-            "tcp://openelis-analyzer-bridge:12001",
-        ),
-        "source_ip": os.environ.get("QC_DEFAULT_ASTM_SOURCE_IP", "10.42.20.10"),
-    }
-
-
-def _default_qc_hl7_route() -> Dict[str, str]:
-    return {
-        "destination": os.environ.get(
-            "QC_DEFAULT_HL7_DESTINATION",
-            "mllp://openelis-analyzer-bridge:2575",
-        ),
-        "source_ip": os.environ.get("QC_DEFAULT_HL7_SOURCE_IP", "10.42.22.10"),
-    }
-
-
-def _default_qc_file_bridge_upload(template: Dict) -> Dict[str, str]:
-    default_test_code = os.environ.get("QC_DEFAULT_FILE_TEST_CODE")
-    if not default_test_code:
-        controls = template.get("qc_controls") or []
-        if controls:
-            default_test_code = controls[0].get("field_code")
-    bridge_upload = {}
-    if default_test_code:
-        bridge_upload["test_code"] = default_test_code
-    return bridge_upload
-
-
 def _load_template(analyzer: str) -> Optional[Dict]:
     """Load a template and resolve any declared profile before returning it."""
     base = os.path.dirname(os.path.abspath(__file__))
@@ -207,9 +175,9 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, source_ip, qc, qc_deviation)",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
-                    "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, bridge_upload, filename, qc, qc_deviation)",
+                    "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
                     "POST /analyzers": "Create mock analyzer with unique network+IP",
                     "DELETE /analyzers/{name}": "Remove mock analyzer",
@@ -266,6 +234,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "Invalid JSON body"})
                 return
             params = body or {}
+            if not params.get("destination"):
+                self._send_json(400, {
+                    "error": "destination is required for the saved Bridge MLLP listener"
+                })
+                return
             kwargs = {
                 "patient_id": params.get("patientId") or params.get("patient_id"),
                 "sample_id": params.get("sampleId") or params.get("sample_id"),
@@ -341,10 +314,6 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
-            if qc_mode and not destination:
-                defaults = _default_qc_hl7_route()
-                destination = defaults.get("destination")
-                source_ip = source_ip or defaults.get("source_ip")
 
             gen_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("patient_id", "sample_id", "tests") and v is not None}
@@ -441,18 +410,21 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         params = body or {}
         count = min(max(int(params.get("count", 1)), 1), 100)
         destination = params.get("destination")
+        if not destination:
+            self._send_json(400, {
+                "error": "destination is required for the saved Bridge ASTM listener"
+            })
+            return
         # The provisioned instance owns the source IP (see _handle_hl7).
         source_ip = params.get("source_ip") or instance_ip
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
-        if qc_mode and not destination:
-            defaults = _default_qc_astm_route()
-            destination = defaults.get("destination")
-            source_ip = source_ip or defaults.get("source_ip")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
             gen_kwargs["sample_id"] = params["sample_id"]
+        if "results" in params:
+            gen_kwargs["results"] = params["results"]
 
         results = []
         success_count = 0
@@ -539,13 +511,16 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         params = body or {}
         target_dir = params.get("target_dir")
+        if not target_dir:
+            self._send_json(400, {
+                "error": "target_dir is required for the Bridge-owned FILE watch directory"
+            })
+            return
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
 
-        # QC mode: generate a synthetic CSV from template.qc_controls and either
-        # upload to the bridge (if bridge_upload set) or return content / write
-        # to target_dir. Bypasses the fixture path because QC generation is
-        # deterministic and parameterized by qc_deviation, not by a pre-baked file.
+        # QC mode generates a deterministic file in the Bridge-owned watch
+        # directory rather than bypassing the analyzer FILE transport.
         if qc_mode:
             try:
                 qc_kwargs = {}
@@ -560,35 +535,17 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
                 return
 
-            # Explicit None check — an empty dict {} from the client means
-            # "do not upload"; only fall through to defaults when the field
-            # is omitted entirely.
-            bridge_upload = params.get("bridge_upload")
-            if bridge_upload is None:
-                bridge_upload = _default_qc_file_bridge_upload(template)
-            if bridge_upload:
-                try:
-                    self._upload_qc_content_to_bridge(
-                        template_name, template, content, bridge_upload, qc_deviation
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.exception("Bridge QC upload failed for %s", template_name)
-                    self._send_json(502, {"error": f"Bridge upload failed: {e}"})
+            if not _is_allowed_file_output_dir(target_dir):
+                self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
                 return
-
-            written_path = None
-            if target_dir:
-                if not _is_allowed_file_output_dir(target_dir):
-                    self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
-                    return
-                resolved_dir = os.path.realpath(target_dir)
-                os.makedirs(resolved_dir, exist_ok=True)
-                ext = FileHandler.qc_extension(template)
-                fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}{ext}"
-                out_path = os.path.join(resolved_dir, os.path.basename(fname))
-                with open(out_path, "wb") as f:
-                    f.write(content)
-                written_path = out_path
+            resolved_dir = os.path.realpath(target_dir)
+            os.makedirs(resolved_dir, exist_ok=True)
+            ext = FileHandler.qc_extension(template)
+            fname = params.get("filename") or f"qc-{template_name}-{uuid.uuid4().hex[:8]}{ext}"
+            out_path = os.path.join(resolved_dir, os.path.basename(fname))
+            with open(out_path, "wb") as f:
+                f.write(content)
+            written_path = out_path
             qc_format = FileHandler.qc_format(template)
             response = {
                 "status": "completed",
@@ -614,7 +571,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 logger.exception("Fixture FILE POST failed for %s", template_name)
                 self._send_json(500, {"error": str(e)})
         else:
-            # Fallback: synthetic generation (legacy templates without fixture section)
+            # Templates without a captured fixture generate deterministic output.
             try:
                 content = FileHandler().generate(template)
                 written_path = None
@@ -639,21 +596,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
 
     def _handle_fixture_file_post(self, template_name, template, fixture_cfg, target_dir, params):
-        """Deliver a fixture file.
-
-        Two delivery modes:
-
-        1. Bridge upload (production-parity): set ``bridge_upload.analyzer_id``
-           in the request body. The mock POSTs the fixture multipart to the
-           bridge's ``/admin/upload`` — identical to what a Madagascar lab tech
-           does via the bridge admin UI. When the file has no per-row test
-           code column, pass ``bridge_upload.test_code`` to declare it
-           (same UI field the tech fills in).
-
-        2. Watched-directory drop (legacy): set ``target_dir`` to a path
-           under ``/data/analyzer-imports``. Mock copies the fixture verbatim.
-           Preserved for tests that exercise the FileWatcher path directly.
-        """
+        """Copy a real analyzer fixture into the Bridge-owned watch directory."""
         fixture_rel = fixture_cfg["file"]
         fixture_path = os.path.join(os.path.dirname(__file__), fixture_rel)
         if not os.path.isfile(fixture_path):
@@ -663,39 +606,24 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         # Parse metadata from the fixture
         metadata_results = parse_fixture(fixture_path, fixture_cfg)
 
-        # --- Mode 1: upload via bridge (production-parity) ---
-        bridge_upload = params.get("bridge_upload")
-        if bridge_upload:
-            return self._upload_fixture_to_bridge(
-                template_name, template, fixture_cfg, fixture_path, fixture_rel,
-                metadata_results, bridge_upload,
-            )
+        if not _is_allowed_file_output_dir(target_dir):
+            self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
+            return
+        resolved_dir = os.path.realpath(target_dir)
+        os.makedirs(resolved_dir, exist_ok=True)
+        ext = os.path.splitext(fixture_path)[1]
+        filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
+        out_path = os.path.join(resolved_dir, os.path.basename(filename))
 
-        # --- Mode 2: watched-directory drop (legacy) ---
-        written_path = None
-        if target_dir:
-            # Validate target_dir: resolve to real path to prevent path traversal.
-            # Only allow output under /data/analyzer-imports (Docker) or /tmp (tests).
-            if not _is_allowed_file_output_dir(target_dir):
-                self._send_json(400, {"error": f"target_dir must be under {list(FILE_OUTPUT_ROOTS)}"})
-                return
-            resolved_dir = os.path.realpath(target_dir)
-            os.makedirs(resolved_dir, exist_ok=True)
-            ext = os.path.splitext(fixture_path)[1]
-            filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
-            out_path = os.path.join(resolved_dir, os.path.basename(filename))
+        shutil.copy2(fixture_path, out_path)
 
-            # Copy the real file (preserving binary format for .xls/.xlsx)
-            shutil.copy2(fixture_path, out_path)
+        # Prevent Bridge hash deduplication from hiding repeated text fixtures.
+        if ext.lower() in ('.csv', '.tsv', '.txt'):
+            with open(out_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{int(time.time() * 1000)}")
 
-            # Append unique timestamp to prevent bridge hash-based dedup across test runs
-            if ext.lower() in ('.csv', '.tsv', '.txt'):
-                import time
-                with open(out_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n{int(time.time() * 1000)}")
-
-            written_path = out_path
-            logger.info("Dropped fixture %s to %s (%d results)", fixture_rel, out_path, len(metadata_results))
+        written_path = out_path
+        logger.info("Dropped fixture %s to %s (%d results)", fixture_rel, out_path, len(metadata_results))
 
         self._send_json(200, {
             "status": "completed",
@@ -709,290 +637,6 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             },
         })
 
-    def _resolve_analyzer_id_from_name(self, name, oe_url, oe_user, oe_pass):
-        """Query OE for an analyzer ID by name. Returns the id (str) or None.
-
-        Used by the bridge-upload helpers so callers (Postman, scripts) can
-        reference analyzers by stable NAME instead of by id, which churns on
-        every harness re-seed.
-        """
-        if not name:
-            return None
-        import urllib.request, urllib.error, ssl, base64, json as _json
-        url = oe_url.rstrip("/") + "/api/OpenELIS-Global/rest/analyzer/analyzers"
-        req = urllib.request.Request(url, method="GET")
-        auth = base64.b64encode(f"{oe_user}:{oe_pass}".encode()).decode()
-        req.add_header("Authorization", f"Basic {auth}")
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                payload = _json.loads(resp.read().decode("utf-8"))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to resolve analyzer by name '%s' from %s: %s", name, url, e)
-            return None
-        # OE returns either a bare list or {"analyzers": [...]}; handle both.
-        analyzers = payload.get("analyzers") if isinstance(payload, dict) else payload
-        for a in analyzers if isinstance(analyzers, list) else []:
-            if a.get("name") == name:
-                return str(a.get("id"))
-        logger.warning("No analyzer found with name '%s' in OE registry", name)
-        return None
-
-    def _upload_fixture_to_bridge(
-        self, template_name, template, fixture_cfg, fixture_path, fixture_rel,
-        metadata_results, bridge_upload,
-    ):
-        """POST the fixture to the bridge's /admin/upload endpoint.
-
-        Production-parity simulation: replays what a lab tech does in the
-        bridge admin upload UI — select analyzer, optionally declare test
-        code, upload file. The bridge's FileUploadController handles the
-        rest (including FileNameSelfDeclarationScanner for files whose
-        test code isn't declared explicitly).
-
-        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
-        mock resolves the ID by querying OE for the analyzer matching
-        `template.analyzer.name`. This lets Postman + scripts reference the
-        analyzer by stable NAME instead of churning ID.
-        """
-        analyzer_id = bridge_upload.get("analyzer_id")
-        oe_url = (bridge_upload.get("oe_url")
-                  or os.environ.get("OE_URL")
-                  or "https://oe.openelis.org:8443")
-        oe_user = (bridge_upload.get("oe_user")
-                   or os.environ.get("OE_USER")
-                   or "admin")
-        oe_pass = (bridge_upload.get("oe_pass")
-                   or os.environ.get("OE_PASS")
-                   or "adminADMIN!")
-        if not analyzer_id:
-            analyzer_name = template.get("analyzer", {}).get("name") or template_name
-            analyzer_id = self._resolve_analyzer_id_from_name(
-                analyzer_name, oe_url, oe_user, oe_pass
-            )
-            if not analyzer_id:
-                self._send_json(400, {
-                    "error": (
-                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
-                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
-                        "analyzer is registered in OE."
-                    )
-                })
-                return
-        test_code = bridge_upload.get("test_code")
-        bridge_url = (bridge_upload.get("bridge_url")
-                      or os.environ.get("BRIDGE_URL")
-                      or "https://openelis-analyzer-bridge:8443")
-        bridge_user = (bridge_upload.get("bridge_user")
-                       or os.environ.get("BRIDGE_USER")
-                       or "bridge")
-        bridge_pass = (bridge_upload.get("bridge_pass")
-                       or os.environ.get("BRIDGE_PASS")
-                       or "changeme")
-
-        # Build multipart request. stdlib doesn't ship multipart encoder,
-        # so build the body manually — this matches what curl --form does.
-        import urllib.request, urllib.error, ssl, uuid as _uuid
-        boundary = f"----mock-server-{_uuid.uuid4().hex}"
-        with open(fixture_path, "rb") as f:
-            file_bytes = f.read()
-        ext = os.path.splitext(fixture_path)[1]
-        upload_filename = f"{template_name}-{_uuid.uuid4().hex[:8]}{ext}"
-
-        parts = []
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(b'Content-Disposition: form-data; name="analyzerId"\r\n\r\n')
-        parts.append(str(analyzer_id).encode() + b"\r\n")
-        if test_code:
-            parts.append(f"--{boundary}\r\n".encode())
-            parts.append(b'Content-Disposition: form-data; name="testCode"\r\n\r\n')
-            parts.append(test_code.encode() + b"\r\n")
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(
-            f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
-            f"Content-Type: application/octet-stream\r\n\r\n".encode()
-        )
-        parts.append(file_bytes)
-        parts.append(b"\r\n")
-        parts.append(f"--{boundary}--\r\n".encode())
-        body = b"".join(parts)
-
-        upload_url = bridge_url.rstrip("/") + "/admin/upload"
-        req = urllib.request.Request(upload_url, data=body, method="POST")
-        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-        req.add_header("Content-Length", str(len(body)))
-        import base64
-        auth = base64.b64encode(f"{bridge_user}:{bridge_pass}".encode()).decode()
-        req.add_header("Authorization", f"Basic {auth}")
-
-        # Bridge uses a self-signed cert in dev/test — accept it.
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
-                resp_body = resp.read().decode("utf-8", errors="replace")
-                resp_status = resp.status
-        except urllib.error.HTTPError as e:
-            resp_body = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
-            resp_status = e.code
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Bridge upload failed for %s", template_name)
-            self._send_json(502, {"error": f"Bridge upload failed: {e}"})
-            return
-
-        logger.info(
-            "Uploaded fixture %s to bridge %s (analyzer %s, testCode=%s) — status %d",
-            fixture_rel, bridge_url, analyzer_id, test_code, resp_status,
-        )
-
-        if not 200 <= resp_status < 300:
-            self._send_json(502, {
-                "error": "Bridge rejected fixture upload",
-                "bridge_status": resp_status,
-                "bridge_response_preview": resp_body[:500],
-            })
-            return
-
-        self._send_json(200, {
-            "status": "uploaded",
-            "template": template_name,
-            "bridge_status": resp_status,
-            "bridge_response_preview": resp_body[:500],
-            "upload_filename": upload_filename,
-            "metadata": {
-                "analyzerName": template.get("analyzer", {}).get("name", template_name),
-                "format": fixture_cfg.get("format", "CSV"),
-                "fixture": fixture_rel,
-                "results": metadata_results,
-            },
-        })
-
-    def _upload_qc_content_to_bridge(
-        self, template_name, template, content, bridge_upload, qc_deviation,
-    ):
-        """Upload mock-generated QC CSV content to the bridge's /admin/upload.
-
-        Same multipart-upload shape as _upload_fixture_to_bridge; differs only in
-        that the file body is generated in-memory (no fixture file on disk).
-
-        Caller may pass analyzer_id explicitly OR omit it — when omitted, the
-        mock resolves the ID by querying OE for the analyzer matching
-        `template.analyzer.name`.
-        """
-        analyzer_id = bridge_upload.get("analyzer_id")
-        oe_url = (bridge_upload.get("oe_url")
-                  or os.environ.get("OE_URL")
-                  or "https://oe.openelis.org:8443")
-        oe_user = (bridge_upload.get("oe_user")
-                   or os.environ.get("OE_USER")
-                   or "admin")
-        oe_pass = (bridge_upload.get("oe_pass")
-                   or os.environ.get("OE_PASS")
-                   or "adminADMIN!")
-        if not analyzer_id:
-            analyzer_name = template.get("analyzer", {}).get("name") or template_name
-            analyzer_id = self._resolve_analyzer_id_from_name(
-                analyzer_name, oe_url, oe_user, oe_pass
-            )
-            if not analyzer_id:
-                self._send_json(400, {
-                    "error": (
-                        f"Could not resolve analyzer_id from name '{analyzer_name}'. "
-                        "Pass bridge_upload.analyzer_id explicitly, or ensure the "
-                        "analyzer is registered in OE."
-                    )
-                })
-                return
-        test_code = bridge_upload.get("test_code")
-        bridge_url = (bridge_upload.get("bridge_url")
-                      or os.environ.get("BRIDGE_URL")
-                      or "https://openelis-analyzer-bridge:8443")
-        bridge_user = (bridge_upload.get("bridge_user")
-                       or os.environ.get("BRIDGE_USER")
-                       or "bridge")
-        bridge_pass = (bridge_upload.get("bridge_pass")
-                       or os.environ.get("BRIDGE_PASS")
-                       or "changeme")
-
-        import urllib.request, urllib.error, ssl, uuid as _uuid, base64
-        boundary = f"----mock-server-qc-{_uuid.uuid4().hex}"
-        ext = FileHandler.qc_extension(template)
-        upload_filename = f"qc-{template_name}-{_uuid.uuid4().hex[:8]}{ext}"
-        # Pick a Content-Type that matches the bytes — bridge dispatch is
-        # extension-based but a correct MIME helps debugging tools.
-        content_type = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        if ext.endswith("xlsx") else
-                        "text/tab-separated-values" if ext.endswith("tsv") else
-                        "text/csv")
-        # generate_qc returns bytes for both text and binary formats — text
-        # paths emit utf-8 encoded bytes; xlsx emits raw OOXML bytes.
-        file_bytes = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8")
-
-        parts = []
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(b'Content-Disposition: form-data; name="analyzerId"\r\n\r\n')
-        parts.append(str(analyzer_id).encode() + b"\r\n")
-        if test_code:
-            parts.append(f"--{boundary}\r\n".encode())
-            parts.append(b'Content-Disposition: form-data; name="testCode"\r\n\r\n')
-            parts.append(test_code.encode() + b"\r\n")
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(
-            f'Content-Disposition: form-data; name="file"; filename="{upload_filename}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n".encode()
-        )
-        parts.append(file_bytes)
-        parts.append(b"\r\n")
-        parts.append(f"--{boundary}--\r\n".encode())
-        body = b"".join(parts)
-
-        upload_url = bridge_url.rstrip("/") + "/admin/upload"
-        req = urllib.request.Request(upload_url, data=body, method="POST")
-        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-        req.add_header("Content-Length", str(len(body)))
-        auth = base64.b64encode(f"{bridge_user}:{bridge_pass}".encode()).decode()
-        req.add_header("Authorization", f"Basic {auth}")
-
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
-                resp_body = resp.read().decode("utf-8", errors="replace")
-                resp_status = resp.status
-        except urllib.error.HTTPError as e:
-            resp_body = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
-            resp_status = e.code
-
-        logger.info(
-            "Uploaded QC content to bridge %s (template=%s, analyzer=%s, deviation=%s) — status %d",
-            bridge_url, template_name, analyzer_id, qc_deviation, resp_status,
-        )
-
-        # XLSX content is binary — only include a text preview for delimited
-        # formats. The upload_filename's extension already indicates the
-        # format clearly; binary preview would just be JSON-serialization
-        # noise (and breaks self._send_json).
-        qc_format = FileHandler.qc_format(template)
-        response = {
-            "status": "uploaded",
-            "template": template_name,
-            "qc": True,
-            "qc_deviation": qc_deviation,
-            "format": qc_format,
-            "bridge_status": resp_status,
-            "bridge_response_preview": resp_body[:500] if isinstance(resp_body, str) else "",
-            "upload_filename": upload_filename,
-            "content_size_bytes": len(file_bytes),
-        }
-        if qc_format in ("CSV", "TSV"):
-            response["content_preview"] = file_bytes[:500].decode("utf-8", errors="replace")
-        self._send_json(200, response)
 
     def _handle_create_analyzer(self):
         mgr = self._get_network_manager()

@@ -9,7 +9,7 @@ produces for ASTM QC pushes. They serve two purposes:
   2. Documentation by example: the bridge's expected input format is
      literally these tests' assertions.
 
-Reference: ASTM LIS2-A2, OE GenericASTMLineInserter conventions.
+Reference: ASTM LIS2-A2 and the pinned Bridge profile recognition contract.
 """
 
 import json
@@ -115,10 +115,9 @@ class QCMessageContract(unittest.TestCase):
 class FileQCMessageContract(unittest.TestCase):
     """Test B — FILE (QuantStudio) generate_qc emission contract.
 
-    QuantStudio FILE profile qcRules (OE side):
+    The pinned QuantStudio Bridge profile recognizes controls when:
       - SPECIMEN_ID_PREFIX operand=LPC|HPC|CNEG|CPOS|NTC|PTC → row Sample Name
-        must start with one of those level prefixes so the bridge classifies
-        as QC AND propagates controlLevel to OE's Tier 2 lot resolver.
+        starts with one of those level prefixes.
       - FIELD_EQUALS targetField=QC_TASK operand=STANDARD → Task column must
         equal STANDARD.
 
@@ -180,7 +179,7 @@ class FileQCMessageContract(unittest.TestCase):
             sample_name = row.get("Sample Name", "")
             self.assertTrue(
                 sample_name.startswith("LPC-") or sample_name.startswith("HPC-"),
-                f"[{fmt}] expected LPC-/HPC- prefix per QuantStudio qcRules, got: {sample_name}")
+                f"[{fmt}] expected LPC-/HPC- control sample, got: {sample_name}")
             self.assertIn("LOT-", sample_name,
                           f"[{fmt}] expected lot string embedded in sample name, got: {sample_name}")
             self.assertEqual(row.get("Task"), "STANDARD",
@@ -235,7 +234,7 @@ class FileQCMessageContract(unittest.TestCase):
 class HL7QCMessageContract(unittest.TestCase):
     """Test C — HL7 (Mindray BS-200) generate_qc emission contract.
 
-    Mindray HL7 profile qcRule (OE side):
+    The simulator's Mindray HL7 fixture emits a QC specimen prefix:
       - SPECIMEN_ID_PREFIX operand=QC → OBR-3 (Filler/Specimen ID) must start with "QC-"
     """
 

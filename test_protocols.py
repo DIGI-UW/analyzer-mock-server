@@ -12,6 +12,7 @@ import threading
 import http.client
 from copy import deepcopy
 from http.server import HTTPServer
+from unittest.mock import patch
 
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
@@ -228,6 +229,17 @@ class TestASTMGeneXpert(unittest.TestCase):
         # spec 302-2261 vocabulary.
         r_fields = r_lines[0].split("|")
         self.assertIn("NOT DETECTED", r_fields[3])
+
+    def test_explicit_result_scenario_can_emit_an_unexpected_analyzer_code(self):
+        msg = self._generate(results=[{
+            "test_code": "UNMAPPED-MTB",
+            "value": "REVIEW REQUIRED",
+        }])
+
+        r_lines = self._segments(msg, "R")
+        self.assertEqual(1, len(r_lines))
+        self.assertIn("UNMAPPED-MTB", r_lines[0])
+        self.assertIn("REVIEW REQUIRED", r_lines[0])
 
     # --- QC message generation ---
     # Template's runtime astm_config.enable_qc is false for the harness demo
@@ -495,7 +507,6 @@ class TestFileSimulateAPI(unittest.TestCase):
             written_path = body.get("written_path")
             self.assertTrue(written_path)
             self.assertTrue(os.path.exists(written_path))
-
 
     def test_post_simulate_file_sanitizes_path_traversal_filename(self):
         """Path traversal in filename is stripped to basename (safe write)."""

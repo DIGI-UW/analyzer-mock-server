@@ -1,7 +1,7 @@
 {
   "profileRef": {
     "profileId": "quantstudio",
-    "revision": 1
+    "revision": 3
   },
   "qc_sample_id_pattern": "{level}-{lot}-001",
   "fixture": {

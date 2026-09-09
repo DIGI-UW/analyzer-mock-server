@@ -446,7 +446,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(400, {"error": str(e)})
                     return
             else:
-                msg = handler.generate(template, **gen_kwargs)
+                try:
+                    msg = handler.generate(template, **gen_kwargs)
+                except ValueError as e:
+                    self._send_json(400, {"error": str(e)})
+                    return
             pushed = False
             push_err = None
             if destination:

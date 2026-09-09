@@ -6,6 +6,7 @@ Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
 import logging
+import math
 import random
 import uuid
 from datetime import datetime, timedelta
@@ -119,7 +120,13 @@ def _select_result_scenario(
         })
         value = result["value"]
         if field.get("type") == "NUMERIC":
-            field["seedValue"] = value
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"result {code} requires a finite numeric value") from None
+            if isinstance(value, bool) or not math.isfinite(numeric_value):
+                raise ValueError(f"result {code} requires a finite numeric value")
+            field["seedValue"] = numeric_value
         else:
             field["type"] = "QUALITATIVE"
             field["possibleValues"] = [str(value)]

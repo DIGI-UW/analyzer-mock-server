@@ -124,7 +124,12 @@ FILE_OUTPUT_ROOTS = ("/data/analyzer-imports", "/tmp")
 
 
 def _is_allowed_file_output_dir(target_dir: str) -> bool:
-    resolved_dir = os.path.realpath(target_dir)
+    if not isinstance(target_dir, str) or not target_dir.strip():
+        return False
+    try:
+        resolved_dir = os.path.realpath(target_dir)
+    except (ValueError, OSError):
+        return False
     for root in FILE_OUTPUT_ROOTS:
         resolved_root = os.path.realpath(root)
         try:

@@ -151,6 +151,8 @@ def test_exact_profile_ref_rejects_profile_owned_field_overrides(tmp_path, monke
         {"protocol": {"type": "ASTM"}},
         {"fields": []},
         {"file_config": {"format": "CSV"}},
+        {"fileFormat": {"delimiter": ";"}},
+        {"columns": []},
         {"identification": {"file_pattern": "*.csv"}},
     ],
 )
@@ -161,6 +163,9 @@ def test_exact_profile_ref_rejects_profile_owned_template_data(
     monkeypatch.setenv("ANALYZER_BRIDGE_PROFILES_DIR", str(tmp_path))
     template = _template()
     template.update(duplicate)
+
+    schema = json.loads((TEMPLATES_DIR / "schema.json").read_text(encoding="utf-8"))
+    assert not Draft7Validator(schema).is_valid(template)
 
     with pytest.raises(ProfileResolutionError, match="duplicates profile-owned fields"):
         load_profile_backed_template("priority", template)

@@ -83,7 +83,13 @@ def _normalize_fields_from_template(template: Dict[str, Any]) -> List[Dict[str, 
 def _select_result_scenario(
     fields: List[Dict[str, Any]], results: Optional[List[Dict[str, Any]]]
 ) -> List[Dict[str, Any]]:
-    """Build one requested analyzer run without changing the profile-backed template."""
+    """Build a requested run without changing the profile-backed template.
+
+    Known codes retain their profile-owned numeric/non-numeric category. For
+    unknown codes, type selects that simulation category only. Non-numeric
+    scenario values use the qualitative generator to emit the requested text;
+    this is not an API for overriding a known assay's profile type.
+    """
     if results is None:
         return fields
     if not isinstance(results, list) or not results:

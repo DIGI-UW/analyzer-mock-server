@@ -98,7 +98,7 @@ def push_hl7_to_destination(destination: str, hl7_message: str,
         except ValueError:
             return False, f"invalid MLLP port: {port_str}"
         return push_hl7_mllp(host, port, hl7_message, source_ip=source_ip)
-    return False, f"HL7 result destination must use mllp://host:port: {destination}"
+    return False, f"HL7 result destination must use 'mllp://host:port'; received {destination}"
 
 
 def push_astm_to_destination(destination: str, astm_message: str,
@@ -117,7 +117,7 @@ def push_astm_to_destination(destination: str, astm_message: str,
         except ValueError:
             return False, f"invalid TCP port: {port_str}"
         return push_astm_tcp(host, port, astm_message, source_ip=source_ip)
-    return False, f"ASTM result destination must use tcp://host:port: {destination}"
+    return False, f"ASTM result destination must use 'tcp://host:port'; received {destination}"
 
 
 def push_hl7_mllp(host: str, port: int, hl7_message: str, timeout: int = 30,

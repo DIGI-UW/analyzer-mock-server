@@ -56,7 +56,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest test_hl7.py test_protocols.py test_priority_profile_templates.py test_bridge_profile_adapter.py test_analyzers_api.py test_analyzer_network_manager.py test_simulate_qc_default_contract_api.py test_simulate_astm_qc_api.py test_file_output_paths.py -v --tb=short
+          python -m pytest test_hl7.py test_protocols.py test_priority_profile_templates.py test_bridge_profile_adapter.py test_analyzers_api.py test_analyzer_network_manager.py test_simulate_qc_default_contract_api.py test_simulate_astm_qc_api.py test_file_output_paths.py test_fixture_parser.py -v --tb=short
 
       - name: Validate Python syntax
         run: |

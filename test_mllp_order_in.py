@@ -4,7 +4,7 @@
 When the mock receives an ORM^O01 over MLLP, after ACK'ing it the mock pushes
 a matching ORU^R01 back to the configured destination (the bridge's MLLP
 listener). The result echoes the inbound placer + filler order numbers so the
-OpenELIS inbound import correlates to the originating accession (OBR-3).
+normalized result retains the originating accession (OBR-3).
 """
 
 import os
@@ -88,6 +88,15 @@ class TestExtractOrderCorrelation(unittest.TestCase):
 
 
 class TestPushOrderResult(unittest.TestCase):
+
+    def test_does_not_invent_bridge_destination(self):
+        h, _ = _make_handler()
+        with patch('push.push_hl7_mllp') as mock_push, patch.dict(
+            os.environ, {}, clear=True
+        ):
+            h._push_order_result(ORDER_ORM_O01)
+
+        mock_push.assert_not_called()
 
     def test_pushes_oru_r01_echoing_placer_and_filler(self):
         h, _ = _make_handler()

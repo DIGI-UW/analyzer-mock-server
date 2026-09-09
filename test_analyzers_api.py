@@ -47,6 +47,10 @@ class TestAnalyzersAPI(unittest.TestCase):
         SimulateAPIHandler._network_manager = None
 
     def setUp(self):
+        self.mock_mgr.get_analyzer.side_effect = (
+            lambda name: None if name == "nonexistent" else {"name": name}
+        )
+        self.mock_mgr.remove_analyzer.side_effect = lambda name: name != "nonexistent"
         # Patch _get_network_manager for every test so Docker is never touched
         patcher = patch.object(
             SimulateAPIHandler, "_get_network_manager", return_value=self.mock_mgr
@@ -299,17 +303,52 @@ class TestAnalyzersAPI(unittest.TestCase):
     # DELETE /analyzers/{name}
     # ------------------------------------------------------------------
 
-    def test_delete_existing_analyzer_returns_200(self):
+    def test_delete_existing_analyzer_returns_202(self):
         status, body = self._delete_analyzer("valid-name")
-        self.assertEqual(status, 200)
-        self.assertTrue(body["removed"])
+        self.assertEqual(status, 202)
+        self.assertTrue(body["removalScheduled"])
         self.assertEqual(body["name"], "valid-name")
 
     def test_delete_with_query_string_strips_query(self):
         status, body = self._delete_analyzer("valid-name", "?query=1")
-        self.assertEqual(status, 200)
-        self.assertTrue(body["removed"])
+        self.assertEqual(status, 202)
+        self.assertTrue(body["removalScheduled"])
         self.assertEqual(body["name"], "valid-name")
+
+    def test_delete_responds_before_network_teardown(self):
+        removal_started = threading.Event()
+        allow_removal = threading.Event()
+        client_finished = threading.Event()
+        result = []
+
+        def blocking_remove(name):
+            removal_started.set()
+            allow_removal.wait(timeout=5)
+            return True
+
+        def delete_from_client():
+            try:
+                result.append(self._delete_analyzer("valid-name"))
+            finally:
+                client_finished.set()
+
+        self.mock_mgr.remove_analyzer.side_effect = blocking_remove
+        client = threading.Thread(target=delete_from_client, daemon=True)
+        client.start()
+
+        try:
+            self.assertTrue(removal_started.wait(timeout=1))
+            self.assertTrue(
+                client_finished.wait(timeout=1),
+                "DELETE response must complete before the mock tears down its own network",
+            )
+            self.assertEqual(result[0][0], 202)
+        finally:
+            allow_removal.set()
+            client.join(timeout=5)
+            self.mock_mgr.remove_analyzer.side_effect = (
+                lambda name: name != "nonexistent"
+            )
 
     def test_delete_nonexistent_analyzer_returns_404(self):
         status, body = self._delete_analyzer("nonexistent")

@@ -11,8 +11,7 @@
         "transport": "SERIAL"
     },
     "identification": {
-        "astm_header": "STAGO^START4^V1.0",
-        "hl7_sending_app": "STAGO"
+        "astm_header": "STAGO^START4^V1.0"
     },
     "serial_config": {
         "baud_rate": 9600,

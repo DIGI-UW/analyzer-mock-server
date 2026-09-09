@@ -2,17 +2,50 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://openelis-global.org/astm-mock-server/template-schema",
   "title": "Analyzer Message Template",
-  "description": "Schema for analyzer message templates (M4 multi-protocol simulator). Supports ASTM, HL7, RS232, FILE protocols with field definitions and deterministic seed values.",
+  "description": "Schema for analyzer simulator templates. Supports ASTM, HL7, RS232, and FILE traffic with deterministic seed values.",
   "type": "object",
-  "required": ["analyzer", "protocol"],
   "oneOf": [
-    { "required": ["fields"], "description": "Legacy: inline assay fields." },
-    { "required": ["profile"], "description": "Profile-backed: assay menu derived from the canonical profile referenced by `profile` (single source of truth)." }
+    {
+      "required": ["analyzer", "protocol", "fields"],
+      "not": { "required": ["profileRef"] },
+      "description": "Standalone simulator fixture with inline analyzer, protocol, and assay data."
+    },
+    {
+      "required": ["profileRef"],
+      "not": {
+        "anyOf": [
+          { "required": ["analyzer"] },
+          { "required": ["protocol"] },
+          { "required": ["fields"] },
+          { "required": ["fileFormat"] },
+          { "required": ["file_config"] },
+          { "required": ["columns"] },
+          {
+            "required": ["identification"],
+            "properties": { "identification": { "required": ["file_pattern"] } }
+          }
+        ]
+      },
+      "description": "Profile-backed fixture whose analyzer, protocol, and assay data come from one exact Bridge profile revision."
+    }
   ],
   "properties": {
-    "profile": {
-      "type": "string",
-      "description": "Reference to a canonical profile (e.g. 'hl7/mindray-bc5380'); profile_adapter derives `fields` from it. Mutually exclusive with inline `fields`."
+    "profile": false,
+    "profileRef": {
+      "type": "object",
+      "description": "Exact immutable Bridge profile revision used by a profile-backed analyzer simulation.",
+      "required": ["profileId", "revision"],
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     },
     "seedValues": {
       "type": "object",
@@ -29,7 +62,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Full analyzer name as registered in OpenELIS"
+          "description": "Analyzer display name"
         },
         "model": {
           "type": "string",
@@ -62,22 +95,18 @@
         },
         "transport": {
           "type": "string",
-          "enum": ["TCP", "HTTP", "SERIAL", "FILE"],
+          "enum": ["TCP", "SERIAL", "FILE"],
           "description": "Transport mechanism"
         }
       }
     },
     "identification": {
       "type": "object",
-      "description": "How OpenELIS identifies this analyzer (ASTM header, HL7 sender, IP, file pattern)",
+      "description": "Analyzer-side protocol identity and file matching fields",
       "properties": {
         "astm_header": {
           "type": "string",
           "description": "ASTM H-segment sender identification (field 5)"
-        },
-        "msh_sender": {
-          "type": "string",
-          "description": "HL7 MSH-3 field (legacy, use hl7_sending_app)"
         },
         "hl7_sending_app": {
           "type": "string",
@@ -86,6 +115,14 @@
         "hl7_sending_facility": {
           "type": "string",
           "description": "HL7 MSH-4 sending facility"
+        },
+        "hl7_receiving_app": {
+          "type": "string",
+          "description": "HL7 MSH-5 receiving application"
+        },
+        "hl7_receiving_facility": {
+          "type": "string",
+          "description": "HL7 MSH-6 receiving facility"
         },
         "ip_pattern": {
           "type": "string",

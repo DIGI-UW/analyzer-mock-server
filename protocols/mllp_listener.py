@@ -26,12 +26,6 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Default destination for ORU^R01 result push after an inbound ORM^O01 order.
-# In the harness docker-compose, both vars resolve to the bridge's MLLP listener;
-# overrideable per environment (or set to empty to disable the push entirely).
-DEFAULT_ORDER_RESULT_PUSH_HOST = "openelis-analyzer-bridge"
-DEFAULT_ORDER_RESULT_PUSH_PORT = 2575
-
 # MLLP framing bytes
 VT = b"\x0B"  # Start Block
 FS = b"\x1C"  # End Block
@@ -102,7 +96,7 @@ class MLLPProtocolHandler:
                     time.sleep(self.response_delay_ms / 1000.0)
 
                 # Generate and send ACK
-                ack = self._build_ack(control_id, msg_type)
+                ack = self._build_ack(control_id, msg_type, message)
                 self._send_mllp_frame(ack)
 
                 logger.info(
@@ -112,9 +106,9 @@ class MLLPProtocolHandler:
                     msg_type,
                 )
 
-                # LIS-initiated order: push a matching ORU^R01 result back to the
-                # bridge's MLLP listener so OE2's inbound import sees it. Echoes
-                # ORC-2 (placer) and OBR-3 (filler / accession) for correlation.
+                # For an inbound order, push a matching ORU^R01 result back to
+                # the configured Bridge listener. Echo order identifiers for
+                # correlation.
                 if msg_type.startswith("ORM") and self.template:
                     self._push_order_result(message)
 
@@ -236,9 +230,9 @@ class MLLPProtocolHandler:
 
     def _extract_order_correlation(self, order_message: str) -> Tuple[Optional[str], Optional[str]]:
         """Parse ORC-2/OBR-2 (placer) and OBR-3/ORC-3 (filler) from an inbound
-        ORM^O01. The bridge embeds the OE2 accession in both placer and filler;
-        we echo whatever was sent. Returns (placer, filler), either may be None
-        if absent."""
+        ORM^O01. The Bridge carries the accession in placer and filler fields;
+        the mock echoes whatever was sent. Returns (placer, filler), either may
+        be None if absent."""
         placer: Optional[str] = None
         filler: Optional[str] = None
         for segment in order_message.split("\r"):
@@ -277,7 +271,7 @@ class MLLPProtocolHandler:
         """After ACK'ing an ORM^O01, push a matching ORU^R01 to the LIS via a
         fresh MLLP connection to the configured destination (the bridge's MLLP
         listener in compose). Result OBR-3 echoes the inbound order's filler so
-        OE2's existing accession-keyed inbound result import picks it up.
+        normalized result correlation remains stable.
 
         Failures are logged, not raised — the order-receipt path stays
         successful even if the result push can't reach the bridge.
@@ -286,10 +280,13 @@ class MLLPProtocolHandler:
         from push import push_hl7_mllp
         from protocols.hl7_handler import generate_oru_r01
 
-        host = os.environ.get("ORDER_RESULT_PUSH_HOST", DEFAULT_ORDER_RESULT_PUSH_HOST)
-        port_raw = os.environ.get("ORDER_RESULT_PUSH_PORT", str(DEFAULT_ORDER_RESULT_PUSH_PORT))
-        if not host:
-            logger.info("[ORDER_IN] ORDER_RESULT_PUSH_HOST empty; result push disabled")
+        host = os.environ.get("ORDER_RESULT_PUSH_HOST")
+        port_raw = os.environ.get("ORDER_RESULT_PUSH_PORT")
+        if not host or not port_raw:
+            logger.info(
+                "[ORDER_IN] HL7 result push requires ORDER_RESULT_PUSH_HOST and "
+                "ORDER_RESULT_PUSH_PORT"
+            )
             return
         try:
             port = int(port_raw)
@@ -350,7 +347,7 @@ class MLLPProtocolHandler:
                 host, port, e, exc_info=True,
             )
 
-    def _build_ack(self, control_id: str, msg_type: str) -> str:
+    def _build_ack(self, control_id: str, msg_type: str, inbound_message: str) -> str:
         """Build HL7 ACK message matching the inbound message's control ID."""
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
         ack_control_id = f"ACK{ts}"
@@ -362,9 +359,18 @@ class MLLPProtocolHandler:
 
         sending_app = "SIMULATOR"
         sending_facility = self.analyzer_name.upper().replace(" ", "-")
+        receiving_app = "LIS"
+        receiving_facility = "LAB"
+        for segment in inbound_message.split("\r"):
+            if segment.startswith("MSH|"):
+                fields = segment.split("|")
+                if len(fields) > 3:
+                    receiving_app = fields[2] or receiving_app
+                    receiving_facility = fields[3] or receiving_facility
+                break
 
         segments = [
-            f"MSH|^~\\&|{sending_app}|{sending_facility}|OpenELIS|LAB|{ts}||{ack_type}|{ack_control_id}|P|2.3.1",
+            f"MSH|^~\\&|{sending_app}|{sending_facility}|{receiving_app}|{receiving_facility}|{ts}||{ack_type}|{ack_control_id}|P|2.3.1",
             f"MSA|AA|{control_id}|Message accepted",
         ]
 

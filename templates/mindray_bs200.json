@@ -14,17 +14,72 @@
     "hl7_sending_app": "MINDRAY",
     "hl7_sending_facility": "BS-200"
   },
-  "profile": "hl7/mindray-bs200",
-  "seedValues": {
-    "CREA": 1.1,
-    "ALT": 32,
-    "AST": 28,
-    "GLU": 92,
-    "UREA": 15,
-    "ALB": 4.2,
-    "TP": 7.1,
-    "TBIL": 0.7
-  },
+  "fields": [
+    {
+      "code": "GLU",
+      "name": "Glucose",
+      "loinc": "2345-7",
+      "unit": "mg/dL",
+      "type": "NUMERIC",
+      "seedValue": 92
+    },
+    {
+      "code": "CREA",
+      "name": "Creatinine",
+      "loinc": "2160-0",
+      "unit": "mg/dL",
+      "type": "NUMERIC",
+      "seedValue": 1.1
+    },
+    {
+      "code": "ALT",
+      "name": "Alanine Aminotransferase",
+      "loinc": "1742-6",
+      "unit": "U/L",
+      "type": "NUMERIC",
+      "seedValue": 32
+    },
+    {
+      "code": "AST",
+      "name": "Aspartate Aminotransferase",
+      "loinc": "1920-8",
+      "unit": "U/L",
+      "type": "NUMERIC",
+      "seedValue": 28
+    },
+    {
+      "code": "ALB",
+      "name": "Albumin",
+      "loinc": "1751-7",
+      "unit": "g/dL",
+      "type": "NUMERIC",
+      "seedValue": 4.2
+    },
+    {
+      "code": "TP",
+      "name": "Total Protein",
+      "loinc": "2885-2",
+      "unit": "g/dL",
+      "type": "NUMERIC",
+      "seedValue": 7.1
+    },
+    {
+      "code": "TBIL",
+      "name": "Total Bilirubin",
+      "loinc": "1975-2",
+      "unit": "mg/dL",
+      "type": "NUMERIC",
+      "seedValue": 0.7
+    },
+    {
+      "code": "UREA",
+      "name": "Blood Urea Nitrogen",
+      "loinc": "3094-0",
+      "unit": "mg/dL",
+      "type": "NUMERIC",
+      "seedValue": 15
+    }
+  ],
   "testPatient": {
     "id": "PAT003",
     "name": "RABE^FARA",

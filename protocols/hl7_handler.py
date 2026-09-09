@@ -1,8 +1,7 @@
 """
 HL7 ORU^R01 message generator for analyzer simulator.
 
-Generates HL7 v2.x ORU^R01 (Observation Report) messages from template definitions
-so OpenELIS can route and parse them via analyzer plugins (e.g. Abbott Architect).
+Generates HL7 v2.x ORU^R01 messages from analyzer templates for Bridge transport.
 
 Template identification.hl7_sending_app -> MSH-3, hl7_sending_facility -> MSH-4.
 Each template field becomes one OBX segment (value type ST for TEXT/QUALITATIVE, NM for NUMERIC).
@@ -65,11 +64,10 @@ def generate_oru_r01(
     test_patient = template.get("testPatient", {})
     test_sample = template.get("testSample", {})
 
-    # Prefer new HL7 identification fields, but fall back to legacy msh_sender for backward compatibility
-    sending_app = identification.get("hl7_sending_app") or identification.get("msh_sender", "SIMULATOR")
+    sending_app = identification.get("hl7_sending_app", "SIMULATOR")
     sending_facility = identification.get("hl7_sending_facility", "LAB")
-    receiving_app = "OpenELIS"
-    receiving_facility = "LAB"
+    receiving_app = identification.get("hl7_receiving_app", "LIS")
+    receiving_facility = identification.get("hl7_receiving_facility", "LAB")
     hl7_version = template.get("protocol", {}).get("version", "2.5.1")
 
     ts = timestamp.strftime("%Y%m%d%H%M%S")
@@ -136,8 +134,8 @@ def generate_oru_r01(
     # ordered_codes is supplied, resolve each against the template's catalog and
     # emit one OBX per ordered test; a code the analyzer doesn't run yields an
     # error-flagged OBX (it must be visible, not silently dropped). Only when no
-    # order context is given (e.g. unsolicited push / legacy QC) do we fall back
-    # to the full template field list.
+    # order context is given (for example, an unsolicited result) do we use
+    # the full template field list.
     if ordered_codes:
         by_code = {f.get("code"): f for f in fields}
         emit_fields = []
@@ -203,8 +201,7 @@ def generate_qc_oru_r01(
 ) -> str:
     """Generate an HL7 ORU^R01 QC message from template.qc_controls.
 
-    Convention (matches the Mindray HL7 profile's qcRule
-    `SPECIMEN_ID_PREFIX operand=QC` on the OE side):
+    Simulator convention for the control traffic represented by this fixture:
       - OBR-3 (Filler order / Specimen ID) = "QC-{lot}-{level}"
       - One OBX per control entry
       - OBX-3 components = field_code^lot_number^level
@@ -225,10 +222,10 @@ def generate_qc_oru_r01(
         timestamp = datetime.now()
 
     identification = template.get("identification", {})
-    sending_app = identification.get("hl7_sending_app") or identification.get("msh_sender", "SIMULATOR")
+    sending_app = identification.get("hl7_sending_app", "SIMULATOR")
     sending_facility = identification.get("hl7_sending_facility", "LAB")
-    receiving_app = "OpenELIS"
-    receiving_facility = "LAB"
+    receiving_app = identification.get("hl7_receiving_app", "LIS")
+    receiving_facility = identification.get("hl7_receiving_facility", "LAB")
     hl7_version = template.get("protocol", {}).get("version", "2.5.1")
 
     ts = timestamp.strftime("%Y%m%d%H%M%S")

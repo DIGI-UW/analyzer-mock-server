@@ -1,163 +1,123 @@
-# Analyzer Mock Server Templates
+# Analyzer Simulator Templates
 
-This directory contains analyzer templates for generating deterministic mock messages across multiple lab communication protocols (ASTM LIS2-A2, HL7, FILE-based formats).
+This directory contains deterministic simulator inputs for ASTM, HL7, and FILE
+analyzer traffic.
 
-## Purpose
+## Authority
 
-Templates enable the mock server to generate protocol-specific messages with **exact field alignment** to OpenELIS analyzer plugins, supporting:
+Analyzer Bridge profiles are authoritative for analyzer type behavior and
+connection defaults. A mock template is not another profile.
 
-- **Reproducible E2E testing**: Deterministic seed values for consistent assertions
-- **Plugin validation**: Generated messages match plugin `TestMapping` arrays exactly
-- **Out-of-the-box testing**: Zero manual configuration needed
-
-## Available Templates
-
-| Template | Analyzer | Fields | Protocol |
-|----------|----------|--------|----------|
-| `horiba_pentra60.json` | Horiba ABX Pentra 60 | 20 (5-part differential) | ASTM LIS2-A2 |
-| `horiba_micros60.json` | Horiba ABX Micros 60 | 16 (3-part differential) | ASTM LIS2-A2 |
-| `stago_start4.json` | Stago STart 4 | 5 (coagulation panel) | ASTM LIS2-A2 |
-
-## Template Structure
+A profile-backed template references one exact Bridge profile revision:
 
 ```json
 {
-  "analyzer": {
-    "name": "Horiba ABX Pentra 60",
-    "manufacturer": "Horiba ABX",
-    "model": "Pentra 60 C+",
-    "category": "HEMATOLOGY"
+  "profileRef": {
+    "profileId": "example-profile",
+    "revision": 1
   },
-  "protocol": {
-    "type": "ASTM",
-    "version": "LIS2-A2"
-  },
-  "identification": {
-    "astm_header": "ABX^PENTRA60^V2.0"
-  },
-  "fields": [
-    {
-      "code": "WBC",
-      "name": "White Blood Cells",
-      "loinc": "6690-2",
-      "unit": "10^3/uL",
-      "normalRange": "4.0-10.0",
-      "seedValue": 5.8
-    }
-  ],
-  "testPatient": {
-    "id": "PAT-2026-001",
-    "name": "Rakoto^Jean^A",
-    "sex": "M",
-    "dob": "19850315"
-  },
-  "testSample": {
-    "id": "60",
-    "type": "CBC^Complete Blood Count"
+  "seedValues": {
+    "TEST-CODE": "NOT DETECTED"
   }
 }
 ```
 
-## Usage
+Set `ANALYZER_BRIDGE_PROFILES_DIR` before loading such a template. The adapter
+fails closed unless exactly one matching profile revision exists and has a
+revision fingerprint.
 
-### Generate Deterministic ASTM Message (supported path)
+## Ownership
 
-```bash
-python server.py --simulate-api-port 8081
-curl "http://localhost:8081/simulate/astm/horiba_pentra60"
-```
+Bridge profile data supplies:
 
-### Generate Random Values Within Normal Ranges (library path)
+- analyzer identity
+- protocol and version
+- analyzer test codes
+- result types and units
+- qualitative value vocabularies
+- FILE format and column mapping
 
-```bash
-python - <<'PY'
-from server import _load_template
-from protocols.astm_handler import ASTMHandler
-template = _load_template("horiba_micros60")
-print(ASTMHandler().generate(template, use_seed=False))
-PY
-```
+The mock template may supply only simulation concerns:
 
-### List Available Templates
+- deterministic result values
+- representative patient and sample data
+- captured fixture files
+- transport-fidelity details needed to reproduce analyzer traffic
 
-```bash
-python template_loader.py --list
-```
+A profile-backed template cannot duplicate or override profile-owned fields.
 
-### Validate a Template
+## Priority Fixtures
 
-```bash
-python template_loader.py --validate templates/horiba_pentra60.json
-```
+The priority acceptance fixtures are:
 
-### Get Template Info
+| Template | Traffic | Profile source |
+| --- | --- | --- |
+| `genexpert_astm.json` | ASTM TCP | Exact Bridge profile revision |
+| `hain_fluorocycler.json` | FILE watch directory | Exact Bridge profile revision |
 
-```bash
-python template_loader.py --info horiba_pentra60
-```
+These are exercised across the real mock process and Bridge runtime. Other
+standalone templates remain simulator coverage until their corresponding Bridge
+profiles are standardized and validated.
 
-## Creating New Templates
+## Generate Traffic
 
-1. Copy an existing template as a starting point
-2. Update `analyzer`, `protocol`, and `identification` sections
-3. Define `fields` array matching the plugin's `TestMapping` entries
-4. Set `seedValue` for each field (extract from test fixtures)
-5. Validate against schema: `python template_loader.py --validate your_template.json`
-
-### Field Alignment with Plugins
-
-Fields must match the plugin's `TestMapping` array exactly:
-
-```java
-// From HoribaPentra60Analyzer.java
-private List<TestMapping> createTestMappings() {
-    return Arrays.asList(
-        new TestMapping("WBC", "White Blood Cells", "6690-2"),  // 3-arg: with LOINC
-        new TestMapping("MXD%", "Mixed Cells Percent")           // 2-arg: no LOINC
-    );
-}
-```
-
-Map to template fields:
-```json
-{
-  "code": "WBC",      // Matches first TestMapping argument
-  "name": "White Blood Cells",  // Matches second argument
-  "loinc": "6690-2"   // Matches third argument (or empty for 2-arg)
-}
-```
-
-## Schema Validation
-
-Templates are validated against `schema.json` which enforces:
-
-- Required fields: `analyzer`, `protocol`, `fields`
-- Field properties: `code`, `name`, `type` are required per field (`unit` is optional)
-- Patient sex: Must be `M`, `F`, or `U`
-- Date format: DOB must be `YYYYMMDD`
-
-## Integration with E2E Tests
-
-Templates power the E2E testing workflow:
+Start the control API:
 
 ```bash
-# 1. Generate deterministic ASTM message via simulate API
-python server.py --simulate-api-port 8081
-curl -s "http://localhost:8081/simulate/astm/horiba_pentra60" | \
-python -c "import sys, json; print(json.load(sys.stdin)['message'])" > /tmp/test.astm
-
-# 2. Send to OpenELIS ASTM endpoint
-curl -X POST https://localhost/api/OpenELIS-Global/analyzer/astm \
-  -H "Content-Type: text/plain" \
-  --data-binary @/tmp/test.astm
-
-# 3. Assert results in Cypress with known values
-cy.get('[data-testid="wbc-value"]').should('contain', '5.8');  // seedValue
+export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
+export ASTM_TEMPLATE=genexpert_astm
+python3 server.py --simulate-api-port 8081
 ```
 
-## Related Documentation
+Generate without sending:
 
-For related documentation, see the main OpenELIS-Global-2 repository:
-- Plan files in `.claude/plans/`
-- Feature specs in `specs/011-madagascar-analyzer-integration/`
-- Cypress E2E tests in `frontend/cypress/`
+```bash
+curl http://localhost:8081/simulate/astm/genexpert_astm
+curl http://localhost:8081/simulate/file/hain_fluorocycler
+```
+
+Send ASTM through a saved Bridge listener:
+
+```bash
+curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+  -H 'Content-Type: application/json' \
+  -d '{"destination":"tcp://127.0.0.1:12001"}'
+```
+
+Write FILE traffic into a saved Bridge connection's watch directory:
+
+```bash
+curl -X POST http://localhost:8081/simulate/file/hain_fluorocycler \
+  -H 'Content-Type: application/json' \
+  -d '{"target_dir":"/data/analyzer-imports/fluorocycler"}'
+```
+
+## Add A Simulator Fixture
+
+1. Establish or identify the authoritative Bridge profile revision.
+2. Add a template with only `profileRef` plus simulation-owned values and
+   fixtures.
+3. Add representative protocol traffic captured from instrument evidence.
+4. Validate the template and exact profile resolution.
+5. Add protocol tests in this repository.
+6. Add a cross-process Bridge test before treating the analyzer as validated.
+
+Do not copy profile mappings into the mock, invent default connection values, or
+send results directly to OpenELIS.
+
+## Validation
+
+Validate one template:
+
+```bash
+python3 template_loader.py --validate templates/genexpert_astm.json
+```
+
+Run all mock tests:
+
+```bash
+uv run --with-requirements requirements.txt python -m pytest
+```
+
+The Bridge cross-process harness is the acceptance layer for profile-backed
+transport and normalized result output.

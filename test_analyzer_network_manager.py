@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 from analyzer_network_manager import (
     DYNAMIC_SUBNET_BASE,
     DYNAMIC_SUBNET_MAX,
-    FIXED_SUBNETS,
     NETWORK_PREFIX,
     AnalyzerNetworkManager,
 )
@@ -51,16 +50,15 @@ class Base(unittest.TestCase):
 
 
 class TestDeterministicAllocation(Base):
-    def test_fixed_exact_match(self):
-        self.assertEqual(self.mgr._subnet_id_for("genexpert"), FIXED_SUBNETS["genexpert"])
-
-    def test_fixed_case_insensitive(self):
-        self.assertEqual(self.mgr._subnet_id_for("GeneXpert"), FIXED_SUBNETS["genexpert"])
-
-    def test_substring_is_not_the_fixed_subnet(self):
-        s = self.mgr._subnet_id_for("demo-genexpert-site1")
-        self.assertNotEqual(s, FIXED_SUBNETS["genexpert"])
+    def test_every_name_uses_the_dynamic_range(self):
+        s = self.mgr._subnet_id_for("genexpert")
         self.assertTrue(DYNAMIC_SUBNET_BASE <= s <= DYNAMIC_SUBNET_MAX)
+
+    def test_name_matching_is_case_insensitive(self):
+        self.assertEqual(
+            self.mgr._subnet_id_for("Analyzer-Instance-A"),
+            self.mgr._subnet_id_for("analyzer-instance-a"),
+        )
 
     def test_same_name_same_subnet_across_calls_and_instances(self):
         a = self.mgr._subnet_id_for("demo-outbound-gx")
@@ -177,6 +175,28 @@ class TestReconcileOrphans(Base):
         orphan.remove.assert_called_once()
         live.remove.assert_not_called()
         foreign.remove.assert_not_called()
+
+
+class TestRemoveAnalyzer(Base):
+    def test_keeps_analyzer_visible_until_network_removal_completes(self):
+        self.mgr._analyzers["demo-x"] = {"name": "demo-x"}
+
+        def cleanup(_network_name):
+            self.assertIsNotNone(self.mgr.get_analyzer("demo-x"))
+            return True
+
+        self.mgr._cleanup_network = MagicMock(side_effect=cleanup)
+
+        self.assertTrue(self.mgr.remove_analyzer("demo-x"))
+        self.assertIsNone(self.mgr.get_analyzer("demo-x"))
+
+    def test_failed_network_removal_keeps_analyzer_visible_for_retry(self):
+        analyzer = {"name": "demo-x"}
+        self.mgr._analyzers["demo-x"] = analyzer
+        self.mgr._cleanup_network = MagicMock(return_value=False)
+
+        self.assertFalse(self.mgr.remove_analyzer("demo-x"))
+        self.assertEqual(self.mgr.get_analyzer("demo-x"), analyzer)
 
 
 class TestConcurrency(Base):

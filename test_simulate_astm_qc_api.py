@@ -111,10 +111,41 @@ class TestSimulateAstmQcApi(unittest.TestCase):
         # Normal patient result has no Q action code at O.12
         self.assertNotIn("|Q|", wire)
 
+    def test_explicit_result_scenario_is_emitted_on_the_wire(self):
+        status, _ = self._post({
+            "destination": "tcp://bridge:12001",
+            "results": [{"test_code": "UNMAPPED-MTB", "value": "REVIEW REQUIRED"}],
+        })
+
+        self.assertEqual(status, 200)
+        wire = self.mock_push.call_args[0][1]
+        self.assertIn("UNMAPPED-MTB", wire)
+        self.assertIn("REVIEW REQUIRED", wire)
+
     def test_source_ip_omitted_passes_none(self):
         self._post({"destination": "tcp://bridge:12001"})
         kwargs = self.mock_push.call_args[1]
         self.assertIsNone(kwargs.get("source_ip"))
+
+    def test_numeric_scenario_rejects_invalid_values_before_sending(self):
+        for value in ["not-a-number", True, {}, [], "NaN", "Infinity"]:
+            with self.subTest(value=value):
+                self.mock_push.reset_mock()
+                status, body = self._post({
+                    "destination": "tcp://bridge:12001",
+                    "results": [{"test_code": "SYNTHETIC-NUMERIC", "type": "NUMERIC", "value": value}],
+                })
+                self.assertEqual(400, status)
+                self.assertIn("finite numeric value", body["error"])
+                self.mock_push.assert_not_called()
+
+    def test_numeric_scenario_accepts_numeric_strings(self):
+        status, _ = self._post({
+            "destination": "tcp://bridge:12001",
+            "results": [{"test_code": "SYNTHETIC-NUMERIC", "type": "NUMERIC", "value": "12.5"}],
+        })
+        self.assertEqual(200, status)
+        self.assertIn("12.5", self.mock_push.call_args[0][1])
 
     def test_qc_without_qc_controls_returns_400(self):
         bad_template = dict(GENEXPERT_TEMPLATE)

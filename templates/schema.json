@@ -30,6 +30,7 @@
     }
   ],
   "properties": {
+    "profile": false,
     "profileRef": {
       "type": "object",
       "description": "Exact immutable Bridge profile revision used by a profile-backed analyzer simulation.",

@@ -83,7 +83,7 @@ def test_unversioned_profile_key_is_not_a_profile_reference():
 
 
 def test_template_schema_rejects_unversioned_profile_reference():
-    with open("templates/schema.json", encoding="utf-8") as schema_file:
+    with (TEMPLATES_DIR / "schema.json").open(encoding="utf-8") as schema_file:
         validator = Draft7Validator(json.load(schema_file))
 
     errors = list(
@@ -95,6 +95,7 @@ def test_template_schema_rejects_unversioned_profile_reference():
                     "manufacturer": "Unsupported",
                 },
                 "protocol": {"type": "HL7"},
+                "fields": [{"code": "TEST", "name": "Test", "type": "NUMERIC"}],
                 "profile": "hl7/unsupported",
             }
         )

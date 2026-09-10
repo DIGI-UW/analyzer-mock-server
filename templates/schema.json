@@ -16,13 +16,21 @@
         "anyOf": [
           { "required": ["analyzer"] },
           { "required": ["protocol"] },
-          { "required": ["fields"] }
+          { "required": ["fields"] },
+          { "required": ["fileFormat"] },
+          { "required": ["file_config"] },
+          { "required": ["columns"] },
+          {
+            "required": ["identification"],
+            "properties": { "identification": { "required": ["file_pattern"] } }
+          }
         ]
       },
       "description": "Profile-backed fixture whose analyzer, protocol, and assay data come from one exact Bridge profile revision."
     }
   ],
   "properties": {
+    "profile": false,
     "profileRef": {
       "type": "object",
       "description": "Exact immutable Bridge profile revision used by a profile-backed analyzer simulation.",

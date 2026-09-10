@@ -83,7 +83,7 @@ def test_unversioned_profile_key_is_not_a_profile_reference():
 
 
 def test_template_schema_rejects_unversioned_profile_reference():
-    with open("templates/schema.json", encoding="utf-8") as schema_file:
+    with (TEMPLATES_DIR / "schema.json").open(encoding="utf-8") as schema_file:
         validator = Draft7Validator(json.load(schema_file))
 
     errors = list(
@@ -95,6 +95,7 @@ def test_template_schema_rejects_unversioned_profile_reference():
                     "manufacturer": "Unsupported",
                 },
                 "protocol": {"type": "HL7"},
+                "fields": [{"code": "TEST", "name": "Test", "type": "NUMERIC"}],
                 "profile": "hl7/unsupported",
             }
         )
@@ -151,6 +152,8 @@ def test_exact_profile_ref_rejects_profile_owned_field_overrides(tmp_path, monke
         {"protocol": {"type": "ASTM"}},
         {"fields": []},
         {"file_config": {"format": "CSV"}},
+        {"fileFormat": {"delimiter": ";"}},
+        {"columns": []},
         {"identification": {"file_pattern": "*.csv"}},
     ],
 )
@@ -161,6 +164,9 @@ def test_exact_profile_ref_rejects_profile_owned_template_data(
     monkeypatch.setenv("ANALYZER_BRIDGE_PROFILES_DIR", str(tmp_path))
     template = _template()
     template.update(duplicate)
+
+    schema = json.loads((TEMPLATES_DIR / "schema.json").read_text(encoding="utf-8"))
+    assert not Draft7Validator(schema).is_valid(template)
 
     with pytest.raises(ProfileResolutionError, match="duplicates profile-owned fields"):
         load_profile_backed_template("priority", template)

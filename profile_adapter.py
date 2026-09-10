@@ -15,9 +15,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Default qualitative vocabulary when a profile mapping declares a qualitative
-# result_type but no explicit `values`. Aligns (case-insensitively) with the
-# common OE2 dictionary entries Detected/Not Detected.
+# Profile result types that require an explicit qualitative vocabulary.
 _QUALITATIVE_TYPES = {"qualitative", "ordinal", "nominal", "ord", "nom", "qual"}
 _PROFILE_OWNED_FIELD_KEYS = {"code", "loinc", "unit", "type", "possibleValues"}
 _PROFILE_OWNED_TEMPLATE_KEYS = {

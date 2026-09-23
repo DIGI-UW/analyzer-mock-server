@@ -230,11 +230,10 @@ def _build_astm_message(
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d%H%M%S")
     if completed_at is None:
-        start_ts = now.strftime("%Y%m%d%H%M%S")
-        end_ts = (now + timedelta(minutes=random.randint(5, 30))).strftime("%Y%m%d%H%M%S")
+        started, completed = now, now + timedelta(minutes=random.randint(5, 30))
     else:
-        start_ts = (completed_at - timedelta(minutes=90)).strftime("%Y%m%d%H%M%S")
-        end_ts = completed_at.strftime("%Y%m%d%H%M%S")
+        started, completed = completed_at - timedelta(minutes=90), completed_at
+    start_ts, end_ts = (t.strftime("%Y%m%d%H%M%S") for t in (started, completed))
 
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"

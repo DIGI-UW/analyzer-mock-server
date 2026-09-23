@@ -438,8 +438,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if "results" in params:
             gen_kwargs["results"] = params["results"]
         if params.get("completed_at"):
+            completed_at = str(params["completed_at"])
             try:
-                gen_kwargs["completed_at"] = datetime.strptime(str(params["completed_at"]), "%Y%m%d%H%M%S")
+                # strptime alone accepts shorter digit runs ("202510211612" reads as 16:01:02).
+                if not re.fullmatch(r"\d{14}", completed_at):
+                    raise ValueError(completed_at)
+                gen_kwargs["completed_at"] = datetime.strptime(completed_at, "%Y%m%d%H%M%S")
             except ValueError:
                 self._send_json(400, {"error": "completed_at must be an ASTM time, YYYYMMDDHHMMSS"})
                 return

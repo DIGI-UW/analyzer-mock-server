@@ -17,6 +17,7 @@ import shutil
 import threading
 import time
 import uuid
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from typing import Dict, Optional
@@ -181,7 +182,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, source_ip, sender_id, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, qc, qc_deviation)",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
@@ -436,6 +437,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             gen_kwargs["sample_id"] = params["sample_id"]
         if "results" in params:
             gen_kwargs["results"] = params["results"]
+        if params.get("completed_at"):
+            try:
+                gen_kwargs["completed_at"] = datetime.strptime(str(params["completed_at"]), "%Y%m%d%H%M%S")
+            except ValueError:
+                self._send_json(400, {"error": "completed_at must be an ASTM time, YYYYMMDDHHMMSS"})
+                return
 
         results = []
         success_count = 0

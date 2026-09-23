@@ -211,8 +211,13 @@ def _build_astm_message(
     action_code: str = "",
     operator_id: Optional[str] = None,
     use_seed: bool = False,
+    completed_at: Optional[datetime] = None,
 ) -> str:
     """Build ASTM H|P|O|R|L message from analyzer name and field list.
+
+    ``completed_at`` fixes the test completion time (R.13, or R.10 without astm_config) and puts
+    the start time (R.12) 90 minutes before it, so a receiver's handling of instrument test
+    times can be asserted exactly; without it both are taken from the clock.
 
     When astm_config is provided, generates standards-compliant messages with:
     - H.3 Message ID, H.10 Receiver, H.12 Processing ID, H.13 Version
@@ -224,8 +229,12 @@ def _build_astm_message(
     cfg = astm_config or {}
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d%H%M%S")
-    start_ts = now.strftime("%Y%m%d%H%M%S")
-    end_ts = (now + timedelta(minutes=random.randint(5, 30))).strftime("%Y%m%d%H%M%S")
+    if completed_at is None:
+        start_ts = now.strftime("%Y%m%d%H%M%S")
+        end_ts = (now + timedelta(minutes=random.randint(5, 30))).strftime("%Y%m%d%H%M%S")
+    else:
+        start_ts = (completed_at - timedelta(minutes=90)).strftime("%Y%m%d%H%M%S")
+        end_ts = completed_at.strftime("%Y%m%d%H%M%S")
 
     if not patient_id:
         patient_id = f"PAT-{now.strftime('%Y%m%d')}-{random.randint(100, 999)}"
@@ -534,6 +543,7 @@ class ASTMHandler(BaseHandler):
             astm_config=astm_config if astm_config else None,
             operator_id=kwargs.get("operator_id"),
             use_seed=use_seed,
+            completed_at=kwargs.get("completed_at"),
         )
 
         # Build QC message if enabled

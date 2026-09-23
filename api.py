@@ -27,6 +27,7 @@ from fixture_parser import parse_fixture
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
 from protocols.file_handler import FileHandler
+from protocols.sender_identity import with_astm_sender_id, with_hl7_sender_id
 from push import push_hl7_to_destination, push_astm_to_destination
 
 logger = logging.getLogger(__name__)
@@ -178,9 +179,9 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "endpoints": {
                     "GET /health": "Health check",
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
-                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, qc, qc_deviation)",
+                    "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, source_ip, sender_id, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, qc, qc_deviation)",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
@@ -252,6 +253,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "count": params.get("count", 1),
                 "qc": params.get("qc"),
                 "qc_deviation": params.get("qc_deviation"),
+                "source_ip": params.get("source_ip"),
+                "sender_id": params.get("sender_id"),
             }
             self._handle_hl7(analyzer, kwargs)
             return
@@ -319,6 +322,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             count = min(max(int(kwargs.get("count", 1)), 1), 1000)
             qc_mode = bool(kwargs.get("qc"))
             qc_deviation = kwargs.get("qc_deviation")
+            sender_id = kwargs.get("sender_id")
 
             gen_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("patient_id", "sample_id", "tests") and v is not None}
@@ -339,6 +343,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                         return
                 else:
                     msg = handler.generate(template, **gen_kwargs)
+                msg = with_hl7_sender_id(msg, sender_id)
                 if first_message is None:
                     first_message = msg
                 pushed = False
@@ -424,6 +429,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         source_ip = params.get("source_ip") or instance_ip
         qc_mode = bool(params.get("qc"))
         qc_deviation = params.get("qc_deviation")
+        sender_id = params.get("sender_id")
 
         gen_kwargs = {"use_seed": True}
         if params.get("sample_id"):
@@ -451,6 +457,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 except ValueError as e:
                     self._send_json(400, {"error": str(e)})
                     return
+            msg = with_astm_sender_id(msg, sender_id)
             pushed = False
             push_err = None
             if destination:
@@ -473,6 +480,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "pushed": success_count if destination else None,
             "destination": destination,
             "source_ip": source_ip,
+            "sender_id": sender_id,
             "results": results,
         })
 

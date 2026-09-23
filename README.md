@@ -111,6 +111,27 @@ curl -X POST http://localhost:8081/simulate/hl7/abbott_architect_hl7 \
 
 The destination must use `mllp://`. HTTP destinations are rejected.
 
+## Simulate Several Instruments Of One Type
+
+Two optional body fields make one template stand in for distinct instruments,
+on both the ASTM and HL7 endpoints:
+
+- `source_ip`: the local address the push leaves from, so the LIS sees a
+  different peer. The address must be configured on the mock container.
+- `sender_id`: the instrument's own name, as a GeneXpert PC sends the System Name
+  from its configuration. It replaces component 1 of ASTM H.5 and HL7 MSH-3 and
+  leaves the rest of the message unchanged. Without it the template's token is
+  sent as before.
+
+```bash
+curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "destination": "tcp://127.0.0.1:12001",
+    "sender_id": "GX-LAB-A"
+  }'
+```
+
 ## Write FILE Traffic For Bridge
 
 ```bash

@@ -132,6 +132,25 @@ curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
   }'
 ```
 
+## Fix The Instrument's Test Times
+
+A real instrument reports when it ran a test, often long before the result
+reaches the LIS. By default the mock takes both times from the clock. To check
+that a receiver keeps the instrument's time, send `completed_at` (ASTM
+`YYYYMMDDHHMMSS`) to `/simulate/astm`: it becomes the completion time (R.13 in
+the GeneXpert layout) and the start time (R.12) is set 90 minutes earlier. An
+unreadable value is rejected with 400. Templates without `astm_config` carry the
+time in R.10 instead, and QC messages (`"qc": true`) ignore `completed_at`.
+
+```bash
+curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "destination": "tcp://127.0.0.1:12001",
+    "completed_at": "20251021161230"
+  }'
+```
+
 ## Write FILE Traffic For Bridge
 
 ```bash

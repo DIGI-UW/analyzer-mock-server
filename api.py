@@ -659,6 +659,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 metadata_results = write_xlsx_with_sample_ids(
                     fixture_path, temporary_path, fixture_cfg, sample_ids
                 )
+                shutil.copymode(fixture_path, temporary_path)
                 os.replace(temporary_path, out_path)
             finally:
                 if os.path.exists(temporary_path):

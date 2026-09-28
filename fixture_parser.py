@@ -47,6 +47,57 @@ def parse_fixture(fixture_path: str, fixture_config: Dict[str, Any]) -> List[Dic
     return results
 
 
+def write_xlsx_with_sample_ids(
+    fixture_path: str,
+    output_path: str,
+    fixture_config: Dict[str, Any],
+    sample_ids: List[str],
+) -> List[Dict[str, str]]:
+    """Write a captured XLSX with only its result-row sample IDs replaced."""
+    import openpyxl
+
+    original = parse_fixture(fixture_path, fixture_config)
+    if len(sample_ids) != len(original):
+        raise ValueError(f"sample_ids must contain exactly {len(original)} result IDs")
+    columns = fixture_config.get("column_mapping", {})
+    sample_header = columns.get("sampleId", "Sample Name")
+    result_header = columns.get("result", "Result")
+    test_header = columns.get("testCode")
+    test_filter = fixture_config.get("testCodeFilter")
+    workbook = openpyxl.load_workbook(fixture_path)
+    try:
+        for sheet in workbook:
+            for header in sheet.iter_rows(max_row=50):
+                labels = [str(cell.value).strip() if cell.value is not None else "" for cell in header]
+                if sample_header not in labels or result_header not in labels:
+                    continue
+                sample_column = labels.index(sample_header)
+                result_column = labels.index(result_header)
+                if test_filter and test_header not in labels:
+                    raise ValueError(f"XLSX test-code header '{test_header}' not found")
+                test_column = labels.index(test_header) if test_filter else None
+                rows = [
+                    row for row in sheet.iter_rows(min_row=header[0].row + 1)
+                    if str(row[sample_column].value or "").strip()
+                    and str(row[result_column].value or "").strip()
+                    and (test_column is None or str(row[test_column].value or "").strip() == test_filter)
+                ]
+                if len(rows) != len(original):
+                    raise ValueError("XLSX result rows changed since fixture metadata was parsed")
+                for row, sample_id in zip(rows, sample_ids):
+                    row[sample_column].value = sample_id
+                workbook.save(output_path)
+                written = parse_fixture(output_path, fixture_config)
+                if [row["sampleId"] for row in written] != sample_ids or [
+                    row["result"] for row in written
+                ] != [row["result"] for row in original]:
+                    raise ValueError("Written XLSX did not preserve the expected result rows")
+                return written
+        raise ValueError(f"XLSX sample/result headers not found in {os.path.basename(fixture_path)}")
+    finally:
+        workbook.close()
+
+
 def _parse_csv(
     path: str,
     col_map: Dict[str, str],
@@ -94,7 +145,10 @@ def _parse_xlsx(path: str, col_map: Dict[str, str]) -> List[Dict[str, str]]:
     result_col = col_map.get("result", "Result")
     test_col = col_map.get("testCode")
 
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    # A mock writes to a .tmp path before publishing the complete workbook.
+    # Pass bytes so openpyxl validates content rather than the temporary suffix.
+    with open(path, "rb") as source:
+        wb = openpyxl.load_workbook(io.BytesIO(source.read()), read_only=True, data_only=True)
 
     # Header-scan: find first sheet + row containing the sampleId column header
     header_row_idx = None

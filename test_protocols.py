@@ -6,6 +6,7 @@ Reference: specs/011-madagascar-analyzer-integration, tasks T091–T095.
 
 import json
 import os
+import stat
 import unittest
 import tempfile
 import threading
@@ -528,6 +529,13 @@ class TestFileSimulateAPI(unittest.TestCase):
             template = _load_template("hain_fluorocycler")
             written = parse_fixture(body["written_path"], template["fixture"])
             self.assertEqual(written, results)
+            fixture_path = os.path.join(
+                os.path.dirname(__file__), template["fixture"]["file"]
+            )
+            self.assertEqual(
+                stat.S_IMODE(os.stat(body["written_path"]).st_mode),
+                stat.S_IMODE(os.stat(fixture_path).st_mode),
+            )
 
     def test_post_filtered_xlsx_fixture_replaces_only_selected_results(self):
         from fixture_parser import parse_fixture

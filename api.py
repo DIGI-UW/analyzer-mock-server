@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -23,7 +24,7 @@ from socketserver import ThreadingMixIn
 from typing import Dict, Optional
 from urllib.parse import urlparse, parse_qs
 
-from fixture_parser import parse_fixture
+from fixture_parser import parse_fixture, write_xlsx_with_sample_ids
 
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
@@ -184,7 +185,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/astm/{template}": "Generate ASTM message",
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
-                    "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, qc, qc_deviation)",
+                    "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, sample_ids for XLSX fixtures, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
                     "POST /analyzers": "Create mock analyzer with unique network+IP",
                     "DELETE /analyzers/{name}": "Remove mock analyzer",
@@ -643,7 +644,27 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         filename = params.get("filename") or f"{template_name}-{uuid.uuid4().hex[:8]}{ext}"
         out_path = os.path.join(resolved_dir, os.path.basename(filename))
 
-        shutil.copy2(fixture_path, out_path)
+        sample_ids = params.get("sample_ids")
+        if sample_ids is not None:
+            if (fixture_cfg.get("format") or "").upper() != "XLSX":
+                self._send_json(400, {"error": "sample_ids requires an XLSX fixture"})
+                return
+            if (not isinstance(sample_ids, list) or len(sample_ids) != len(metadata_results)
+                    or any(not isinstance(value, str) or not value.strip() for value in sample_ids)):
+                self._send_json(400, {"error": f"sample_ids must contain {len(metadata_results)} nonblank result IDs"})
+                return
+            with tempfile.NamedTemporaryFile(dir=resolved_dir, suffix=".tmp", delete=False) as temporary:
+                temporary_path = temporary.name
+            try:
+                metadata_results = write_xlsx_with_sample_ids(
+                    fixture_path, temporary_path, fixture_cfg, sample_ids
+                )
+                os.replace(temporary_path, out_path)
+            finally:
+                if os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
+        else:
+            shutil.copy2(fixture_path, out_path)
 
         # Prevent Bridge hash deduplication from hiding repeated text fixtures.
         if ext.lower() in ('.csv', '.tsv', '.txt'):

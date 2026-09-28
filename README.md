@@ -166,6 +166,12 @@ curl -X POST http://localhost:8081/simulate/file/hain_fluorocycler \
 connection. Bridge discovers and transports the file through that watched
 directory.
 
+For a captured XLSX fixture, the optional `sample_ids` array replaces only the
+result-row sample IDs, in file order. Supply one ID per parsed result; the
+response reports the actual IDs and values written. This lets repeated tests
+use newly created orders while retaining the analyzer's captured file layout
+and measured values.
+
 ## Dynamic Analyzer Instances
 
 The control API can provision isolated mock analyzer network identities:

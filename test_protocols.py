@@ -508,6 +508,50 @@ class TestFileSimulateAPI(unittest.TestCase):
             self.assertTrue(written_path)
             self.assertTrue(os.path.exists(written_path))
 
+    def test_post_fixture_file_uses_requested_sample_ids_in_written_xlsx(self):
+        from fixture_parser import parse_fixture
+
+        sample_ids = ["DEV01269999999999901", "DEV01269999999999902"]
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+            payload = json.dumps({"target_dir": tmpdir, "sample_ids": sample_ids})
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("POST", "/simulate/file/hain_fluorocycler", body=payload,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = json.loads(resp.read().decode("utf-8"))
+            conn.close()
+
+            self.assertEqual(resp.status, 200, body)
+            results = body["metadata"]["results"]
+            self.assertEqual([row["sampleId"] for row in results], sample_ids)
+            self.assertEqual([row["result"] for row in results], ["1250", "450"])
+            template = _load_template("hain_fluorocycler")
+            written = parse_fixture(body["written_path"], template["fixture"])
+            self.assertEqual(written, results)
+
+    def test_post_filtered_xlsx_fixture_replaces_only_selected_results(self):
+        from fixture_parser import parse_fixture
+
+        template = _load_template("quantstudio7")
+        fixture = template["fixture"]
+        source = os.path.join(os.path.dirname(__file__), fixture["file"])
+        expected = parse_fixture(source, fixture)
+        sample_ids = [f"DEV0126999999999{index:04d}" for index in range(1, len(expected) + 1)]
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+            payload = json.dumps({"target_dir": tmpdir, "sample_ids": sample_ids})
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("POST", "/simulate/file/quantstudio7", body=payload,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = json.loads(resp.read().decode("utf-8"))
+            conn.close()
+
+            self.assertEqual(resp.status, 200, body)
+            written = parse_fixture(body["written_path"], fixture)
+            self.assertEqual([row["sampleId"] for row in written], sample_ids)
+            self.assertEqual([row["result"] for row in written],
+                             [row["result"] for row in expected])
+
     def test_post_simulate_file_sanitizes_path_traversal_filename(self):
         """Path traversal in filename is stripped to basename (safe write)."""
         with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:

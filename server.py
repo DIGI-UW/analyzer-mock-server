@@ -204,6 +204,10 @@ class ASTMProtocolHandler:
     def _handle_enq(self):
         """Handle ENQ (enquiry) - client wants to send data."""
         logger.debug(f"Received ENQ from {self.addr}")
+        # ENQ opens a new transmission whose frames restart at 1 (CLSI LIS01-A2
+        # 6.3.2.1), so the sequence check must not carry over from the last one.
+        self.last_accepted_frame = 0
+        self.retransmit_count = 0
         # Per CLSI LIS1-A: Must respond within establishment timeout
         self._send(ACK)
         logger.debug(f"Sent ACK to {self.addr}")

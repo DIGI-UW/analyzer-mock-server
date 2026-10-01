@@ -1,7 +1,5 @@
 """
-Protocol abstraction layer base class (M4 multi-protocol simulator).
-
-Reference: specs/011-madagascar-analyzer-integration/plan.md, tasks T071–T073.
+Protocol abstraction layer base class for the multi-protocol simulator.
 """
 
 from abc import ABC, abstractmethod

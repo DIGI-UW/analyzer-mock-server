@@ -13,8 +13,6 @@ Where:
   VT  = 0x0B (Vertical Tab, Start Block)
   FS  = 0x1C (File Separator, End Block)
   CR  = 0x0D (Carriage Return)
-
-Reference: specs/013-hjra-hl7-stream-alignment
 """
 
 import logging

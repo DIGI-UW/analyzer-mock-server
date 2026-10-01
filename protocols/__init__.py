@@ -1,7 +1,5 @@
 """
-Protocol handlers for multi-protocol analyzer simulator (M4).
-
-Reference: specs/011-madagascar-analyzer-integration/plan.md.
+Protocol handlers for the multi-protocol analyzer simulator.
 """
 
 from .base_handler import BaseHandler

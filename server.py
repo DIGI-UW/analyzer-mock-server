@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """Profile-driven laboratory analyzer simulator.
 
-Reference Documents:
-- specs/004-astm-analyzer-mapping/research.md Section 1 (ASTM Protocol)
-- specs/004-astm-analyzer-mapping/spec.md FR-001, FR-002
-
 ASTM LIS2-A2 Protocol Overview:
 1. Client sends ENQ (0x05) to initiate communication
 2. Server responds with ACK (0x06) if ready

@@ -683,6 +683,33 @@ class TestASTMStandardsCompliance(unittest.TestCase):
         finally:
             sock.close()
 
+    def test_second_transmission_on_one_connection_starts_at_frame_one(self):
+        """
+        Frame numbering restarts at 1 with each new ENQ (CLSI LIS01-A2 §6.3.2.1),
+        and an instrument keeps the connection open between messages. The P record
+        keeps the first message from being read as a field query, which would make
+        the server send its own ENQ.
+        """
+        sock = self._create_socket()
+        try:
+            sock.connect((TEST_HOST, TEST_PORT))
+
+            sock.send(ENQ)
+            self.assertEqual(sock.recv(1), ACK)
+            first_message = ["H|\\^&|||Test^First^1.0|||||||LIS2-A2", "P|1||PT-1", "L|1|N"]
+            for frame_num, record in enumerate(first_message, start=1):
+                self.assertEqual(self._send_frame(sock, frame_num, record), ACK)
+            sock.send(EOT)
+
+            sock.send(ENQ)
+            self.assertEqual(sock.recv(1), ACK)
+            response = self._send_frame(sock, 1, "H|\\^&|||Test^Second^1.0|||||||LIS2-A2")
+            self.assertEqual(response, ACK, "a new message's first frame is frame 1")
+            response = self._send_frame(sock, 2, "P|1||PT-2")
+            self.assertEqual(response, ACK)
+        finally:
+            sock.close()
+
 
 if __name__ == '__main__':
     print("=" * 60)

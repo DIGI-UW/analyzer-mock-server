@@ -68,9 +68,11 @@ Start the control API:
 
 ```bash
 export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
-export ASTM_TEMPLATE=genexpert_astm
 python3 server.py --simulate-api-port 8081
 ```
+
+This also starts a listener for every port in `config/port_templates.json`. To
+start one listener instead, see [ACCESS.md](ACCESS.md).
 
 Check health:
 
@@ -184,9 +186,24 @@ curl -X POST http://localhost:8081/analyzers \
 curl http://localhost:8081/analyzers
 ```
 
-Use the instance name in a `/simulate/{protocol}/{name}` request when a test
-must send from that instance's source address. Network provisioning is test
-infrastructure only; Bridge remains the durable connection authority.
+Use the instance name in a `/simulate/astm/{name}` or `/simulate/hl7/{name}`
+request when a test must send from that instance's source address; FILE
+requests take a template name. Network provisioning is test infrastructure
+only; Bridge remains the durable connection authority.
+
+Set `ANALYZER_NETWORK_NAMESPACE` and `ANALYZER_SUBNET_PREFIX` (default `10.42`)
+to keep one stack's analyzer networks apart from another's on the same Docker
+host. `MOCK_CONTAINER_NAME` (default: the container hostname) and
+`BRIDGE_CONTAINER_NAME` name the containers joined to each analyzer network.
+
+## Serial Analyzers
+
+```bash
+python3 server.py --serial-port /dev/pts/3 --serial-analyzer mindray_ba88a
+```
+
+`--serial-port` sends ASTM over a serial device, for example one end of a
+`socat` virtual pair; `--serial-analyzer` names the template to send.
 
 ## Tests
 
@@ -212,7 +229,7 @@ scans or source-text guards for code that should simply be removed.
 - `templates/`: deterministic simulator inputs
 - `profile_adapter.py`: exact Bridge profile revision adapter
 - `fixtures/`: representative analyzer output files
-- `tests/` and `test_*.py`: behavior and contract tests
+- `test_*.py`: behavior and contract tests
 
 ## Standards
 

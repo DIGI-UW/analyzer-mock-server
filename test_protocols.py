@@ -1,7 +1,5 @@
 """
-Unit tests for protocol handlers (M4).
-
-Reference: specs/011-madagascar-analyzer-integration, tasks T091–T095.
+Unit tests for protocol handlers.
 """
 
 import json

@@ -69,9 +69,14 @@ Start a listener with an explicit template:
 
 ```bash
 export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
+export PORT_TEMPLATES='{}'
 export ASTM_TEMPLATE=genexpert_astm
 python3 server.py --port 5000 --simulate-api-port 8081
 ```
+
+`ASTM_TEMPLATE` applies only when the port map is empty; without
+`PORT_TEMPLATES='{}'`, `config/port_templates.json` starts a listener for every
+port it lists.
 
 ## Testing
 

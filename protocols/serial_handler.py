@@ -1,7 +1,5 @@
 """
-RS232 / virtual serial protocol handler (M4). Uses socat for virtual ports.
-
-Reference: specs/011-madagascar-analyzer-integration, tasks T079–T082.
+RS232 / virtual serial protocol handler. Uses socat for virtual ports.
 """
 
 import logging

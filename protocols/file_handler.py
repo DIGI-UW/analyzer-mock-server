@@ -1,7 +1,5 @@
 """
-File-based protocol handler (M4). CSV/TXT generation for file import testing.
-
-Reference: specs/011-madagascar-analyzer-integration, tasks T083–T086.
+File-based protocol handler. CSV/TXT generation for file import testing.
 """
 
 import csv

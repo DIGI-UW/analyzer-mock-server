@@ -2,10 +2,9 @@
 """
 Socket-level integration tests for LIS-initiated order → result round-trip.
 
-Per the mock constitution (Principle I: "behave like a rigorous real-world
-analyzer"; Principle III: integration tests "verify the full protocol handshake
-and data exchange") and OE2's Inversion Test (a test must fail if the SUT is
-replaced by a hardcoded/fixture return).
+The mock must behave like a rigorous real-world analyzer, so these tests verify
+the full protocol handshake and data exchange, and each must fail if the system
+under test is replaced by a hardcoded or fixture return.
 
 These tests drive a REAL order through the mock's listener over a loopback
 socket and capture what the mock pushes back to a stand-in "bridge inbound"

@@ -7,16 +7,20 @@ transports. OpenELIS does not connect to the mock directly.
 
 ```bash
 export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
+export PORT_TEMPLATES='{}'
 export ASTM_TEMPLATE=genexpert_astm
 python3 server.py --port 5000
 ```
 
-The selected template controls the analyzer identity and message behavior. A
-single listener will not start without a valid template.
+The selected template controls the analyzer identity and message behavior.
+`ASTM_TEMPLATE` applies only when the port map is empty: without
+`PORT_TEMPLATES='{}'`, the shipped `config/port_templates.json` loads and starts
+a listener for every port it lists.
 
 ## Start Port-Mapped Listeners
 
-Set `PORT_TEMPLATES` or provide `config/port_templates.json`:
+Set `PORT_TEMPLATES`, or edit `config/port_templates.json`, which is used when
+`PORT_TEMPLATES` is unset:
 
 ```json
 {
@@ -31,6 +35,7 @@ The template protocol selects ASTM TCP or HL7 MLLP handling for each port.
 
 ```bash
 export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
+export PORT_TEMPLATES='{}'
 export ASTM_TEMPLATE=genexpert_astm
 python3 server.py --port 5000 --simulate-api-port 8081
 ```

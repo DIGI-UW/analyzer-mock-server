@@ -1,8 +1,7 @@
 """
-ASTM LIS2-A2 protocol handler (M4). Refactored from server.py.
+ASTM LIS2-A2 protocol handler.
 
-Reference: specs/011-madagascar-analyzer-integration, tasks T072–T073.
-Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
+Reference: Cepheid GeneXpert LIS Protocol Specification Rev E (Sections 4-6).
 """
 
 import logging

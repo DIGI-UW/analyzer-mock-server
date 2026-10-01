@@ -1,7 +1,8 @@
 # Analyzer Simulator Templates
 
-This directory contains deterministic simulator inputs for ASTM, HL7, and FILE
-analyzer traffic.
+This directory contains deterministic simulator inputs for ASTM, HL7, FILE and
+serial analyzer traffic. Templates with a `serial_config` block (for example
+`mindray_ba88a.json` and `stago_start4.json`) also drive serial mode.
 
 ## Authority
 
@@ -21,6 +22,11 @@ A profile-backed template references one exact Bridge profile revision:
   }
 }
 ```
+
+`seedValues` sets the deterministic result value per test code. `fieldOverrides`
+adds per-code simulation detail on top of the profile-derived field, such as a
+GeneXpert assay's wire vocabulary, cartridge version or complementary Ct/Conc
+sub-results; the profile still owns the test menu and result types.
 
 Set `ANALYZER_BRIDGE_PROFILES_DIR` before loading such a template. The adapter
 fails closed unless exactly one matching profile revision exists and has a
@@ -65,7 +71,6 @@ Start the control API:
 
 ```bash
 export ANALYZER_BRIDGE_PROFILES_DIR=/path/to/openelis-analyzer-bridge/src/main/resources/analyzer-profiles
-export ASTM_TEMPLATE=genexpert_astm
 python3 server.py --simulate-api-port 8081
 ```
 
@@ -107,11 +112,14 @@ send results directly to OpenELIS.
 
 ## Validation
 
-Validate one template:
+Check one template against `templates/schema.json`:
 
 ```bash
 python3 template_loader.py --validate templates/genexpert_astm.json
 ```
+
+This is a schema check only. Exact Bridge profile resolution happens when the
+template is loaded, and the mock tests exercise it.
 
 Run all mock tests:
 

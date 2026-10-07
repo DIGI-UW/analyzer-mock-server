@@ -144,5 +144,35 @@ class TestMultiPortResponse(unittest.TestCase):
             t.join(timeout=1)
 
 
+
+class TestReplayOnlyListener(unittest.TestCase):
+    """A GeneXpert that replays Cepheid's messages has nothing queued to send on its own."""
+
+    def test_listens_without_proactive_enq_and_acknowledges_an_enq(self):
+        port = 19611
+        srv = server_module.ASTMMockServer(
+            port=port, response_delay_ms=0, port_to_template={port: 'genexpert_astm'})
+        threading.Thread(target=srv.start, daemon=True).start()
+        for _ in range(40):
+            try:
+                probe = socket.create_connection(('127.0.0.1', port), timeout=0.5)
+                probe.close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            self.fail('Server did not bind to port %s within 2s' % port)
+        try:
+            sock = socket.create_connection(('127.0.0.1', port), timeout=1)
+            with self.assertRaises(socket.timeout):
+                sock.recv(1)
+            sock.settimeout(5)
+            sock.send(ENQ)
+            self.assertEqual(ACK, sock.recv(1))
+            sock.close()
+        finally:
+            srv.stop()
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,7 +1,7 @@
 """Every manufacturer fixture is declared by the pinned baseline profile, and every declared
 outcome has a fixture.
 
-The profile is the Bridge's shipped genexpert-astm revision named below, read from
+The profile is the Bridge's shipped GeneXpert baseline profile named below, read from
 ANALYZER_BRIDGE_PROFILES_DIR (the Bridge's src/main/resources/analyzer-profiles).
 """
 
@@ -12,7 +12,7 @@ import pytest
 
 import fixture_messages
 
-PROFILE_FILE = "genexpert-astm-v8.json"
+PROFILE_FILE = "cepheid-genexpert-astm.json"
 FAMILY = "genexpert"
 # 302-7279 prints the single-result assay's error and invalid examples under the two-assay panel's
 # code, so SARSCOV2_3's values are shown only through SARSCOV2's.

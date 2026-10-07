@@ -9,7 +9,7 @@ on:
     inputs:
       bridge_ref:
         description: "Bridge ref containing the versioned priority profiles"
-        default: "164f4efac85ea07a57dcd1be80df381a7f6a6431"
+        default: "a4a22a46ae4ee1b92006097fd78733d4c4185c1b"
         type: string
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
           repository: DIGI-UW/openelis-analyzer-bridge
           sparse-checkout: src/main/resources/analyzer-profiles
           path: bridge
-          ref: ${{ inputs.bridge_ref || '164f4efac85ea07a57dcd1be80df381a7f6a6431' }}
+          ref: ${{ inputs.bridge_ref || 'a4a22a46ae4ee1b92006097fd78733d4c4185c1b' }}
 
       - name: Set profiles path for tests
         run: |

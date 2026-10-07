@@ -110,6 +110,14 @@ class TestSimulateFixtureApi(unittest.TestCase):
         self.assertEqual(404, status)
         self.mock_push.assert_not_called()
 
+    def test_a_replay_only_template_refuses_to_generate_and_names_the_fixture_route(self):
+        with patch.object(api, "_load_template", return_value={"fixtures": "genexpert"}):
+            status, body = self._post("/simulate/astm/genexpert_astm",
+                                      {"destination": "tcp://bridge:12001", "sample_id": "A"})
+        self.assertEqual(400, status)
+        self.assertIn("/simulate/fixture/genexpert_astm/", body["error"])
+        self.mock_push.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

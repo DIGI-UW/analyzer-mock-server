@@ -1,7 +1,7 @@
 {
   "profileRef": {
-    "profileId": "quantstudio",
-    "revision": 3
+    "profileId": "thermo-quantstudio",
+    "revision": 1
   },
   "qc_sample_id_pattern": "{level}-{lot}-001",
   "fixture": {

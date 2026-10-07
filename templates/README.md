@@ -25,8 +25,8 @@ A profile-backed template references one exact Bridge profile revision:
 
 `seedValues` sets the deterministic result value per test code. `fieldOverrides`
 adds per-code simulation detail on top of the profile-derived field, such as a
-GeneXpert assay's wire vocabulary, cartridge version or complementary Ct/Conc
-sub-results; the profile still owns the test menu and result types.
+wire vocabulary or a version; the profile still owns the test menu and result
+types.
 
 Set `ANALYZER_BRIDGE_PROFILES_DIR` before loading such a template. The adapter
 fails closed unless exactly one matching profile revision exists and has a
@@ -58,7 +58,7 @@ The priority acceptance fixtures are:
 
 | Template | Traffic | Profile source |
 | --- | --- | --- |
-| `genexpert_astm.json` | ASTM TCP | Exact Bridge profile revision |
+| `genexpert_astm.json` | ASTM TCP | Replays Cepheid's documented messages (`fixtures/genexpert`) |
 | `hain_fluorocycler.json` | FILE watch directory | Exact Bridge profile revision |
 
 These are exercised across the real mock process and Bridge runtime. Other
@@ -77,16 +77,15 @@ python3 server.py --simulate-api-port 8081
 Generate without sending:
 
 ```bash
-curl http://localhost:8081/simulate/astm/genexpert_astm
 curl http://localhost:8081/simulate/file/hain_fluorocycler
 ```
 
-Send ASTM through a saved Bridge listener:
+Replay a GeneXpert message through a saved Bridge listener:
 
 ```bash
-curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+curl -X POST http://localhost:8081/simulate/fixture/genexpert_astm/hivvl/quantified \
   -H 'Content-Type: application/json' \
-  -d '{"destination":"tcp://127.0.0.1:12001"}'
+  -d '{"destination":"tcp://127.0.0.1:12001","sample_id":"LAB-2026-00001"}'
 ```
 
 Write FILE traffic into a saved Bridge connection's watch directory:

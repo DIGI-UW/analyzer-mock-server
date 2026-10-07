@@ -420,6 +420,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if not template:
             self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
+        if template.get("fixtures") and "fields" not in template:
+            self._send_json(400, {"error": f"{template_name} replays manufacturer messages only; use "
+                                           f"/simulate/fixture/{template_name}/<assay>/<outcome>"})
+            return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
             return

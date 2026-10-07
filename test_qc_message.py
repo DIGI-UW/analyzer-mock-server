@@ -35,7 +35,7 @@ class QCMessageContract(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.template = _load_template("genexpert_astm")
+        cls.template = _load_template("stago_start4")
 
     def _generate(self, deviation=None) -> str:
         return ASTMHandler().generate_qc(self.template, deviation=deviation)
@@ -76,41 +76,6 @@ class QCMessageContract(unittest.TestCase):
             components[1].startswith("LOT-"),
             f"Expected lot number prefix 'LOT-', got: {components[1]}",
         )
-
-    def test_deviation_zero_emits_target_value(self):
-        msg = self._generate(deviation=0)
-        r_records = [r for r in self._records(msg) if r.startswith("R|")]
-        self.assertEqual(len(r_records), 1, f"Expected one R-record, got: {r_records}")
-        value = float(r_records[0].split("|")[3])
-        # genexpert_astm.json qc_controls[0].target = 1250.0
-        self.assertAlmostEqual(value, 1250.0, places=1)
-
-    def test_deviation_3_5_emits_target_plus_3_5_sd(self):
-        # MOLECULAR SD = 10% of target (astm_handler.py:367) → 125.0
-        # Expected: 1250 + 3.5 * 125 = 1687.5 (1₃ₛ rejection territory)
-        msg = self._generate(deviation=3.5)
-        r_records = [r for r in self._records(msg) if r.startswith("R|")]
-        value = float(r_records[0].split("|")[3])
-        self.assertAlmostEqual(value, 1687.5, places=1)
-
-    def test_deviation_minus_2_5_emits_target_minus_2_5_sd(self):
-        # 1250 - 2.5 * 125 = 937.5 (1₂ₛ warning territory)
-        msg = self._generate(deviation=-2.5)
-        r_records = [r for r in self._records(msg) if r.startswith("R|")]
-        value = float(r_records[0].split("|")[3])
-        self.assertAlmostEqual(value, 937.5, places=1)
-
-    def test_h_record_carries_genexpert_identifier(self):
-        # Bridge identifies analyzer via H.5 (sender identifier). For
-        # genexpert template the H-record should include "GENEXPERT" or
-        # "GeneXpert" so the bridge's protocolHint matches the registered
-        # analyzer name.
-        msg = self._generate(deviation=0)
-        h_records = [r for r in self._records(msg) if r.startswith("H|")]
-        self.assertEqual(len(h_records), 1)
-        self.assertIn("eneXpert", h_records[0],
-                      f"Expected GeneXpert identifier in H-record, got: {h_records[0]}")
-
 
 class FileQCMessageContract(unittest.TestCase):
     """Test B — FILE (QuantStudio) generate_qc emission contract.

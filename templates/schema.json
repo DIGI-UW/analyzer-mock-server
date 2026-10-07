@@ -27,6 +27,18 @@
         ]
       },
       "description": "Profile-backed fixture whose analyzer, protocol, and assay data come from one exact Bridge profile revision."
+    },
+    {
+      "required": ["identification", "astm_config", "fixtures"],
+      "not": {
+        "anyOf": [
+          { "required": ["profileRef"] },
+          { "required": ["fields"] },
+          { "required": ["analyzer"] },
+          { "required": ["protocol"] }
+        ]
+      },
+      "description": "Replay-only fixture template: an ASTM transport that sends a manufacturer's documented messages from fixtures/<family>, never generated ones."
     }
   ],
   "properties": {

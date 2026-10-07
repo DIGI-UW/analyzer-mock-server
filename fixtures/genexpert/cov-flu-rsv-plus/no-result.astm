@@ -1,0 +1,39 @@
+H|@^\|GXM-04617177528||GeneXpert PC^GeneXpert^6.3|||||LIS||P|1394-97|20210809121210
+P|1|||{patient_id}|{patient_name}|||||||||||||||||||||||||||||
+O|1|{sample_id}||^^^COVFLURSVPLUS|R|20210713164557|||||||||ORH||||||||||F
+R|1|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^Xpress SARS-CoV-2_Flu_RSV plus^1^SARS-CoV-2^|NO RESULT - REPEAT TEST^|||||F|| John Doe |20210713164557|20210713164741|CepheidVM-
+C|1|I|Error^2125^Operation terminated^Error 2125: Termination Error - Insufficient Volume: 15, 50, 0, 16^20210713164809|N
+R|2|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^|NO RESULT^|||
+R|3|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^Ct|^0.0|||
+R|4|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^EndPt|^0.0|||
+R|5|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^|NO RESULT^|||
+R|6|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^Ct|^0.0|||
+R|7|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^EndPt|^0.0|||
+R|8|^COVFLURSVPLUS^^{instrument_code:FLUA}^Xpress SARS-CoV-2_Flu_RSV plus^1^Flu A^|NO RESULT - REPEAT TEST^|||||F|| John Doe |20210713164557|20210713164741|CepheidVM-PC^812422^647156^472753073^00500^20211226|
+C|1|I|Error^2125^Operation terminated^Error 2125: Termination Error - Insufficient Volume: 15, 50, 0, 16^20210713164809|N
+R|9|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^|NO RESULT^|||
+R|10|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^Ct|^0.0|||
+R|11|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^EndPt|^0.0|||
+R|12|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^|NO RESULT^|||
+R|13|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^Ct|^0.0|||
+R|14|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^EndPt|^0.0|||
+R|15|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^|NO RESULT^|||
+R|16|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^Ct|^0.0|||
+R|17|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^EndPt|^0.0|||
+R|18|^COVFLURSVPLUS^^{instrument_code:FLUB}^Xpress SARS-CoV-2_Flu_RSV plus^1^Flu B^|NO RESULT - REPEAT TEST^|||||F|| John Doe |20210713164557|20210713164741|CepheidVM-PC^812422^647156^472753073^00500^20211226|
+C|1|I|Error^2125^Operation terminated^Error 2125: Termination Error - Insufficient Volume: 15, 50, 0, 16^20210713164809|N
+R|19|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^|NO RESULT^|||
+R|20|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^Ct|^0.0|||
+R|21|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^EndPt|^0.0|||
+R|22|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^|NO RESULT^|||
+R|23|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^Ct|^0.0|||
+R|24|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^EndPt|^0.0|||
+R|25|^COVFLURSVPLUS^^{instrument_code:RSV}^Xpress SARS-CoV-2_Flu_RSV plus^1^RSV^|NO RESULT - REPEAT TEST^|||||F|| John Doe |20210713164557|20210713164741|CepheidVM-PC^812422^647156^472753073^00500^20211226|
+C|1|I|Error^2125^Operation terminated^Error 2125: Termination Error - Insufficient Volume: 15, 50, 0, 16^20210713164809|N
+R|26|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^|NO RESULT^|||
+R|27|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^Ct|^0.0|||
+R|28|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^EndPt|^0.0|||
+R|29|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^|NO RESULT^|||
+R|30|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^Ct|^0.0|||
+R|31|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^EndPt|^0.0|||
+L|1|N

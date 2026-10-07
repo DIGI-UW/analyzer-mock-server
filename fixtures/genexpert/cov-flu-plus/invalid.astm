@@ -1,0 +1,28 @@
+H|@^\|GXM-66263131232||GeneXpert PC^GeneXpert^6.3|||||LIS||P|1394-97|20210809120237
+P|1|||{patient_id}|{patient_name}|||||||||||||||||||||||||||||
+O|1|{sample_id}||^^^COVFLUPLUS|R|20210804145359|||||||||ORH||||||||||F
+R|1|^COVFLUPLUS^^{instrument_code:SARSCOV2}^Xpress SARS-CoV-2_Flu plus^1^SARS-CoV-2^|INVALID^|||||F|| John Doe |20210804145359|20210804153036|CepheidVM-PC^714106^711453^472753073^00500^20211226|
+R|2|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^|INVALID^|||
+R|3|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^Ct|^0.0|||
+R|4|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^EndPt|^1.0|||
+R|5|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^|FAIL^|||
+R|6|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^Ct|^0.0|||
+R|7|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^EndPt|^0.0|||
+R|8|^COVFLUPLUS^^{instrument_code:FLUA}^Xpress SARS-CoV-2_Flu plus^1^Flu A^|INVALID^|||||F|| John Doe |20210804145359|20210804153036|CepheidVM-PC^714106^711453^472753073^00500^20211226|
+R|9|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^|INVALID^|||
+R|10|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^Ct|^0.0|||
+R|11|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^EndPt|^2.0|||
+R|12|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^|INVALID^|||
+R|13|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^Ct|^0.0|||
+R|14|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^EndPt|^1.0|||
+R|15|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^|FAIL^|||
+R|16|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^Ct|^0.0|||
+R|17|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^EndPt|^0.0|||
+R|18|^COVFLUPLUS^^{instrument_code:FLUB}^Xpress SARS-CoV-2_Flu plus^1^Flu B^|INVALID^|||||F|| John Doe |20210804145359|20210804153036|CepheidVM-PC^714106^711453^472753073^00500^20211226|
+R|19|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^|INVALID^|||
+R|20|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^Ct|^0.0|||
+R|21|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^EndPt|^2.0|||
+R|22|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^|FAIL^|||
+R|23|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^Ct|^0.0|||
+R|24|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^EndPt|^0.0|||
+L|1|N

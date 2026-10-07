@@ -1,0 +1,35 @@
+H|@^\|GXM-33725387435||GeneXpert PC^GeneXpert^6.3|||||LIS||P|1394-97|20210820144159
+P|1|||{patient_id}|{patient_name}|||||||||||||||||||||||||||||
+O|1|{sample_id}||^^^COVFLURSVPLUS|R|20210713160633|||||||||ORH||||||||||F
+R|1|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^Xpress SARS-CoV-2_Flu_RSV plus^1^SARS-CoV-2^|NEGATIVE^|||||F||John Doe|20210713160633|20210713164224|CepheidVM-PC^804051^639127^472753131^00500^20211226|
+R|2|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^|NEG^|||
+R|3|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^Ct|^0.0|||
+R|4|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^EndPt|^1.0|||
+R|5|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^|PASS^|||
+R|6|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^Ct|^29.3|||
+R|7|^COVFLURSVPLUS^^{instrument_code:SARSCOV2}^^^SPC^EndPt|^180.0|||
+R|8|^COVFLURSVPLUS^^{instrument_code:FLUA}^Xpress SARS-CoV-2_Flu_RSV plus^1^Flu A^|NEGATIVE^|||||F||John Doe|20210713160633|20210713164224|CepheidVM-PC^804051^639127^472753131^00500^20211226|
+R|9|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^|NEG^|||
+R|10|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^Ct|^0.0|||
+R|11|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 1^EndPt|^2.0|||
+R|12|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^|NEG^|||
+R|13|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^Ct|^0.0|||
+R|14|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^Flu A 2^EndPt|^1.0|||
+R|15|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^|PASS^|||
+R|16|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^Ct|^29.3|||
+R|17|^COVFLURSVPLUS^^{instrument_code:FLUA}^^^SPC^EndPt|^180.0|||
+R|18|^COVFLURSVPLUS^^{instrument_code:FLUB}^Xpress SARS-CoV-2_Flu_RSV plus^1^Flu B^|NEGATIVE^|||||F||John Doe|20210713160633|20210713164224|CepheidVM-PC^804051^639127^472753131^00500^20211226|
+R|19|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^|NEG^|||
+R|20|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^Ct|^0.0|||
+R|21|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^Flu B^EndPt|^1.0|||
+R|22|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^|PASS^|||
+R|23|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^Ct|^29.3|||
+R|24|^COVFLURSVPLUS^^{instrument_code:FLUB}^^^SPC^EndPt|^180.0|||
+R|25|^COVFLURSVPLUS^^{instrument_code:RSV}^Xpress SARS-CoV-2_Flu_RSV plus^1^RSV^|NEGATIVE^|||||F||John Doe|20210713160633|20210713164224|CepheidVM-PC^804051^639127^472753131^00500^20211226|
+R|26|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^|NEG^|||
+R|27|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^Ct|^0.0|||
+R|28|^COVFLURSVPLUS^^{instrument_code:RSV}^^^RSV^EndPt|^0.0|||
+R|29|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^|PASS^|||
+R|30|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^Ct|^29.3|||
+R|31|^COVFLURSVPLUS^^{instrument_code:RSV}^^^SPC^EndPt|^180.0|||
+L|1|N

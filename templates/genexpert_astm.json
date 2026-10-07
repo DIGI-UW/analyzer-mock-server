@@ -11,7 +11,8 @@
         "enable_qc": false,
         "proactive_enq": true
     },
-    "profileRef": {
+    "fixtures": "genexpert",
+  "profileRef": {
         "profileId": "genexpert-astm",
         "revision": 4
     },

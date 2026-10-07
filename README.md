@@ -100,6 +100,27 @@ curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
 
 The destination must use `tcp://`. HTTP destinations are rejected.
 
+## Replay A Manufacturer's Own Message
+
+For GeneXpert, `fixtures/genexpert/<assay>/<outcome>.astm` holds the ASTM messages Cepheid prints
+in its LIS guidance (303-0251 section 2.1.1 and 302-7279 section 6), unchanged except for
+placeholders. Push one as an instrument would send it:
+
+```bash
+curl -s -X POST http://localhost:8085/simulate/fixture/genexpert/hivvl/below-40 \
+  -H 'Content-Type: application/json' \
+  -d '{"destination": "tcp://bridge:12001", "sample_id": "ACC-1", "sender_id": "GX-1",
+       "patient": {"id": "MRN-9", "name": "Roe^Jane"},
+       "instrument_codes": {"HIVVL": "HIVU"}}'
+```
+
+`destination` and `sample_id` are required. `{patient_id}` and `{patient_name}` fill the P
+record (empty by default, as in Cepheid's examples), and `instrument_codes` maps a profile test
+code to the code this instrument sends for it (`{instrument_code:HIVVL}` in a fixture).
+`test_fixtures_match_profile.py` keeps the fixtures and the Bridge's baseline profile in step: every
+record and value in a fixture is declared by the profile, and every declared one is in a fixture.
+Assays today: `hivvl`, `cov-flu-rsv-plus`, `cov-flu-plus`, `cov-plus`.
+
 ## Send HL7 Through Bridge
 
 ```bash

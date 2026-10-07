@@ -1,0 +1,31 @@
+H|@^\|GXM-52657545660||GeneXpert PC^GeneXpert^6.3|||||LIS||P|1394-97|20210809120239
+P|1|||{patient_id}|{patient_name}|||||||||||||||||||||||||||||
+O|1|{sample_id}||^^^COVFLUPLUS|R|20210713123358|||||||||ORH||||||||||F
+R|1|^COVFLUPLUS^^{instrument_code:SARSCOV2}^Xpress SARS-CoV-2_Flu plus^1^SARS-CoV-2^|ERROR^|||||F|| John Doe |20210713123358|20210713124719|CepheidVM-PC^714107^607591^472753088^00500^20211226|
+C|1|I|Error^2008^Operation terminated^Error 2008: Syringe pressure reading of 100.0 PSI exceeds the protocol limit of 100.0 PSI^20210713124706|N
+R|2|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^|NO RESULT^|||
+R|3|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^Ct|^0.0|||
+R|4|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^EndPt|^0.0|||
+R|5|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^|NO RESULT^|||
+R|6|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^Ct|^0.0|||
+R|7|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^EndPt|^0.0|||
+R|8|^COVFLUPLUS^^{instrument_code:FLUA}^Xpress SARS-CoV-2_Flu plus^1^Flu A^|ERROR^|||||F|| John Doe |20210713123358|20210713124719|CepheidVM-PC^714107^607591^472753088^00500^20211226|
+C|1|I|Error^2008^Operation terminated^Error 2008: Syringe pressure reading of 100.0 PSI exceeds the protocol limit of 100.0 PSI^20210713124706|N
+R|9|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^|NO RESULT^|||
+R|10|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^Ct|^0.0|||
+R|11|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^EndPt|^0.0|||
+R|12|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^|NO RESULT^|||
+R|13|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^Ct|^0.0|||
+R|14|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^EndPt|^0.0|||
+R|15|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^|NO RESULT^|||
+R|16|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^Ct|^0.0|||
+R|17|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^EndPt|^0.0|||
+R|18|^COVFLUPLUS^^{instrument_code:FLUB}^Xpress SARS-CoV-2_Flu plus^1^Flu B^|ERROR^|||||F|| John Doe |20210713123358|20210713124719|CepheidVM-PC^714107^607591^472753088^00500^20211226|
+C|1|I|Error^2008^Operation terminated^Error 2008: Syringe pressure reading of 100.0 PSI exceeds the protocol limit of 100.0 PSI^20210713124706|N
+R|19|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^|NO RESULT^|||
+R|20|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^Ct|^0.0|||
+R|21|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^EndPt|^0.0|||
+R|22|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^|NO RESULT^|||
+R|23|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^Ct|^0.0|||
+R|24|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^EndPt|^0.0|||
+L|1|N

@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-    inputs:
-      bridge_ref:
-        description: "Bridge ref containing the versioned priority profiles"
-        default: "a4a22a46ae4ee1b92006097fd78733d4c4185c1b"
-        type: string
 
 jobs:
   test:
@@ -19,18 +14,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Checkout versioned priority profiles from Bridge
-        uses: actions/checkout@v4
-        with:
-          repository: DIGI-UW/openelis-analyzer-bridge
-          sparse-checkout: src/main/resources/analyzer-profiles
-          path: bridge
-          ref: ${{ inputs.bridge_ref || 'a4a22a46ae4ee1b92006097fd78733d4c4185c1b' }}
-
-      - name: Set profiles path for tests
-        run: |
-          echo "ANALYZER_BRIDGE_PROFILES_DIR=${{ github.workspace }}/bridge/src/main/resources/analyzer-profiles" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5

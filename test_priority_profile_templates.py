@@ -30,6 +30,7 @@ def test_priority_template_pins_exact_bridge_profile_revision(template_name, pro
     assert "perFileTestCode" not in template.get("fixture", {})
 
 
+@pytest.mark.needs_bridge
 @pytest.mark.parametrize("template_name,profile_ref", PRIORITY_PROFILE_REFS.items())
 def test_priority_template_loads_exact_bridge_profile(template_name, profile_ref):
     profiles_dir = os.environ.get("ANALYZER_BRIDGE_PROFILES_DIR")

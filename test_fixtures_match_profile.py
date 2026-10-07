@@ -12,6 +12,8 @@ import pytest
 
 import fixture_messages
 
+pytestmark = pytest.mark.needs_bridge
+
 PROFILE_FILE = "cepheid-genexpert-astm.json"
 FAMILY = "genexpert"
 # 302-7279 prints the single-result assay's error and invalid examples under the two-assay panel's
@@ -20,9 +22,7 @@ SHOWN_THROUGH = {"SARSCOV2_3": "SARSCOV2"}
 
 
 def _profile():
-    directory = os.environ.get("ANALYZER_BRIDGE_PROFILES_DIR")
-    if not directory:
-        pytest.skip("ANALYZER_BRIDGE_PROFILES_DIR is not set")
+    directory = os.environ["ANALYZER_BRIDGE_PROFILES_DIR"]
     with open(os.path.join(directory, PROFILE_FILE), encoding="utf-8") as handle:
         return json.load(handle)
 

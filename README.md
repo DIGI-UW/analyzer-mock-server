@@ -239,9 +239,12 @@ Run the complete mock suite:
 uv run --with-requirements requirements.txt python -m pytest
 ```
 
-The Bridge repository owns the cross-process result-traffic harness. Point that
-harness at this checkout to exercise the real mock process, Bridge listeners,
-profile parsing, and normalized OpenELIS contract.
+The suite tests the mock on its own: the file templates generate from the copies
+of their Bridge profiles in `test_profiles`. Tests that need the Bridge as well
+are marked `needs_bridge` and skipped here; OpenELIS runs them, and the Bridge's
+cross-process result-traffic harness, against its Bridge and mock submodules,
+which record the versions that go together. To run them locally, set
+`ANALYZER_BRIDGE_PROFILES_DIR` to the Bridge's `src/main/resources/analyzer-profiles`.
 
 Focused tests should assert observable protocol behavior. Do not add filesystem
 scans or source-text guards for code that should simply be removed.

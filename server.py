@@ -115,7 +115,7 @@ class ASTMProtocolHandler:
         if not self.astm_template:
             raise ValueError("ASTM analyzer listener requires a valid template")
         self.frame_number = 0
-        self.last_accepted_frame = 0  # Track last accepted frame number per CLSI LIS1-A
+        self.last_accepted_frame = None  # None until a transmission's first frame (CLSI LIS01-A2)
         self.retransmit_count = 0  # Track retransmissions per CLSI LIS1-A
         self.received_data: List[bytes] = []
         self.received_orders: List[Dict[str, str]] = []  # inbound LIS orders awaiting result push
@@ -205,7 +205,7 @@ class ASTMProtocolHandler:
         logger.debug(f"Received ENQ from {self.addr}")
         # ENQ opens a new transmission whose frames restart at 1 (CLSI LIS01-A2
         # 6.3.2.1), so the sequence check must not carry over from the last one.
-        self.last_accepted_frame = 0
+        self.last_accepted_frame = None
         self.retransmit_count = 0
         # Per CLSI LIS1-A: Must respond within establishment timeout
         self._send(ACK)
@@ -275,10 +275,10 @@ class ASTMProtocolHandler:
         
         # Validate frame number per CLSI LIS01-A2 §6.3.2.1:
         # Frame numbers 0-7, begin at 1, increment by 1, wrap 7→0.
-        if self.last_accepted_frame == 0:
-            # First frame — accept any valid frame number (0-7)
-            if frame_num < 0 or frame_num > 7:
-                logger.warning(f"Invalid frame number range: {frame_num} (must be 0-7)")
+        if self.last_accepted_frame is None:
+            # A transmission's first frame is frame 1.
+            if frame_num != 1:
+                logger.warning(f"First frame of a transmission must be 1, got {frame_num}")
                 self._send(NAK)
                 self.retransmit_count += 1
                 if self.retransmit_count >= 6:

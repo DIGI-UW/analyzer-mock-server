@@ -711,6 +711,35 @@ class TestASTMStandardsCompliance(unittest.TestCase):
             sock.close()
 
 
+    def test_a_transmission_opens_on_frame_one_and_only_frame_one(self):
+        """A first frame numbered 0 or 7 is refused; the transmission starts at 1 (CLSI LIS01-A2 6.3.2.1)."""
+        for opening in (0, 7):
+            sock = self._create_socket()
+            try:
+                sock.connect((TEST_HOST, TEST_PORT))
+                sock.send(ENQ)
+                self.assertEqual(sock.recv(1), ACK)
+                response = self._send_frame(sock, opening, "H|\\^&|||Test^Opening^1.0|||||||LIS2-A2")
+                self.assertEqual(response, NAK, f"a transmission opening on frame {opening} is refused")
+            finally:
+                sock.close()
+
+    def test_after_frame_seven_wraps_to_zero_the_next_frame_is_one(self):
+        """Wrapping 7 to 0 is not a new transmission: the frame after 0 must be 1."""
+        sock = self._create_socket()
+        try:
+            sock.connect((TEST_HOST, TEST_PORT))
+            sock.send(ENQ)
+            self.assertEqual(sock.recv(1), ACK)
+            records = ["H|\\^&|||Test^Wrap^1.0|||||||LIS2-A2"] + [f"P|{n}||PT-{n}" for n in range(1, 8)]
+            for frame_num, record in zip([1, 2, 3, 4, 5, 6, 7, 0], records):
+                self.assertEqual(self._send_frame(sock, frame_num, record), ACK)
+            response = self._send_frame(sock, 5, "P|8||PT-8")
+            self.assertEqual(response, NAK, "frame 5 after frame 0 is out of sequence")
+        finally:
+            sock.close()
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("ASTM Mock Server Tests - TDD RED Phase")

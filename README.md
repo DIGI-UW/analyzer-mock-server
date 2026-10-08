@@ -110,7 +110,7 @@ in its LIS guidance (303-0251 section 2.1.1 and 302-7279 section 6), unchanged e
 placeholders. Push one as an instrument would send it:
 
 ```bash
-curl -s -X POST http://localhost:8085/simulate/fixture/genexpert/hivvl/below-40 \
+curl -s -X POST http://localhost:8085/simulate/fixture/genexpert_astm/hivvl/below-40 \
   -H 'Content-Type: application/json' \
   -d '{"destination": "tcp://bridge:12001", "sample_id": "ACC-1", "sender_id": "GX-1",
        "patient": {"id": "MRN-9", "name": "Roe^Jane"},

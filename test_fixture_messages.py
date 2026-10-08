@@ -110,6 +110,29 @@ class TestSimulateFixtureApi(unittest.TestCase):
         self.assertEqual(404, status)
         self.mock_push.assert_not_called()
 
+    def test_a_fixture_route_takes_only_simple_names(self):
+        for path in ("/simulate/fixture/..%2Ftemplates/hivvl/below-40",
+                     "/simulate/fixture/genexpert_astm/hiv.vl/below-40",
+                     "/simulate/fixture/genexpert_astm/hivvl/below..40"):
+            with patch.object(api, "_load_template") as load:
+                status, body = self._post(path, {"destination": "tcp://bridge:12001", "sample_id": "A"})
+                self.assertEqual(400, status, path)
+                load.assert_not_called()
+        self.mock_push.assert_not_called()
+
+    def test_a_value_that_would_split_an_astm_record_is_refused(self):
+        for field, body in (
+            ("sample_id", {"sample_id": "ACC|7"}),
+            ("patient.id", {"sample_id": "ACC-7", "patient": {"id": "MRN\r9"}}),
+            ("patient.name", {"sample_id": "ACC-7", "patient": {"name": "Roe|Jane"}}),
+            ("instrument_codes.HIVVL", {"sample_id": "ACC-7", "instrument_codes": {"HIVVL": "HIV\nU"}}),
+        ):
+            status, response = self._post("/simulate/fixture/genexpert_astm/hivvl/below-40",
+                                          {"destination": "tcp://bridge:12001", **body})
+            self.assertEqual(400, status, field)
+            self.assertIn(field, response["error"])
+        self.mock_push.assert_not_called()
+
     def test_a_replay_only_template_refuses_to_generate_and_names_the_fixture_route(self):
         with patch.object(api, "_load_template", return_value={"fixtures": "genexpert"}):
             status, body = self._post("/simulate/astm/genexpert_astm",

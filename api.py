@@ -264,7 +264,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/simulate/fixture/"):
             parts = [segment for segment in self.path.split("?")[0][len("/simulate/fixture/"):].split("/") if segment]
-            if len(parts) != 3:
+            if len(parts) != 3 or not all(re.match(r"^[A-Za-z0-9_-]+$", part) for part in parts):
                 self._send_json(400, {"error": "Use /simulate/fixture/{analyzer}/{assay}/{outcome}"})
                 return
             self._handle_fixture_post(*parts)
@@ -528,6 +528,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "destination and sample_id are required"})
             return
         patient = params.get("patient") or {}
+        codes = params.get("instrument_codes") or {}
+        # These values are written into ASTM fields, so they may not carry a field or record break.
+        supplied = {"sample_id": sample_id, "sender_id": params.get("sender_id"),
+                    "patient.id": patient.get("id"), "patient.name": patient.get("name"),
+                    **{f"instrument_codes.{code}": value for code, value in codes.items()}}
+        for field, value in supplied.items():
+            if value is not None and any(mark in str(value) for mark in ("|", "\r", "\n")):
+                self._send_json(400, {"error": f"{field} may not contain '|', a carriage return or a line feed"})
+                return
         try:
             message = fixture_messages.render(
                 family, assay, outcome, sample_id=sample_id,

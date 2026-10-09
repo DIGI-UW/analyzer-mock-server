@@ -115,7 +115,7 @@ class ASTMProtocolHandler:
         if not self.astm_template:
             raise ValueError("ASTM analyzer listener requires a valid template")
         self.frame_number = 0
-        self.last_accepted_frame = 0  # Track last accepted frame number per CLSI LIS1-A
+        self.last_accepted_frame = None  # None until a transmission's first frame (CLSI LIS01-A2)
         self.retransmit_count = 0  # Track retransmissions per CLSI LIS1-A
         self.received_data: List[bytes] = []
         self.received_orders: List[Dict[str, str]] = []  # inbound LIS orders awaiting result push
@@ -130,7 +130,8 @@ class ASTMProtocolHandler:
         # GeneXpert which has queued results). This creates contention if the
         # client also sends ENQ — matching real instrument behavior per
         # CLSI LIS1-A §8.2.7.1.
-        if self.astm_template and self.astm_template.get('astm_config', {}).get('proactive_enq'):
+        if (self.astm_template and self.astm_template.get('astm_config', {}).get('proactive_enq')
+                and self.astm_template.get('fields')):
             logger.info(f"[PROACTIVE_ENQ] Sending ENQ to {self.addr} (instrument has data)")
             self._send(ENQ)
             try:
@@ -203,6 +204,10 @@ class ASTMProtocolHandler:
     def _handle_enq(self):
         """Handle ENQ (enquiry) - client wants to send data."""
         logger.debug(f"Received ENQ from {self.addr}")
+        # ENQ opens a new transmission whose frames restart at 1 (CLSI LIS01-A2
+        # 6.3.2.1), so the sequence check must not carry over from the last one.
+        self.last_accepted_frame = None
+        self.retransmit_count = 0
         # Per CLSI LIS1-A: Must respond within establishment timeout
         self._send(ACK)
         logger.debug(f"Sent ACK to {self.addr}")
@@ -271,10 +276,10 @@ class ASTMProtocolHandler:
         
         # Validate frame number per CLSI LIS01-A2 §6.3.2.1:
         # Frame numbers 0-7, begin at 1, increment by 1, wrap 7→0.
-        if self.last_accepted_frame == 0:
-            # First frame — accept any valid frame number (0-7)
-            if frame_num < 0 or frame_num > 7:
-                logger.warning(f"Invalid frame number range: {frame_num} (must be 0-7)")
+        if self.last_accepted_frame is None:
+            # A transmission's first frame is frame 1.
+            if frame_num != 1:
+                logger.warning(f"First frame of a transmission must be 1, got {frame_num}")
                 self._send(NAK)
                 self.retransmit_count += 1
                 if self.retransmit_count >= 6:
@@ -568,7 +573,7 @@ class ASTMProtocolHandler:
 
         logger.info(f"[FIELD_QUERY] Using template: {self.astm_template.get('analyzer', {}).get('name', 'unknown')}")
         try:
-            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            message = _template_message(self.astm_template, "FIELD_QUERY") or ""
             records = [r for r in message.strip().split('\n') if r.strip()]
             for i, record in enumerate(records):
                 if not self._send_frame(record.strip()):
@@ -599,7 +604,7 @@ class ASTMProtocolHandler:
             return
 
         try:
-            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            message = _template_message(self.astm_template, "RESULTS_QUERY") or ""
             records = [r for r in message.strip().split('\n') if r.strip()]
 
             for i, record in enumerate(records):
@@ -748,7 +753,7 @@ class ASTMProtocolHandler:
         Used by proactive ENQ flow where the handshake is handled by the caller.
         """
         if self.astm_template:
-            message = ASTMHandler().generate(self.astm_template, use_seed=True)
+            message = _template_message(self.astm_template, "PROACTIVE_ENQ") or ""
             records = [r for r in message.strip().split('\n') if r.strip()]
             for i, record in enumerate(records):
                 if not self._send_frame(record.strip()):
@@ -828,7 +833,7 @@ class ASTMMockServer:
                     raise ValueError(
                         f"Cannot resolve template {template_name} for port {listener_port}"
                     )
-                protocol = template.get("protocol", {}).get("type", "").upper()
+                protocol = _listener_protocol(template)
                 if protocol not in {"ASTM", "HL7"}:
                     raise ValueError(
                         f"Template {template_name} uses unsupported listener protocol {protocol}"
@@ -853,7 +858,7 @@ class ASTMMockServer:
             return None
         template = _load_template(template_name)
         if template:
-            proto = template.get('protocol', {}).get('type', '')
+            proto = _listener_protocol(template)
             name = template.get('analyzer', {}).get('name', template_name)
             if proto != 'ASTM':
                 logger.warning(f"ASTM_TEMPLATE={template_name} is not ASTM protocol ({proto}), ignoring")
@@ -907,7 +912,7 @@ class ASTMMockServer:
         Returns 'HL7' or 'ASTM' (default). Both are equal citizens —
         the template's protocol.type field determines the handler.
         """
-        return self.templates_by_port[port]["protocol"]["type"].upper()
+        return _listener_protocol(self.templates_by_port[port])
 
     def _start_multi_port(self):
         """Multi-port mode: one socket per port, protocol-aware handler dispatch.
@@ -1002,6 +1007,21 @@ def _load_template(analyzer: str) -> Optional[Dict]:
             return None
 
     return template
+
+
+def _listener_protocol(template: Dict) -> str:
+    """A template's wire protocol; a replay-only template is ASTM by its astm_config."""
+    declared = template.get("protocol", {}).get("type", "").upper()
+    return declared or ("ASTM" if template.get("astm_config") else "")
+
+
+def _template_message(template: Dict, context: str) -> Optional[str]:
+    """A generated message, or None for a template that only replays a manufacturer's own."""
+    if template.get("fixtures") and not template.get("fields"):
+        logger.info(f"[{context}] Nothing queued: this template replays manufacturer messages "
+                    f"only, through /simulate/fixture/<template>/<assay>/<outcome>")
+        return None
+    return ASTMHandler().generate(template, use_seed=True)
 
 
 def _load_port_templates(default_port: int) -> Dict[int, str]:

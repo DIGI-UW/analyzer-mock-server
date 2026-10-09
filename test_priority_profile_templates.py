@@ -8,10 +8,9 @@ from template_loader import TemplateLoader
 
 
 PRIORITY_PROFILE_REFS = {
-    "genexpert_astm": {"profileId": "genexpert-astm", "revision": 4},
-    "hain_fluorocycler": {"profileId": "fluorocycler-xt", "revision": 3},
-    "quantstudio5": {"profileId": "quantstudio", "revision": 3},
-    "quantstudio7": {"profileId": "quantstudio", "revision": 3},
+    "hain_fluorocycler": {"profileId": "hain-fluorocycler-xt", "revision": 1},
+    "quantstudio5": {"profileId": "thermo-quantstudio", "revision": 1},
+    "quantstudio7": {"profileId": "thermo-quantstudio", "revision": 1},
 }
 
 
@@ -31,6 +30,7 @@ def test_priority_template_pins_exact_bridge_profile_revision(template_name, pro
     assert "perFileTestCode" not in template.get("fixture", {})
 
 
+@pytest.mark.needs_bridge
 @pytest.mark.parametrize("template_name,profile_ref", PRIORITY_PROFILE_REFS.items())
 def test_priority_template_loads_exact_bridge_profile(template_name, profile_ref):
     profiles_dir = os.environ.get("ANALYZER_BRIDGE_PROFILES_DIR")

@@ -1,0 +1,28 @@
+H|@^\|GXM-12350662605||GeneXpert PC^GeneXpert^6.3|||||LIS||P|1394-97|20210820145320
+P|1|||{patient_id}|{patient_name}|||||||||||||||||||||||||||||
+O|1|{sample_id}||^^^COVFLUPLUS|R|20210713122600|||||||||ORH||||||||||F
+R|1|^COVFLUPLUS^^{instrument_code:SARSCOV2}^Xpress SARS-CoV-2_Flu plus^1^SARS-CoV-2^|NEGATIVE^|||||F||John Doe|20210713122600|20210713130203|CepheidVM-PC^702201^719197^472753124^00500^20211226|
+R|2|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^|NEG^|||
+R|3|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^Ct|^0.0|||
+R|4|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SARS-CoV-2^EndPt|^1.0|||
+R|5|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^|NA^|||
+R|6|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^Ct|^29.0|||
+R|7|^COVFLUPLUS^^{instrument_code:SARSCOV2}^^^SPC^EndPt|^167.0|||
+R|8|^COVFLUPLUS^^{instrument_code:FLUA}^Xpress SARS-CoV-2_Flu plus^1^Flu A^|POSITIVE^|||||F||John Doe|20210713122600|20210713130203|CepheidVM-PC^702201^719197^472753124^00500^20211226|
+R|9|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^|POS^|||
+R|10|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^Ct|^30.0|||
+R|11|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 1^EndPt|^752.0|||
+R|12|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^|POS^|||
+R|13|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^Ct|^33.7|||
+R|14|^COVFLUPLUS^^{instrument_code:FLUA}^^^Flu A 2^EndPt|^237.0|||
+R|15|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^|NA^|||
+R|16|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^Ct|^29.0|||
+R|17|^COVFLUPLUS^^{instrument_code:FLUA}^^^SPC^EndPt|^167.0|||
+R|18|^COVFLUPLUS^^{instrument_code:FLUB}^Xpress SARS-CoV-2_Flu plus^1^Flu B^|NEGATIVE^|||||F||John Doe|20210713122600|20210713130203|CepheidVM-PC^702201^719197^472753124^00500^20211226|
+R|19|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^|NEG^|||
+R|20|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^Ct|^0.0|||
+R|21|^COVFLUPLUS^^{instrument_code:FLUB}^^^Flu B^EndPt|^-3.0|||
+R|22|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^|NA^|||
+R|23|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^Ct|^29.0|||
+R|24|^COVFLUPLUS^^{instrument_code:FLUB}^^^SPC^EndPt|^167.0|||
+L|1|N

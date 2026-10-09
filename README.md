@@ -83,14 +83,17 @@ curl http://localhost:8081/health
 Generate a message without sending it:
 
 ```bash
-curl http://localhost:8081/simulate/astm/genexpert_astm
 curl http://localhost:8081/simulate/file/hain_fluorocycler
 ```
 
 ## Send ASTM Through Bridge
 
+The GeneXpert sends only the messages Cepheid documents, kept under
+`fixtures/genexpert/<assay>/<outcome>.astm`; `genexpert_astm` replays them and
+never generates one:
+
 ```bash
-curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+curl -X POST http://localhost:8081/simulate/fixture/genexpert_astm/hivvl/quantified \
   -H 'Content-Type: application/json' \
   -d '{
     "destination": "tcp://127.0.0.1:12001",
@@ -99,6 +102,27 @@ curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
 ```
 
 The destination must use `tcp://`. HTTP destinations are rejected.
+
+## Replay A Manufacturer's Own Message
+
+For GeneXpert, `fixtures/genexpert/<assay>/<outcome>.astm` holds the ASTM messages Cepheid prints
+in its LIS guidance (303-0251 section 2.1.1 and 302-7279 section 6), unchanged except for
+placeholders. Push one as an instrument would send it:
+
+```bash
+curl -s -X POST http://localhost:8085/simulate/fixture/genexpert_astm/hivvl/below-40 \
+  -H 'Content-Type: application/json' \
+  -d '{"destination": "tcp://bridge:12001", "sample_id": "ACC-1", "sender_id": "GX-1",
+       "patient": {"id": "MRN-9", "name": "Roe^Jane"},
+       "instrument_codes": {"HIVVL": "HIVU"}}'
+```
+
+`destination` and `sample_id` are required. `{patient_id}` and `{patient_name}` fill the P
+record (empty by default, as in Cepheid's examples), and `instrument_codes` maps a profile test
+code to the code this instrument sends for it (`{instrument_code:HIVVL}` in a fixture).
+`test_fixtures_match_profile.py` keeps the fixtures and the Bridge's baseline profile in step: every
+record and value in a fixture is declared by the profile, and every declared one is in a fixture.
+Assays today: `hivvl`, `cov-flu-rsv-plus`, `cov-flu-plus`, `cov-plus`.
 
 ## Send HL7 Through Bridge
 
@@ -126,10 +150,11 @@ on both the ASTM and HL7 endpoints:
   sent as before.
 
 ```bash
-curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+curl -X POST http://localhost:8081/simulate/fixture/genexpert_astm/hivvl/quantified \
   -H 'Content-Type: application/json' \
   -d '{
     "destination": "tcp://127.0.0.1:12001",
+    "sample_id": "LAB-2026-00001",
     "sender_id": "GX-LAB-A"
   }'
 ```
@@ -140,12 +165,13 @@ A real instrument reports when it ran a test, often long before the result
 reaches the LIS. By default the mock takes both times from the clock. To check
 that a receiver keeps the instrument's time, send `completed_at` (ASTM
 `YYYYMMDDHHMMSS`) to `/simulate/astm`: it becomes the completion time (R.13 in
-the GeneXpert layout) and the start time (R.12) is set 90 minutes earlier. An
-unreadable value is rejected with 400. Templates without `astm_config` carry the
-time in R.10 instead, and QC messages (`"qc": true`) ignore `completed_at`.
+a template with `astm_config`) and the start time (R.12) is set 90 minutes
+earlier. An unreadable value is rejected with 400. Templates without
+`astm_config` carry the time in R.10 instead, and QC messages (`"qc": true`)
+ignore `completed_at`. A replayed fixture keeps the instrument's own times.
 
 ```bash
-curl -X POST http://localhost:8081/simulate/astm/genexpert_astm \
+curl -X POST http://localhost:8081/simulate/astm/stago_start4 \
   -H 'Content-Type: application/json' \
   -d '{
     "destination": "tcp://127.0.0.1:12001",
@@ -213,9 +239,12 @@ Run the complete mock suite:
 uv run --with-requirements requirements.txt python -m pytest
 ```
 
-The Bridge repository owns the cross-process result-traffic harness. Point that
-harness at this checkout to exercise the real mock process, Bridge listeners,
-profile parsing, and normalized OpenELIS contract.
+The suite tests the mock on its own: the file templates generate from the copies
+of their Bridge profiles in `test_profiles`. Tests that need the Bridge as well
+are marked `needs_bridge` and skipped here; OpenELIS runs them, and the Bridge's
+cross-process result-traffic harness, against its Bridge and mock submodules,
+which record the versions that go together. To run them locally, set
+`ANALYZER_BRIDGE_PROFILES_DIR` to the Bridge's `src/main/resources/analyzer-profiles`.
 
 Focused tests should assert observable protocol behavior. Do not add filesystem
 scans or source-text guards for code that should simply be removed.

@@ -188,7 +188,7 @@ def test_exact_qualitative_profile_requires_explicit_result_values(tmp_path, mon
     "runtime_loader,template_name",
     [
         (api._load_template, "quantstudio7"),
-        (server._load_template, "genexpert_astm"),
+        (server._load_template, "hain_fluorocycler"),
     ],
 )
 def test_runtime_does_not_fall_back_when_exact_profile_is_unavailable(

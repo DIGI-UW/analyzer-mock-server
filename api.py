@@ -25,6 +25,7 @@ from typing import Dict, Optional
 from urllib.parse import urlparse, parse_qs
 
 from fixture_parser import parse_fixture, write_xlsx_with_sample_ids
+import fixture_messages
 
 from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
@@ -183,6 +184,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, source_ip, sender_id, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
+                    "POST /simulate/fixture/{analyzer}/{assay}/{outcome}": "Push a message the manufacturer documents (body: destination, sample_id, patient, instrument_codes, source_ip, sender_id)",
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at, qc, qc_deviation)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, sample_ids for XLSX fixtures, qc, qc_deviation)",
@@ -259,6 +261,13 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "sender_id": params.get("sender_id"),
             }
             self._handle_hl7(analyzer, kwargs)
+            return
+        if self.path.startswith("/simulate/fixture/"):
+            parts = [segment for segment in self.path.split("?")[0][len("/simulate/fixture/"):].split("/") if segment]
+            if len(parts) != 3 or not all(re.match(r"^[A-Za-z0-9_-]+$", part) for part in parts):
+                self._send_json(400, {"error": "Use /simulate/fixture/{analyzer}/{assay}/{outcome}"})
+                return
+            self._handle_fixture_post(*parts)
             return
         if self.path.startswith("/simulate/astm/"):
             name = self._extract_name("/simulate/astm/")
@@ -411,6 +420,10 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         if not template:
             self._send_json(404, {"error": _template_not_found(template_name, resolved_template)})
             return
+        if template.get("fixtures") and "fields" not in template:
+            self._send_json(400, {"error": f"{template_name} replays manufacturer messages only; use "
+                                           f"/simulate/fixture/{template_name}/<assay>/<outcome>"})
+            return
         if template.get('protocol', {}).get('type') != 'ASTM':
             self._send_json(400, {"error": "Template is not ASTM protocol"})
             return
@@ -494,6 +507,61 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "source_ip": source_ip,
             "sender_id": sender_id,
             "results": results,
+        })
+
+    def _handle_fixture_post(self, analyzer: str, assay: str, outcome: str):
+        """Push one message the manufacturer documents, as the named analyzer would send it."""
+        resolved_template, instance_ip = self._resolve_instance(analyzer)
+        template = _load_template(resolved_template)
+        family = (template or {}).get("fixtures")
+        if not family:
+            self._send_json(404, {"error": f"{resolved_template} has no manufacturer fixtures"})
+            return
+        body = self._read_json_body()
+        if body is self._JSON_PARSE_ERROR:
+            self._send_json(400, {"error": "Invalid JSON body"})
+            return
+        params = body or {}
+        destination = params.get("destination")
+        sample_id = params.get("sample_id")
+        if not destination or not sample_id:
+            self._send_json(400, {"error": "destination and sample_id are required"})
+            return
+        patient = params.get("patient") or {}
+        codes = params.get("instrument_codes") or {}
+        # These values are written into ASTM fields, so they may not carry a field or record break.
+        supplied = {"sample_id": sample_id, "sender_id": params.get("sender_id"),
+                    "patient.id": patient.get("id"), "patient.name": patient.get("name"),
+                    **{f"instrument_codes.{code}": value for code, value in codes.items()}}
+        for field, value in supplied.items():
+            if value is not None and any(mark in str(value) for mark in ("|", "\r", "\n")):
+                self._send_json(400, {"error": f"{field} may not contain '|', a carriage return or a line feed"})
+                return
+        try:
+            message = fixture_messages.render(
+                family, assay, outcome, sample_id=sample_id,
+                patient_id=patient.get("id", ""), patient_name=patient.get("name", "^^^^"),
+                instrument_codes=params.get("instrument_codes"))
+        except fixture_messages.FixtureNotFound as e:
+            self._send_json(404, {"error": str(e)})
+            return
+        message = with_astm_sender_id(message, params.get("sender_id"))
+        source_ip = params.get("source_ip") or instance_ip
+        pushed, push_err = push_astm_to_destination(destination, message, source_ip=source_ip)
+        self._send_json(200, {
+            "status": "completed",
+            "fixture": f"{family}/{assay}/{outcome}",
+            "count": 1,
+            "pushed": 1 if pushed else 0,
+            "destination": destination,
+            "source_ip": source_ip,
+            "sender_id": params.get("sender_id"),
+            "results": [{
+                "message_number": 1,
+                "pushed": pushed,
+                "error": push_err,
+                "sample_id": _extract_sample_id_from_astm(message),
+            }],
         })
 
     def _handle_file_get(self, template_name: str):

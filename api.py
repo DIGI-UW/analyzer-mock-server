@@ -529,7 +529,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         patient = params.get("patient") or {}
         codes = params.get("instrument_codes") or {}
-        # These values are written into ASTM fields, so they may not carry a field or record break.
+        # These values are written into ASTM or HL7 fields, so they may not carry a field or record break.
         supplied = {"sample_id": sample_id, "sender_id": params.get("sender_id"),
                     "patient.id": patient.get("id"), "patient.name": patient.get("name"),
                     **{f"instrument_codes.{code}": value for code, value in codes.items()}}
@@ -538,16 +538,24 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": f"{field} may not contain '|', a carriage return or a line feed"})
                 return
         try:
+            hl7 = fixture_messages.is_hl7(family, assay, outcome)
             message = fixture_messages.render(
                 family, assay, outcome, sample_id=sample_id,
-                patient_id=patient.get("id", ""), patient_name=patient.get("name", "^^^^"),
+                patient_id=patient.get("id", ""), patient_name=patient.get("name", "" if hl7 else "^^^^"),
                 instrument_codes=params.get("instrument_codes"))
         except fixture_messages.FixtureNotFound as e:
             self._send_json(404, {"error": str(e)})
             return
-        message = with_astm_sender_id(message, params.get("sender_id"))
         source_ip = params.get("source_ip") or instance_ip
-        pushed, push_err = push_astm_to_destination(destination, message, source_ip=source_ip)
+        if hl7:
+            # HL7 ends each segment with a carriage return.
+            message = with_hl7_sender_id("\r".join(message.strip("\n").split("\n")) + "\r", params.get("sender_id"))
+            pushed, push_err = push_hl7_to_destination(destination, message, source_ip=source_ip)
+            pushed_sample_id = _extract_sample_id_from_hl7(message)
+        else:
+            message = with_astm_sender_id(message, params.get("sender_id"))
+            pushed, push_err = push_astm_to_destination(destination, message, source_ip=source_ip)
+            pushed_sample_id = _extract_sample_id_from_astm(message)
         self._send_json(200, {
             "status": "completed",
             "fixture": f"{family}/{assay}/{outcome}",
@@ -560,7 +568,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "message_number": 1,
                 "pushed": pushed,
                 "error": push_err,
-                "sample_id": _extract_sample_id_from_astm(message),
+                "sample_id": pushed_sample_id,
             }],
         })
 

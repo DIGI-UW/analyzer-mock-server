@@ -124,6 +124,18 @@ code to the code this instrument sends for it (`{instrument_code:HIVVL}` in a fi
 record and value in a fixture is declared by the profile, and every declared one is in a fixture.
 Assays today: `hivvl`, `cov-flu-rsv-plus`, `cov-flu-plus`, `cov-plus`.
 
+For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds the two HL7 messages Mindray prints
+in the BC-5380 Operator's Manual, appendix C.3.3: `analysis-result` (a CBC with its histograms and
+a manual count) and `xr-qc` (an X-R QC run). `{sample_id}` fills OBR-3, `{patient_id}` and
+`{patient_name}` PID-3 and PID-5, and `sender_id` replaces MSH-3. The template
+`mindray_bc5380_hl7` replays them over MLLP:
+
+```bash
+curl -s -X POST http://localhost:8085/simulate/fixture/mindray_bc5380_hl7/cbc/analysis-result \
+  -H 'Content-Type: application/json' \
+  -d '{"destination": "mllp://bridge:2575", "sample_id": "ACC-1", "sender_id": "BC-5380"}'
+```
+
 ## Send HL7 Through Bridge
 
 ```bash

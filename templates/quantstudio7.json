@@ -1,7 +1,7 @@
 {
   "profileRef": {
     "profileId": "thermo-quantstudio",
-    "revision": 1
+    "revision": 2
   },
   "fixture": {
     "file": "fixtures/quantstudio7/results.xlsx",
@@ -11,6 +11,17 @@
       "result": "Quantity Mean",
       "testCode": "Target Name"
     },
-    "testCodeFilter": "VIH-1"
+    "testCodeFilter": "VIH-1",
+    "controlRows": [
+      "STD1_E7",
+      "STD3_E5",
+      "STD5_E3",
+      "NC",
+      "NTC",
+      "PC"
+    ],
+    "variants": {
+      "control-failing": "fixtures/quantstudio7/results-control-failing.xlsx"
+    }
   }
 }

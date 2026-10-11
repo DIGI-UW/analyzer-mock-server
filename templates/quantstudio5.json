@@ -1,7 +1,7 @@
 {
   "profileRef": {
     "profileId": "thermo-quantstudio",
-    "revision": 1
+    "revision": 2
   },
   "qc_sample_id_pattern": "{level}-{lot}-001",
   "fixture": {
@@ -12,7 +12,18 @@
       "result": "Quantity Mean",
       "testCode": "Target Name"
     },
-    "testCodeFilter": "VIH-1"
+    "testCodeFilter": "VIH-1",
+    "controlRows": [
+      "STD1_E7",
+      "STD3_E5",
+      "STD5_E3",
+      "NC",
+      "NTC",
+      "PC"
+    ],
+    "variants": {
+      "control-failing": "fixtures/quantstudio5/results-control-failing.xls"
+    }
   },
   "qc_controls": [
     {
@@ -20,8 +31,8 @@
       "lot_number": "LOT-LPC-26B",
       "level": "LPC",
       "level_name": "Low Positive Control",
-      "target": 32.00,
-      "sd": 0.50,
+      "target": 32.0,
+      "sd": 0.5,
       "unit": "Ct",
       "task": "STANDARD"
     },
@@ -30,8 +41,8 @@
       "lot_number": "LOT-HPC-26B",
       "level": "HPC",
       "level_name": "High Positive Control",
-      "target": 25.00,
-      "sd": 0.40,
+      "target": 25.0,
+      "sd": 0.4,
       "unit": "Ct",
       "task": "STANDARD"
     }

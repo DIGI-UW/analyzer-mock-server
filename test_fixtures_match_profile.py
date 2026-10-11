@@ -15,7 +15,7 @@ import fixture_messages
 
 pytestmark = pytest.mark.needs_bridge
 
-PROFILE_FILE = "cepheid-genexpert-astm.json"
+PROFILE_FILE = "cepheid-genexpert-astm-v2.json"
 FAMILY = "genexpert"
 # 302-7279 prints the single-result assay's error and invalid examples under the two-assay panel's
 # code, so SARSCOV2_3's values are shown only through SARSCOV2's.
@@ -179,7 +179,9 @@ def test_file_rows_resolve_to_tests_and_values_the_pinned_profile_declares(templ
 
 
 def test_every_record_is_declared_and_every_declared_value_is_shown():
-    records, values = _declared(_profile())
+    profile = _profile()
+    records, values = _declared(profile)
+    flags = set(profile.get("sample_flags", {}).get("codes", []))
     undeclared, shown_records, shown_values = [], set(), set()
     for assay, outcomes in fixture_messages.list_fixtures(FAMILY).items():
         for outcome in outcomes:
@@ -187,6 +189,8 @@ def test_every_record_is_declared_and_every_declared_value_is_shown():
             for code, sub, call, number in _records_of(message):
                 if not call and not number:
                     continue  # a record that says nothing is not a result
+                if sub in flags:
+                    continue  # the cartridge's internal control: a flag, not a result
                 if (code, sub) not in records:
                     undeclared.append(f"{assay}/{outcome} {code}|{sub}")
                     continue

@@ -7,6 +7,7 @@ ANALYZER_BRIDGE_PROFILES_DIR (the Bridge's src/main/resources/analyzer-profiles)
 
 import json
 import os
+import re
 
 import pytest
 
@@ -64,6 +65,70 @@ def _records_of(message):
         complement = test_id[7].strip() if len(test_id) > 7 else ""
         sub = analyte + ("&" + complement if complement else "")
         yield test_id[3], sub, data[0].strip(), data[1].strip()
+
+
+FILE_TEMPLATES = ("quantstudio7", "quantstudio5", "hain_fluorocycler")
+
+
+def _pinned_profile(template):
+    ref = template["profileRef"]
+    directory = os.environ["ANALYZER_BRIDGE_PROFILES_DIR"]
+    for name in sorted(os.listdir(directory)):
+        with open(os.path.join(directory, name), encoding="utf-8") as handle:
+            profile = json.load(handle)
+        if (profile["profileMeta"]["id"] == ref["profileId"]
+                and profile["catalog"]["revision"] == ref["revision"]):
+            return profile
+    raise AssertionError(f"pinned profile {ref} not found")
+
+
+def _sheet_rows(path):
+    if path.endswith(".xls"):
+        import xlrd
+        sheet = xlrd.open_workbook(path).sheet_by_index(0)
+        return [sheet.row_values(r) for r in range(sheet.nrows)]
+    import openpyxl
+    return [list(row) for row in openpyxl.load_workbook(path, read_only=True).worksheets[0].iter_rows(values_only=True)]
+
+
+def _is_control(rules, sample_name, qc_task):
+    for rule in rules.values():
+        kind, operand = rule["ruleType"], rule["operand"]
+        if kind == "FIELD_EQUALS" and rule["targetField"] == "QC_TASK" and qc_task.lower() == operand.lower():
+            return True
+        if kind == "SPECIMEN_ID_PATTERN" and re.fullmatch(operand, sample_name, re.IGNORECASE):
+            return True
+        if kind == "SPECIMEN_ID_PREFIX" and sample_name.lower().startswith(operand.lower()):
+            return True
+        if kind not in ("FIELD_EQUALS", "SPECIMEN_ID_PATTERN", "SPECIMEN_ID_PREFIX"):
+            raise AssertionError(f"rule type {kind} is not evaluated by this test")
+    return False
+
+
+@pytest.mark.parametrize("template_name", FILE_TEMPLATES)
+def test_file_control_rows_are_the_rows_the_pinned_profile_recognises(template_name):
+    root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(root, "templates", template_name + ".json"), encoding="utf-8") as handle:
+        template = json.load(handle)
+    profile = _pinned_profile(template)
+    rules = profile["controlResultRecognition"]["rules"]
+    task_header = next(h for h, key in profile["column_mapping"].items() if key == "qcTask")
+    fixture = template["fixture"]
+    sample_header = fixture["column_mapping"]["sampleId"]
+    declared = set(fixture["controlRows"])
+    for path in [fixture["file"], *fixture.get("variants", {}).values()]:
+        rows = _sheet_rows(os.path.join(root, path))
+        header_index = next(i for i, row in enumerate(rows) if sample_header in [str(c) for c in row])
+        header = [str(c) for c in rows[header_index]]
+        sample, task = header.index(sample_header), header.index(task_header)
+        recognised, patients = set(), set()
+        for row in rows[header_index + 1:]:
+            name = str(row[sample]).strip()
+            if not name:
+                continue
+            (recognised if _is_control(rules, name, str(row[task] or "")) else patients).add(name)
+        assert recognised <= declared, f"{path}: recognised but not declared {recognised - declared}"
+        assert not (patients & declared), f"{path}: declared but not recognised {patients & declared}"
 
 
 def test_every_record_is_declared_and_every_declared_value_is_shown():

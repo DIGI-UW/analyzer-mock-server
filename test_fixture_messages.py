@@ -42,6 +42,32 @@ class TestFixtureMessages(unittest.TestCase):
         self.assertEqual("^^^^", records[1].split("|")[5])
         self.assertTrue(records[2].startswith("O|1|ACC-2||^^^HIVVL|"))
 
+    def test_a_control_outcome_is_its_patient_fixture_with_action_code_q_and_no_patient(self):
+        for assay, control, patient in (
+            ("hivvl", "control-quantified", "quantified"),
+            ("hivvl", "control-above-1e7", "above-1e7"),
+            ("cov-flu-rsv-plus", "control-all-positive", "all-positive"),
+            ("cov-flu-rsv-plus", "control-flu-a-positive", "flu-a-positive"),
+        ):
+            control_records = fixture_messages.render("genexpert", assay, control, sample_id="QC-1").split("\n")
+            patient_records = fixture_messages.render("genexpert", assay, patient, sample_id="QC-1").split("\n")
+
+            self.assertEqual("P|1", control_records[1], control)
+            order = control_records[2].split("|")
+            self.assertEqual("Q", order[11], control)
+            self.assertEqual("ORH", order[15], control)
+            self.assertEqual(
+                [r for r in patient_records if not r.startswith(("P|", "O|"))],
+                [r for r in control_records if not r.startswith(("P|", "O|"))], control)
+
+    def test_the_message_time_replaces_the_header_time(self):
+        message = fixture_messages.render("genexpert", "hivvl", "control-quantified", sample_id="QC-1")
+
+        resent = fixture_messages.with_message_time(message, "20261010120000")
+
+        self.assertEqual("20261010120000", resent.split("\n")[0].split("|")[13])
+        self.assertEqual(message.split("\n")[1:], resent.split("\n")[1:])
+
     def test_an_unknown_fixture_is_refused(self):
         with self.assertRaises(fixture_messages.FixtureNotFound):
             fixture_messages.render("genexpert", "hivvl", "no-such-outcome", sample_id="X")
@@ -95,6 +121,23 @@ class TestSimulateFixtureApi(unittest.TestCase):
         self.assertTrue(pushed.startswith("H|@^\\|URM-9h6IUTYA-05||GX-1^GeneXpert^1.0|"), pushed[:80])
         self.assertIn("O|1|ACC-7||^^^HIVU|", pushed)
         self.assertIn("P|1|||MRN-9|Roe^Jane|", pushed)
+
+    def test_a_rerun_carries_the_message_time_it_is_given(self):
+        status, body = self._post("/simulate/fixture/genexpert_astm/hivvl/control-quantified", {
+            "destination": "tcp://bridge:12001", "sample_id": "QC-HIV-1",
+            "message_time": "20261011083000"})
+
+        self.assertEqual(200, status, body)
+        header = self.mock_push.call_args[0][1].split("\n")[0]
+        self.assertEqual("20261011083000", header.split("|")[13])
+
+    def test_a_message_time_must_be_an_astm_timestamp(self):
+        for value in ("2026-10-11", "20261011", "2026101108300x", "20261011083000|"):
+            status, body = self._post("/simulate/fixture/genexpert_astm/hivvl/control-quantified", {
+                "destination": "tcp://bridge:12001", "sample_id": "QC-HIV-1", "message_time": value})
+            self.assertEqual(400, status, value)
+            self.assertIn("message_time", body["error"])
+        self.mock_push.assert_not_called()
 
     def test_a_fixture_needs_a_destination_and_a_sample_id(self):
         status, body = self._post("/simulate/fixture/genexpert_astm/hivvl/below-40",

@@ -50,6 +50,22 @@ def raw(family: str, assay: str, outcome: str) -> str:
         return handle.read()
 
 
+MESSAGE_TIME = re.compile(r"^\d{14}$")
+
+
+def with_message_time(message: str, message_time: str) -> str:
+    """The message with its header time (H.14) set, so a rerun is not taken for a retransmission."""
+    if not MESSAGE_TIME.match(message_time):
+        raise ValueError("message_time must be an ASTM timestamp, YYYYMMDDHHMMSS")
+    records = message.split("\n")
+    header = records[0].split("|")
+    if not records[0].startswith("H|") or len(header) < 14:
+        raise ValueError("The message has no header time to set")
+    header[13] = message_time
+    records[0] = "|".join(header)
+    return "\n".join(records)
+
+
 def render(family: str, assay: str, outcome: str, sample_id: str, patient_id: str = "",
            patient_name: str = "^^^^", instrument_codes: Optional[Dict[str, str]] = None) -> str:
     """The fixture with its placeholders filled, records separated by newlines."""

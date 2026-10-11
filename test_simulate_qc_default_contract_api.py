@@ -16,8 +16,7 @@ from api import MockAPIHandler
 GENEXPERT_TEMPLATE = {
     "analyzer": {"name": "Cepheid GeneXpert", "manufacturer": "Cepheid"},
     "protocol": {"type": "ASTM"},
-    "fields": [{"name": "HIV-VL", "code": "HIV-VL", "type": "NUMERIC"}],
-    "qc_controls": [{"field_code": "HIV-VL", "lot_number": "LOT-HIVVL-N", "target": 1250.0}],
+    "fields": [{"name": "HIV-VL", "code": "HIV-VL", "type": "NUMERIC"}]
 }
 
 MINDRAY_TEMPLATE = {
@@ -71,13 +70,13 @@ class TestExplicitBridgeDestinationContract(unittest.TestCase):
         conn.close()
         return resp.status, payload
 
-    def test_astm_qc_rejects_missing_bridge_destination(self):
+    def test_astm_rejects_missing_bridge_destination(self):
         with patch.object(api, "_load_template", return_value=GENEXPERT_TEMPLATE), patch.object(
             api, "push_astm_to_destination", return_value=(True, None)
         ) as mock_push:
             status, body = self._post(
                 "/simulate/astm/arbitrary_astm_profile",
-                {"qc": True, "qc_deviation": 3.5},
+                {},
             )
 
         self.assertEqual(status, 400)

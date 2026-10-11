@@ -1,22 +1,13 @@
-"""QC message contract tests for the analyzer mock server.
+"""QC message contract tests for the FILE and HL7 generators.
 
-These tests pin down the wire-format contract that the mock --qc CLI
-produces for ASTM QC pushes. They serve two purposes:
-
-  1. Regression coverage: the mock's QC output is the contract the bridge
-     consumes. If we accidentally change the field layout or action code,
-     the bridge's QC-detection breaks silently. Test A catches that.
-  2. Documentation by example: the bridge's expected input format is
-     literally these tests' assertions.
-
-Reference: ASTM LIS2-A2 and the pinned Bridge profile recognition contract.
+ASTM controls are replayed from the manufacturer fixtures (control-* outcomes),
+not generated, so they are covered by test_fixture_messages.py.
 """
 
 import json
 import os
 import unittest
 
-from protocols.astm_handler import ASTMHandler
 
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -29,53 +20,6 @@ def _load_template(name: str) -> dict:
     from server import _load_template as _load_production_template
     return _load_production_template(name)
 
-
-class QCMessageContract(unittest.TestCase):
-    """Test A — Mock --qc emission contract."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.template = _load_template("stago_start4")
-
-    def _generate(self, deviation=None) -> str:
-        return ASTMHandler().generate_qc(self.template, deviation=deviation)
-
-    def _records(self, msg: str) -> list:
-        return [r for r in msg.split("\n") if r.strip()]
-
-    def test_o_record_has_action_code_q(self):
-        msg = self._generate(deviation=0)
-        o_records = [r for r in self._records(msg) if r.startswith("O|")]
-        self.assertEqual(
-            len(o_records), 1,
-            f"Expected exactly one O-record; got {len(o_records)}: {o_records}",
-        )
-        fields = o_records[0].split("|")
-        # ASTM O.12 = Action Code per LIS2-A2.
-        # Convention: ASTM 1-indexed field 12 is 0-indexed array index 11.
-        # The bridge's O_ACTION_CODE_FIELD constant should match this.
-        self.assertEqual(
-            fields[11].strip(), "Q",
-            f"Expected O.12 (idx 11) = 'Q', got fields={fields}",
-        )
-
-    def test_q_segment_carries_lot_number(self):
-        msg = self._generate(deviation=0)
-        q_records = [r for r in self._records(msg) if r.startswith("Q|")]
-        self.assertGreaterEqual(
-            len(q_records), 1,
-            "Expected at least one Q-record carrying lot/level/target",
-        )
-        # Q|seq|field_code^lot_number^level|value|unit|timestamp
-        components = q_records[0].split("|")[2].split("^")
-        self.assertEqual(
-            len(components), 3,
-            f"Q.2 should be field^lot^level, got components={components}",
-        )
-        self.assertTrue(
-            components[1].startswith("LOT-"),
-            f"Expected lot number prefix 'LOT-', got: {components[1]}",
-        )
 
 class FileQCMessageContract(unittest.TestCase):
     """Test B — FILE (QuantStudio) generate_qc emission contract.

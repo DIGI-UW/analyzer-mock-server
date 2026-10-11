@@ -152,6 +152,7 @@ def test_file_rows_resolve_to_tests_and_values_the_pinned_profile_declares(templ
     header_of = {meaning: header for header, meaning in profile["column_mapping"].items()}
     code_values = profile.get("test_code_values", {})
     declared = {test["test_code"]: set(test.get("values", [])) for test in profile["default_test_mappings"]}
+    flags = set(profile.get("sample_flags", {}).get("codes", []))
     value_fields = profile.get("result_value_order", ["result"])
     fixture = template["fixture"]
     unresolved = []
@@ -168,7 +169,7 @@ def test_file_rows_resolve_to_tests_and_values_the_pinned_profile_declares(templ
             raw_code = cell("testCode")
             code = code_values.get(raw_code, raw_code) if raw_code else next(iter(declared))
             value = next((cell(field) for field in value_fields if cell(field)), "")
-            if not value:
+            if not value or code in flags:
                 continue
             if code not in declared:
                 unresolved.append(f"{path} {sample}: test {code!r} is not declared")

@@ -90,6 +90,23 @@ class TestFileFixtureControlRows(unittest.TestCase):
         on_disk = [row["sampleId"] for row in parse_fixture(body["written_path"], fixture_cfg)]
         self.assertEqual(written, on_disk)
 
+    def test_a_renamed_sample_keeps_its_internal_control_row(self):
+        import openpyxl
+        for template_name, sample_header, patients in (
+                ("quantstudio7", "Sample Name", [f"ACC-{n}" for n in range(1, 6)]),
+                ("hain_fluorocycler", "Sample ID", ["ACC-1", "ACC-2"])):
+            status, body = self._post(template_name, {"sample_ids": patients})
+            self.assertEqual(200, status, body)
+            sheet = openpyxl.load_workbook(body["written_path"]).active
+            rows = list(sheet.iter_rows(values_only=True))
+            header_index = next(i for i, row in enumerate(rows) if row and sample_header in row)
+            column = rows[header_index].index(sample_header)
+            names = [row[column] for row in rows[header_index + 1:] if row and row[column]]
+            for patient in patients:
+                self.assertEqual(2, names.count(patient), (template_name, patient, names))
+            self.assertFalse([name for name in names if str(name).startswith("DEV0126")],
+                             (template_name, names))
+
     def test_control_ids_rename_the_control_rows(self):
         status, body = self._post("quantstudio7", {
             "sample_ids": [f"ACC-{n}" for n in range(1, 6)],

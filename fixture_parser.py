@@ -84,8 +84,16 @@ def write_xlsx_with_sample_ids(
                 ]
                 if len(rows) != len(original):
                     raise ValueError("XLSX result rows changed since fixture metadata was parsed")
+                # A sample's other rows (a well's internal control) carry the same name as its result row.
+                renamed = {}
                 for row, sample_id in zip(rows, sample_ids):
-                    row[sample_column].value = sample_id
+                    name = str(row[sample_column].value).strip()
+                    if renamed.setdefault(name, sample_id) != sample_id:
+                        raise ValueError(f"XLSX sample '{name}' cannot take two IDs")
+                for row in sheet.iter_rows(min_row=header[0].row + 1):
+                    name = str(row[sample_column].value or "").strip()
+                    if name in renamed:
+                        row[sample_column].value = renamed[name]
                 workbook.save(output_path)
                 written = parse_fixture(output_path, fixture_config)
                 if [row["sampleId"] for row in written] != sample_ids or [

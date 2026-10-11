@@ -15,7 +15,7 @@ import fixture_messages
 
 pytestmark = pytest.mark.needs_bridge
 
-PROFILE_FILE = "cepheid-genexpert-astm-v2.json"
+PROFILE_FILE = "cepheid-genexpert-astm.json"
 FAMILY = "genexpert"
 # 302-7279 prints the single-result assay's error and invalid examples under the two-assay panel's
 # code, so SARSCOV2_3's values are shown only through SARSCOV2's.

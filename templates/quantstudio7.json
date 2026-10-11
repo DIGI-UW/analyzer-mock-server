@@ -1,7 +1,7 @@
 {
   "profileRef": {
     "profileId": "thermo-quantstudio",
-    "revision": 2
+    "revision": 1
   },
   "fixture": {
     "file": "fixtures/quantstudio7/results.xlsx",

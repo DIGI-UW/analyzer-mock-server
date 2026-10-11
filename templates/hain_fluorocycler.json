@@ -3,6 +3,9 @@
     "profileId": "hain-fluorocycler-xt-madagascar",
     "revision": 1
   },
+  "seedValues": {
+    "IC": "Valid"
+  },
   "fixture": {
     "file": "fixtures/fluorocycler-xt/results.xlsx",
     "format": "XLSX",

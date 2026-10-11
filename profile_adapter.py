@@ -226,6 +226,24 @@ def load_profile_backed_template(
             field.update(overrides)
         fields.append(field)
 
+    # A file carries a row for what the instrument says about each sample (a well's internal
+    # control) beside its results. The profile declares only the value that raises it, so the
+    # template seeds the value a passing record carries; a flag it does not seed is not written.
+    sample_flags = profile.get("sample_flags") or {}
+    for code in sample_flags.get("codes", []):
+        if code not in seed_values:
+            continue
+        field = {
+            "code": code,
+            "name": (sample_flags.get("names") or {}).get(code, code),
+            "type": "QUALITATIVE",
+            "possibleValues": [seed_values[code], sample_flags.get("raisedValue")],
+            "seedQualitative": seed_values[code],
+        }
+        if code in file_codes:
+            field["fileCode"] = file_codes[code]
+        fields.append(field)
+
     merged: Dict[str, Any] = dict(transport_template)
     merged["fields"] = fields
     merged["resolvedProfile"] = {

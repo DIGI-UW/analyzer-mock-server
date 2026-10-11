@@ -9,8 +9,8 @@ from template_loader import TemplateLoader
 
 PRIORITY_PROFILE_REFS = {
     "hain_fluorocycler": {"profileId": "hain-fluorocycler-xt-madagascar", "revision": 1},
-    "quantstudio5": {"profileId": "thermo-quantstudio", "revision": 2},
-    "quantstudio7": {"profileId": "thermo-quantstudio", "revision": 2},
+    "quantstudio5": {"profileId": "thermo-quantstudio", "revision": 1},
+    "quantstudio7": {"profileId": "thermo-quantstudio", "revision": 1},
 }
 
 

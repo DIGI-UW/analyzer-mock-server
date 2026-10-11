@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Profile result types that require an explicit qualitative vocabulary.
 _QUALITATIVE_TYPES = {"qualitative", "ordinal", "nominal", "ord", "nom", "qual"}
-_PROFILE_OWNED_FIELD_KEYS = {"code", "loinc", "unit", "type", "possibleValues"}
+_PROFILE_OWNED_FIELD_KEYS = {"code", "fileCode", "loinc", "unit", "type", "possibleValues"}
 _PROFILE_OWNED_TEMPLATE_KEYS = {
     "analyzer",
     "protocol",
@@ -176,6 +176,10 @@ def load_profile_backed_template(
     # profile-derived field so the profile still owns the assay menu + result_type.
     field_overrides = transport_template.get("fieldOverrides", {})
 
+    # A file names a test by what its test-code column carries; the profile's
+    # test_code_values says what each value means, so the mock writes the value.
+    file_codes = {code: value for value, code in (profile.get("test_code_values") or {}).items()}
+
     fields: List[Dict[str, Any]] = []
     for mapping in profile.get("default_test_mappings", []):
         code = (
@@ -193,6 +197,8 @@ def load_profile_backed_template(
             "unit": unit,
             "name": mapping.get("test_name_hint", code),
         }
+        if code in file_codes:
+            field["fileCode"] = file_codes[code]
         if result_type in _QUALITATIVE_TYPES:
             values = mapping.get("values")
             if not isinstance(values, list) or not values:

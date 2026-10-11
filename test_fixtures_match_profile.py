@@ -131,6 +131,52 @@ def test_file_control_rows_are_the_rows_the_pinned_profile_recognises(template_n
         assert not (patients & declared), f"{path}: declared but not recognised {patients & declared}"
 
 
+def _is_number(value):
+    try:
+        float(str(value).strip())
+        return True
+    except ValueError:
+        return False
+
+
+@pytest.mark.parametrize("template_name", FILE_TEMPLATES)
+def test_file_rows_resolve_to_tests_and_values_the_pinned_profile_declares(template_name):
+    """A workbook and its profile drift apart silently: a column the profile does not read, or a
+    value it does not declare, is held in OpenELIS with nothing to say why. Every patient row of
+    every fixture must name a declared test and, when its value is not a number, a declared value."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(root, "templates", template_name + ".json"), encoding="utf-8") as handle:
+        template = json.load(handle)
+    profile = _pinned_profile(template)
+    rules = profile["controlResultRecognition"]["rules"]
+    header_of = {meaning: header for header, meaning in profile["column_mapping"].items()}
+    code_values = profile.get("test_code_values", {})
+    declared = {test["test_code"]: set(test.get("values", [])) for test in profile["default_test_mappings"]}
+    value_fields = profile.get("result_value_order", ["result"])
+    fixture = template["fixture"]
+    unresolved = []
+    for path in [fixture["file"], *fixture.get("variants", {}).values()]:
+        rows = _sheet_rows(os.path.join(root, path))
+        header_index = next(i for i, row in enumerate(rows) if header_of["sampleId"] in [str(c) for c in row])
+        header = [str(c) for c in rows[header_index]]
+        column = {meaning: header.index(name) for meaning, name in header_of.items() if name in header}
+        for row in rows[header_index + 1:]:
+            cell = lambda meaning: str(row[column[meaning]] or "").strip() if meaning in column else ""
+            sample = cell("sampleId")
+            if not sample or _is_control(rules, sample, cell("qcTask")):
+                continue
+            raw_code = cell("testCode")
+            code = code_values.get(raw_code, raw_code) if raw_code else next(iter(declared))
+            value = next((cell(field) for field in value_fields if cell(field)), "")
+            if not value:
+                continue
+            if code not in declared:
+                unresolved.append(f"{path} {sample}: test {code!r} is not declared")
+            elif not _is_number(value) and value not in declared[code]:
+                unresolved.append(f"{path} {sample} {code}: value {value!r} is not declared")
+    assert unresolved == []
+
+
 def test_every_record_is_declared_and_every_declared_value_is_shown():
     records, values = _declared(_profile())
     undeclared, shown_records, shown_values = [], set(), set()

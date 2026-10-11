@@ -125,9 +125,13 @@ class TestFileHandler(unittest.TestCase):
         t = _load_template("hain_fluorocycler")
         csv = FileHandler().generate(t)
         self.assertIn("Sample ID", csv)
-        self.assertIn("TargetName", csv)
+        self.assertIn("Col", csv)
         self.assertIn("Calc. Conc.", csv)
         self.assertRegex(csv, r"DEV01\d{15}")
+        # The Madagascar workbook numbers its channels: 1 is the target, 2 the internal control.
+        self.assertRegex(csv, r"DEV01\d{15},1,")
+        self.assertRegex(csv, r"DEV01\d{15},2,")
+        self.assertNotIn("VIH-1", csv)
 
     def test_invalid_file_sample_override_fails_loudly(self):
         t = _load_template("quantstudio7")

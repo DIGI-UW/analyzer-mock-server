@@ -20,7 +20,11 @@
     "outboundOrders": false,
     "connectionTest": true
   },
-  "supported_extensions": [".ods", ".xlsx", ".xls"],
+  "supported_extensions": [
+    ".ods",
+    ".xlsx",
+    ".xls"
+  ],
   "column_mapping": {
     "Sample ID": "sampleId",
     "SampleID": "sampleId",
@@ -33,7 +37,10 @@
     "testCode": "testCode",
     "WellPosition": "position"
   },
-  "result_value_order": ["result", "interpretation"],
+  "result_value_order": [
+    "result",
+    "interpretation"
+  ],
   "default_test_mappings": [
     {
       "test_code": "VIH-1",
@@ -41,7 +48,12 @@
       "unit": "copies/mL",
       "result_type": "quantitative",
       "test_name_hint": "HIV-1 viral load",
-      "values": ["DETECTED", "NOT DETECTED", "INVALID", "INDETERMINATE"],
+      "values": [
+        "DETECTED",
+        "NOT DETECTED",
+        "INVALID",
+        "INDETERMINATE"
+      ],
       "value_codes": {
         "DETECTED": [
           {
@@ -159,24 +171,16 @@
         "ruleType": "FIELD_EQUALS",
         "targetField": "QC_TASK",
         "operand": "Standard"
-      },
-      "positive-control-prefix": {
-        "ruleType": "SPECIMEN_ID_PREFIX",
-        "operand": "C+"
-      },
-      "negative-control-prefix": {
-        "ruleType": "SPECIMEN_ID_PREFIX",
-        "operand": "C-"
       }
     }
   },
   "catalog": {
     "revision": 1,
-    "recognitionFingerprint": "sha256:5c0de42e1135b772b23e4c1ea04b0162b30fe36fc08ecef76a70108ba031be26",
+    "recognitionFingerprint": "sha256:539fea855169bf0055fbf0ffe9b47e9538776d77ea93f0725b3aed3d43d8a87f",
     "source": "SHIPPED",
     "status": "ACTIVE",
     "publishedAt": "2026-10-06T00:00:00Z",
     "publishedBy": "distribution",
-    "revisionFingerprint": "sha256:5989781fabb39c7e405f6f1427823af5f9a40bfd0721abf470fda8f95551f4f7"
+    "revisionFingerprint": "sha256:8f28785af6c5af38859c2b393093eb74d6cc6e4e786b22c587cebfa9e2a2a1ba"
   }
 }

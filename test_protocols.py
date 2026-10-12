@@ -125,9 +125,13 @@ class TestFileHandler(unittest.TestCase):
         t = _load_template("hain_fluorocycler")
         csv = FileHandler().generate(t)
         self.assertIn("Sample ID", csv)
-        self.assertIn("TargetName", csv)
+        self.assertIn("Col", csv)
         self.assertIn("Calc. Conc.", csv)
         self.assertRegex(csv, r"DEV01\d{15}")
+        # The Madagascar workbook numbers its channels: 1 is the target, 2 the internal control.
+        self.assertRegex(csv, r"DEV01\d{15},1,")
+        self.assertRegex(csv, r"DEV01\d{15},2,")
+        self.assertNotIn("VIH-1", csv)
 
     def test_invalid_file_sample_override_fails_loudly(self):
         t = _load_template("quantstudio7")
@@ -256,7 +260,9 @@ class TestFileSimulateAPI(unittest.TestCase):
         fixture = template["fixture"]
         source = os.path.join(os.path.dirname(__file__), fixture["file"])
         expected = parse_fixture(source, fixture)
-        sample_ids = [f"DEV0126999999999{index:04d}" for index in range(1, len(expected) + 1)]
+        controls = set(fixture["controlRows"])
+        patient_count = sum(row["sampleId"] not in controls for row in expected)
+        sample_ids = [f"DEV0126999999999{index:04d}" for index in range(1, patient_count + 1)]
         with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
             payload = json.dumps({"target_dir": tmpdir, "sample_ids": sample_ids})
             conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -268,7 +274,10 @@ class TestFileSimulateAPI(unittest.TestCase):
 
             self.assertEqual(resp.status, 200, body)
             written = parse_fixture(body["written_path"], fixture)
-            self.assertEqual([row["sampleId"] for row in written], sample_ids)
+            self.assertEqual([row["sampleId"] for row in written if row["sampleId"] not in controls],
+                             sample_ids)
+            self.assertEqual([row["sampleId"] for row in written if row["sampleId"] in controls],
+                             [row["sampleId"] for row in expected if row["sampleId"] in controls])
             self.assertEqual([row["result"] for row in written],
                              [row["result"] for row in expected])
 

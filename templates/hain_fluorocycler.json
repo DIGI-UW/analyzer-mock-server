@@ -1,7 +1,10 @@
 {
   "profileRef": {
-    "profileId": "hain-fluorocycler-xt",
+    "profileId": "hain-fluorocycler-xt-madagascar",
     "revision": 1
+  },
+  "seedValues": {
+    "IC": "Valid"
   },
   "fixture": {
     "file": "fixtures/fluorocycler-xt/results.xlsx",
@@ -9,6 +12,14 @@
     "column_mapping": {
       "sampleId": "Sample ID",
       "result": "Calc. Conc."
+    },
+    "controlRows": [
+      "PC",
+      "NC"
+    ],
+    "variants": {
+      "with-controls": "fixtures/fluorocycler-xt/results-with-controls.xlsx",
+      "control-failing": "fixtures/fluorocycler-xt/results-control-failing.xlsx"
     }
   }
 }

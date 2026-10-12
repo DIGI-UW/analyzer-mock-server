@@ -21,7 +21,10 @@
     "outboundOrders": false,
     "connectionTest": true
   },
-  "supported_extensions": [".xls", ".xlsx"],
+  "supported_extensions": [
+    ".xls",
+    ".xlsx"
+  ],
   "column_mapping": {
     "Sample Name": "sampleId",
     "Target Name": "testCode",
@@ -30,10 +33,15 @@
     "Well Position": "position",
     "Task": "qcTask"
   },
-  "result_value_order": ["result", "ctValue"],
+  "result_value_order": [
+    "result",
+    "ctValue"
+  ],
   "sheet_detection": {
     "strategy": "header_scan",
-    "preferred_sheet_names": ["Results"],
+    "preferred_sheet_names": [
+      "Results"
+    ],
     "header_marker": "Well",
     "max_sheets_to_scan": 5,
     "max_rows_to_scan": 200
@@ -49,19 +57,17 @@
         "document": "QuantStudio 5 / 7 Flex, Field Mapping & Integration Spec v1.3.1 (openelis-work designs/analyzer-integration)",
         "section": "4.3, 5.1, 8"
       }
-    },
-    {
-      "test_code": "IC",
-      "test_name_hint": "Internal Control DNA",
-      "loinc": "89578-3",
-      "unit": "",
-      "result_type": "quantitative",
-      "source": {
-        "document": "QuantStudio 5 / 7 Flex, Field Mapping & Integration Spec v1.3.1 (openelis-work designs/analyzer-integration)",
-        "section": "4.3, 5.1, 8"
-      }
     }
   ],
+  "sample_flags": {
+    "raisedValue": "Undetermined",
+    "codes": [
+      "IC"
+    ],
+    "names": {
+      "IC": "Internal control not detected"
+    }
+  },
   "configDefaults": {
     "dataFlow": "RESULTS_ONLY",
     "fileFormat": "XLSX",
@@ -110,23 +116,19 @@
         "targetField": "QC_TASK",
         "operand": "NTC"
       },
-      "negative-control-prefix": {
+      "positive-control-name": {
         "ruleType": "SPECIMEN_ID_PATTERN",
-        "operand": "^(CNEG|NTC)(?:$|[-_].*)"
-      },
-      "positive-control-prefix": {
-        "ruleType": "SPECIMEN_ID_PATTERN",
-        "operand": "^(CPOS|PTC|LPC|HPC)(?:$|[-_].*)"
+        "operand": "^(PC|POS|POSITIVE|CONTROLE POSITIF)$"
       }
     }
   },
   "catalog": {
     "revision": 1,
-    "recognitionFingerprint": "sha256:e5c668abfd8b64220efeff01dd57682dcbd883f2652d68d187505bbd4ac707ab",
+    "recognitionFingerprint": "sha256:f8741ceffb710d2bee9dc3f629120dc2d3dadbf866a6d0c3cf154ed94aa250da",
     "source": "SHIPPED",
     "status": "ACTIVE",
     "publishedAt": "2026-10-06T00:00:00Z",
     "publishedBy": "distribution",
-    "revisionFingerprint": "sha256:9b5a84ddbc724ee696823898105a4f49edd41160fb9400bc51c109cda5d91ce1"
+    "revisionFingerprint": "sha256:b8c148e55f0907494058e7eb56603e157d818d103645668f91b585e5e0bf49e0"
   }
 }

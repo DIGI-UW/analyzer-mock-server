@@ -47,23 +47,3 @@ OBX|42|NM|15111^PLT Histogram. Left Line^99MRC||3||||||F
 OBX|43|NM|15112^PLT Histogram. Right Line^99MRC||43||||||F
 OBX|44|ED|15116^PLT Histogram. BMP^99MRC||^Image^BMP^Base64^……PLT Histogram bmp data……||||||F
 OBX|45|ED|15200^WBC DIFF Scattergram. BMP^99MRC||^Image^BMP^Base64^……WBC Diff Scattergram bmp data……||||||F
-OBR|2||{sample_id}|00002^Manual Count^99MRC|||||||||||BLDV
-OBX|46|NM|747-6^Myeloblasts%. Manual^LN||0.0|%|||||F
-OBX|47|NM|783-1^Promyelocytes%. Manual^LN||0.0|%|||||F
-OBX|48|NM|749-2^Myelocytes%. Manual^LN||0.0|%|||||F
-OBX|49|NM|740-1^Metamyelocyte%. Manual^LN||0.0|%|||||F
-OBX|50|NM|764-1^Neuts Band%. Manual^LN||0.0|%|||||F
-OBX|51|NM|769-0^Neuts Seg%. Manual^LN||0.0|%|||||F
-OBX|52|NM|714-6^Eosinophils%. Manual^LN||0.0|%|||||F
-OBX|53|NM|707-0^Basophils%. Manual^LN||0.0|%|||||F
-OBX|54|NM|33831-9^Lymphoblasts%. Manual^LN||0.0|%|||||F
-OBX|55|NM|6746-2^Prolymphocytes%. Manual^LN||0.0|%|||||F
-OBX|56|NM|737-7^Lymphocytes%. Manual^LN||0.0|%|||||F
-OBX|57|NM|29261-5^Abnormal Lymphs%. Manual^LN||0.0|%|||||F
-OBX|58|NM|33840-0^Monoblasts%. Manual^LN||0.0|%|||||F
-OBX|59|NM|13599-6^Promonocytes%. Manual^LN||0.0|%|||||F
-OBX|60|NM|744-3^Monocytes%. Manual^LN||0.0|%|||||F
-OBX|61|NM|18309-5^NRBCs%. Manual^LN||0.0|%|||||F
-OBX|62|NM|31112-6^Reticulocytes%. Manual^LN||0.0|%|||||F
-OBX|63|NM|11000^Undefined Cells%. Manual^99MRC||0.0|%|||||F
-OBX|64|NM|11001^Other Abnormal Cells%. Manual^99MRC||0.0|%|||||F

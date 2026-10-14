@@ -124,9 +124,12 @@ code to the code this instrument sends for it (`{instrument_code:HIVVL}` in a fi
 record and value in a fixture is declared by the profile, and every declared one is in a fixture.
 Assays today: `hivvl`, `cov-flu-rsv-plus`, `cov-flu-plus`, `cov-plus`.
 
-For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds the two HL7 messages Mindray prints
-in the BC-5380 Operator's Manual, appendix C.3.3: `analysis-result` (a CBC with its histograms and
-a manual count) and `xr-qc` (an X-R QC run). `{sample_id}` fills OBR-3, `{patient_id}` and
+For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds messages built on the two Mindray
+prints in the BC-5380 Operator's Manual, appendix C.3.3. `analysis-result` is that CBC as a routine
+run sends it: the automated count with its alarms, histograms and scattergram. `manual-count` is the
+same CBC with the microscope exam a technician enters on the analyzer (OBR-4 `00002` Manual Count),
+counted to 100 white cells; Mindray's print sends that exam with every percentage at 0.0.
+`xr-qc` is the X-R QC run as printed. `{sample_id}` fills OBR-3, `{patient_id}` and
 `{patient_name}` PID-3 and PID-5, and `sender_id` replaces MSH-3. The template
 `mindray_bc5380_hl7` replays them over MLLP:
 

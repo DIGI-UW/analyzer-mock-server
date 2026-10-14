@@ -54,42 +54,5 @@
             "unit": "10^3/uL",
             "normalRange": "150-400"
         }
-    ],
-    "qc_controls": [
-        {
-            "field_code": "WBC",
-            "lot_number": "LOT-WBC-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 6.5
-        },
-        {
-            "field_code": "RBC",
-            "lot_number": "LOT-RBC-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 4.5
-        },
-        {
-            "field_code": "HGB",
-            "lot_number": "LOT-HGB-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 14.0
-        },
-        {
-            "field_code": "HCT",
-            "lot_number": "LOT-HCT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 42.0
-        },
-        {
-            "field_code": "PLT",
-            "lot_number": "LOT-PLT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 250.0
-        }
     ]
 }

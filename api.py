@@ -184,8 +184,8 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/hl7/{template}": "Generate HL7 ORU^R01",
                     "POST /simulate/hl7/{template}": "Generate + push HL7 (body: destination, count, source_ip, sender_id, qc, qc_deviation)",
                     "GET /simulate/astm/{template}": "Generate ASTM message",
-                    "POST /simulate/fixture/{analyzer}/{assay}/{outcome}": "Push a message the manufacturer documents (body: destination, sample_id, patient, instrument_codes, source_ip, sender_id)",
-                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at, qc, qc_deviation)",
+                    "POST /simulate/fixture/{analyzer}/{assay}/{outcome}": "Push a message the manufacturer documents; a control-* outcome is a control run (body: destination, sample_id, patient, instrument_codes, source_ip, sender_id, message_time)",
+                    "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, sample_ids for XLSX fixtures, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
@@ -440,10 +440,12 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "error": "destination is required for the saved Bridge ASTM listener"
             })
             return
+        if "qc" in params or "qc_deviation" in params:
+            self._send_json(400, {"error": "ASTM controls are sent as an O record with action code Q; "
+                                           "replay a control outcome from /simulate/fixture/<template>/<assay>/"})
+            return
         # The provisioned instance owns the source IP (see _handle_hl7).
         source_ip = params.get("source_ip") or instance_ip
-        qc_mode = bool(params.get("qc"))
-        qc_deviation = params.get("qc_deviation")
         sender_id = params.get("sender_id")
 
         gen_kwargs = {"use_seed": True}
@@ -467,21 +469,11 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         handler = ASTMHandler()
 
         for i in range(count):
-            if qc_mode:
-                qc_kwargs = {}
-                if qc_deviation is not None:
-                    qc_kwargs["deviation"] = float(qc_deviation)
-                try:
-                    msg = handler.generate_qc(template, **qc_kwargs)
-                except ValueError as e:
-                    self._send_json(400, {"error": str(e)})
-                    return
-            else:
-                try:
-                    msg = handler.generate(template, **gen_kwargs)
-                except ValueError as e:
-                    self._send_json(400, {"error": str(e)})
-                    return
+            try:
+                msg = handler.generate(template, **gen_kwargs)
+            except ValueError as e:
+                self._send_json(400, {"error": str(e)})
+                return
             msg = with_astm_sender_id(msg, sender_id)
             pushed = False
             push_err = None
@@ -501,7 +493,6 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "status": "completed",
             "template": resolved_template,
             "count": count,
-            "qc": qc_mode,
             "pushed": success_count if destination else None,
             "destination": destination,
             "source_ip": source_ip,
@@ -546,6 +537,15 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         except fixture_messages.FixtureNotFound as e:
             self._send_json(404, {"error": str(e)})
             return
+        message_time = params.get("message_time")
+        if message_time is not None:
+            if hl7:
+                self._send_json(400, {"error": "message_time sets an ASTM header time; HL7 fixtures do not take it"})
+                return
+            if not isinstance(message_time, str) or not fixture_messages.MESSAGE_TIME.match(message_time):
+                self._send_json(400, {"error": "message_time must be an ASTM timestamp, YYYYMMDDHHMMSS"})
+                return
+            message = fixture_messages.with_message_time(message, message_time)
         source_ip = params.get("source_ip") or instance_ip
         if hl7:
             # HL7 ends each segment with a carriage return.

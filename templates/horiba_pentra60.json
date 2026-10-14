@@ -210,42 +210,5 @@
     "testSample": {
         "id": "60",
         "type": "CBC^Complete Blood Count"
-    },
-    "qc_controls": [
-        {
-            "field_code": "WBC",
-            "lot_number": "LOT-WBC-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 5.8
-        },
-        {
-            "field_code": "RBC",
-            "lot_number": "LOT-RBC-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 4.92
-        },
-        {
-            "field_code": "HGB",
-            "lot_number": "LOT-HGB-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 14.8
-        },
-        {
-            "field_code": "HCT",
-            "lot_number": "LOT-HCT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 43.2
-        },
-        {
-            "field_code": "PLT",
-            "lot_number": "LOT-PLT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 245.0
-        }
-    ]
+    }
 }

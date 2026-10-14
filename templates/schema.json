@@ -39,6 +39,19 @@
         ]
       },
       "description": "Replay-only fixture template: an ASTM transport that sends a manufacturer's documented messages from fixtures/<family>, never generated ones."
+    },
+    {
+      "required": ["protocol", "fixtures"],
+      "properties": { "protocol": { "properties": { "type": { "const": "HL7" } } } },
+      "not": {
+        "anyOf": [
+          { "required": ["profileRef"] },
+          { "required": ["fields"] },
+          { "required": ["analyzer"] },
+          { "required": ["astm_config"] }
+        ]
+      },
+      "description": "Replay-only HL7 fixture template: an MLLP sender of a manufacturer's documented messages from fixtures/<family>, never generated ones."
     }
   ],
   "properties": {

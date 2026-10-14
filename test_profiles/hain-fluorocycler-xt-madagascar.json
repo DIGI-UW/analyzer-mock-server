@@ -1,0 +1,170 @@
+{
+  "$schema": "https://openelis-global.org/contracts/analyzer/v1/analyzer-profile.schema.json",
+  "schemaVersion": "2.0",
+  "profileMeta": {
+    "id": "hain-fluorocycler-xt-madagascar",
+    "version": "1.0.0",
+    "displayName": "Bruker FluoroCycler XT (Madagascar workbook)",
+    "confidence": "MEDIUM"
+  },
+  "analyzer_name": "Bruker FluoroCycler XT",
+  "manufacturer": "Bruker",
+  "model": "FluoroCycler XT",
+  "category": "MOLECULAR",
+  "protocol": {
+    "name": "FILE",
+    "format": "XLSX"
+  },
+  "capabilities": {
+    "inboundResults": true,
+    "outboundOrders": false,
+    "connectionTest": true
+  },
+  "supported_extensions": [".ods", ".xlsx", ".xls"],
+  "column_mapping": {
+    "Sample ID": "sampleId",
+    "Type": "qcTask",
+    "Col": "testCode",
+    "Calc. Conc.": "result",
+    "Result": "interpretation"
+  },
+  "test_code_values": {
+    "1": "VIH-1",
+    "2": "IC"
+  },
+  "result_value_order": ["result", "interpretation"],
+  "default_test_mappings": [
+    {
+      "test_code": "VIH-1",
+      "loinc": "20447-9",
+      "unit": "copies/mL",
+      "result_type": "quantitative",
+      "test_name_hint": "HIV-1 viral load",
+      "values": ["Positive", "Negative", "Invalid"],
+      "value_codes": {
+        "Positive": [
+          {
+            "system": "http://loinc.org",
+            "code": "LA11882-0"
+          },
+          {
+            "system": "http://snomed.info/sct",
+            "code": "260373001"
+          },
+          {
+            "system": "https://openconceptlab.org/orgs/CIEL/sources/CIEL",
+            "code": "1301"
+          }
+        ],
+        "Negative": [
+          {
+            "system": "http://loinc.org",
+            "code": "LA11883-8"
+          },
+          {
+            "system": "http://snomed.info/sct",
+            "code": "260415000"
+          },
+          {
+            "system": "https://openconceptlab.org/orgs/CIEL/sources/CIEL",
+            "code": "1302"
+          }
+        ],
+        "Invalid": [
+          {
+            "system": "http://loinc.org",
+            "code": "LA15841-2"
+          },
+          {
+            "system": "https://openconceptlab.org/orgs/CIEL/sources/CIEL",
+            "code": "163611"
+          }
+        ]
+      },
+      "call_component": "call",
+      "components": [
+        {
+          "code": "call",
+          "label": "Call",
+          "result_type": "qualitative"
+        }
+      ],
+      "source": {
+        "document": "Madagascar FluoroCycler XT site workbook, as DIGI-UW/analyzer-mock-server fixtures/fluorocycler-xt/results.xlsx carries it (commit 835261c, column shape read from the site file)",
+        "section": "header row and rows 2 to 5; FluoroCycler XT Flat File Import Spec v1.0 section 2.1 for one row per detection channel"
+      }
+    }
+  ],
+  "sample_flags": {
+    "raisedValue": "Invalid",
+    "codes": ["IC"],
+    "names": {
+      "IC": "Internal control invalid"
+    }
+  },
+  "configDefaults": {
+    "dataFlow": "RESULTS_ONLY",
+    "fileFormat": "XLSX",
+    "filePattern": "*.{ods,ODS,xlsx,XLSX,xls,XLS}",
+    "hasHeader": true,
+    "sheetIndex": 0
+  },
+  "connectionFields": [
+    {
+      "key": "dataFlow",
+      "labelKey": "analyzer.setup.connect.dataFlow",
+      "inputKind": "SELECT",
+      "required": true,
+      "choices": [
+        {
+          "value": "RESULTS_ONLY",
+          "labelKey": "analyzer.setup.connect.dataFlow.resultsOnly"
+        }
+      ]
+    },
+    {
+      "key": "directory",
+      "labelKey": "analyzer.connection.field.directory",
+      "inputKind": "FILE_PATH",
+      "required": true,
+      "choices": []
+    },
+    {
+      "key": "filePattern",
+      "labelKey": "analyzer.connection.field.filePattern",
+      "helpTextKey": "analyzer.connection.field.filePattern.help",
+      "inputKind": "TEXT",
+      "required": true,
+      "choices": []
+    }
+  ],
+  "controlResultRecognition": {
+    "mode": "RULES",
+    "rules": {
+      "positive-control-task": {
+        "ruleType": "FIELD_EQUALS",
+        "targetField": "QC_TASK",
+        "operand": "Positive"
+      },
+      "negative-control-task": {
+        "ruleType": "FIELD_EQUALS",
+        "targetField": "QC_TASK",
+        "operand": "Negative"
+      },
+      "standard-control-task": {
+        "ruleType": "FIELD_EQUALS",
+        "targetField": "QC_TASK",
+        "operand": "Standard"
+      }
+    }
+  },
+  "catalog": {
+    "revision": 1,
+    "recognitionFingerprint": "sha256:539fea855169bf0055fbf0ffe9b47e9538776d77ea93f0725b3aed3d43d8a87f",
+    "source": "SHIPPED",
+    "status": "ACTIVE",
+    "publishedAt": "2026-10-11T00:00:00Z",
+    "publishedBy": "distribution",
+    "revisionFingerprint": "sha256:8c0d62edb064ef081883104d17b666be734c8c2723c8da80a3d5ec953825b775"
+  }
+}

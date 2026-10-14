@@ -148,6 +148,18 @@ time (H.14), and the Bridge takes an identical message for a retransmission, so 
 `test_fixtures_match_profile.py` also checks that every control outcome matches the profile's
 `controlResultRecognition` rules and that no patient outcome does.
 
+For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds the two HL7 messages Mindray prints
+in the BC-5380 Operator's Manual, appendix C.3.3: `analysis-result` (a CBC with its histograms and
+a manual count) and `xr-qc` (an X-R QC run). `{sample_id}` fills OBR-3, `{patient_id}` and
+`{patient_name}` PID-3 and PID-5, and `sender_id` replaces MSH-3. The template
+`mindray_bc5380_hl7` replays them over MLLP:
+
+```bash
+curl -s -X POST http://localhost:8085/simulate/fixture/mindray_bc5380_hl7/cbc/analysis-result \
+  -H 'Content-Type: application/json' \
+  -d '{"destination": "mllp://bridge:2575", "sample_id": "ACC-1", "sender_id": "BC-5380"}'
+```
+
 ## Send HL7 Through Bridge
 
 ```bash
@@ -218,11 +230,31 @@ curl -X POST http://localhost:8081/simulate/file/hain_fluorocycler \
 connection. Bridge discovers and transports the file through that watched
 directory.
 
-For a captured XLSX fixture, the optional `sample_ids` array replaces only the
-result-row sample IDs, in file order. Supply one ID per parsed result; the
-response reports the actual IDs and values written. This lets repeated tests
-use newly created orders while retaining the analyzer's captured file layout
-and measured values.
+For a captured XLSX fixture, the optional `sample_ids` array replaces the
+patient rows' sample IDs, in file order. Control rows, the ones a template lists
+in `fixture.controlRows`, keep their names unless `control_ids` renames them,
+also in file order. The response reports the actual IDs and values written. This
+lets repeated tests use newly created orders while retaining the analyzer's
+file layout, measured values and control wells.
+
+`variant` replays another workbook a template lists under `fixture.variants`:
+
+| Template            | Variant           | Workbook                                                   |
+| ------------------- | ----------------- | ---------------------------------------------------------- |
+| `quantstudio7`, `quantstudio5` | `control-failing` | the same plate with its `NTC` well amplifying   |
+| `hain_fluorocycler` | `with-controls`   | the patient rows plus a positive (`PC`) and a negative (`NC`) control |
+| `hain_fluorocycler` | `control-failing` | the same, with the negative control reading `Positive`     |
+
+The QuantStudio workbooks follow the real exports described in the openelis-work
+QuantStudio spec (sections 3 to 8): a metadata block above the `Well` header row,
+upper-case tasks, and two rows per well (the `VIH-1` target and the `IC` internal
+control) under one sample name. The plate carries standards (`STD1_E7`, `STD3_E5`,
+`STD5_E3`, Task `STANDARD`), NTC wells named `NC` and `NTC` (Task `NTC`), and a
+positive control `PC` (Task `UNKNOWN`). The FluoroCycler XT workbooks keep the
+Madagascar site file's columns; no file we have shows the `Type` value a control
+row carries, so control rows use the values the Bridge profile recognises.
+`test_fixtures_match_profile.py` checks that each template's `controlRows` are
+exactly the rows its pinned profile revision recognises as controls.
 
 ## Dynamic Analyzer Instances
 

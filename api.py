@@ -520,7 +520,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             return
         patient = params.get("patient") or {}
         codes = params.get("instrument_codes") or {}
-        # These values are written into ASTM fields, so they may not carry a field or record break.
+        # These values are written into ASTM or HL7 fields, so they may not carry a field or record break.
         supplied = {"sample_id": sample_id, "sender_id": params.get("sender_id"),
                     "patient.id": patient.get("id"), "patient.name": patient.get("name"),
                     **{f"instrument_codes.{code}": value for code, value in codes.items()}}
@@ -529,22 +529,33 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": f"{field} may not contain '|', a carriage return or a line feed"})
                 return
         try:
+            hl7 = fixture_messages.is_hl7(family, assay, outcome)
             message = fixture_messages.render(
                 family, assay, outcome, sample_id=sample_id,
-                patient_id=patient.get("id", ""), patient_name=patient.get("name", "^^^^"),
+                patient_id=patient.get("id", ""), patient_name=patient.get("name", "" if hl7 else "^^^^"),
                 instrument_codes=params.get("instrument_codes"))
         except fixture_messages.FixtureNotFound as e:
             self._send_json(404, {"error": str(e)})
             return
         message_time = params.get("message_time")
         if message_time is not None:
+            if hl7:
+                self._send_json(400, {"error": "message_time sets an ASTM header time; HL7 fixtures do not take it"})
+                return
             if not isinstance(message_time, str) or not fixture_messages.MESSAGE_TIME.match(message_time):
                 self._send_json(400, {"error": "message_time must be an ASTM timestamp, YYYYMMDDHHMMSS"})
                 return
             message = fixture_messages.with_message_time(message, message_time)
-        message = with_astm_sender_id(message, params.get("sender_id"))
         source_ip = params.get("source_ip") or instance_ip
-        pushed, push_err = push_astm_to_destination(destination, message, source_ip=source_ip)
+        if hl7:
+            # HL7 ends each segment with a carriage return.
+            message = with_hl7_sender_id("\r".join(message.strip("\n").split("\n")) + "\r", params.get("sender_id"))
+            pushed, push_err = push_hl7_to_destination(destination, message, source_ip=source_ip)
+            pushed_sample_id = _extract_sample_id_from_hl7(message)
+        else:
+            message = with_astm_sender_id(message, params.get("sender_id"))
+            pushed, push_err = push_astm_to_destination(destination, message, source_ip=source_ip)
+            pushed_sample_id = _extract_sample_id_from_astm(message)
         self._send_json(200, {
             "status": "completed",
             "fixture": f"{family}/{assay}/{outcome}",
@@ -557,7 +568,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 "message_number": 1,
                 "pushed": pushed,
                 "error": push_err,
-                "sample_id": _extract_sample_id_from_astm(message),
+                "sample_id": pushed_sample_id,
             }],
         })
 
@@ -691,6 +702,13 @@ class MockAPIHandler(BaseHTTPRequestHandler):
 
     def _handle_fixture_file_post(self, template_name, template, fixture_cfg, target_dir, params):
         """Copy a real analyzer fixture into the Bridge-owned watch directory."""
+        variant = params.get("variant")
+        if variant is not None:
+            variants = fixture_cfg.get("variants") or {}
+            if variant not in variants:
+                self._send_json(400, {"error": f"variant must be one of {sorted(variants)}"})
+                return
+            fixture_cfg = {**fixture_cfg, "file": variants[variant]}
         fixture_rel = fixture_cfg["file"]
         fixture_path = os.path.join(os.path.dirname(__file__), fixture_rel)
         if not os.path.isfile(fixture_path):
@@ -710,19 +728,35 @@ class MockAPIHandler(BaseHTTPRequestHandler):
         out_path = os.path.join(resolved_dir, os.path.basename(filename))
 
         sample_ids = params.get("sample_ids")
-        if sample_ids is not None:
+        control_ids = params.get("control_ids")
+        if sample_ids is not None or control_ids is not None:
             if (fixture_cfg.get("format") or "").upper() != "XLSX":
-                self._send_json(400, {"error": "sample_ids requires an XLSX fixture"})
+                self._send_json(400, {"error": "sample_ids and control_ids require an XLSX fixture"})
                 return
-            if (not isinstance(sample_ids, list) or len(sample_ids) != len(metadata_results)
-                    or any(not isinstance(value, str) or not value.strip() for value in sample_ids)):
-                self._send_json(400, {"error": f"sample_ids must contain {len(metadata_results)} nonblank result IDs"})
-                return
+            # Control rows keep their names unless the caller renames them; sample_ids are the
+            # patient rows only, in workbook order.
+            control_names = set(fixture_cfg.get("controlRows") or [])
+            is_control = [row["sampleId"] in control_names for row in metadata_results]
+            patient_count = is_control.count(False)
+            control_count = is_control.count(True)
+            for name, ids, expected in (("sample_ids", sample_ids, patient_count),
+                                        ("control_ids", control_ids, control_count)):
+                if ids is not None and (
+                        not isinstance(ids, list) or len(ids) != expected
+                        or any(not isinstance(value, str) or not value.strip() for value in ids)):
+                    self._send_json(400, {"error": f"{name} must contain {expected} nonblank IDs"})
+                    return
+            patients = iter(sample_ids) if sample_ids is not None else None
+            controls = iter(control_ids) if control_ids is not None else None
+            replacement = []
+            for row, control in zip(metadata_results, is_control):
+                source = controls if control else patients
+                replacement.append(next(source) if source is not None else row["sampleId"])
             with tempfile.NamedTemporaryFile(dir=resolved_dir, suffix=".tmp", delete=False) as temporary:
                 temporary_path = temporary.name
             try:
                 metadata_results = write_xlsx_with_sample_ids(
-                    fixture_path, temporary_path, fixture_cfg, sample_ids
+                    fixture_path, temporary_path, fixture_cfg, replacement
                 )
                 shutil.copymode(fixture_path, temporary_path)
                 os.replace(temporary_path, out_path)

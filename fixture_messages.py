@@ -7,7 +7,8 @@ placeholders for what a caller chooses:
     {patient_id}, {patient_name}     the patient the instrument reports
     {instrument_code:<profile code>} the code this instrument sends for a profile test code
 
-Fixtures live in fixtures/<family>/<assay>/<outcome>.astm.
+Fixtures live in fixtures/<family>/<assay>/<outcome>.astm, or .hl7 for an HL7 instrument, one
+record or segment per line.
 """
 
 import os
@@ -17,6 +18,7 @@ from typing import Dict, List, Optional
 FIXTURE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _PLACEHOLDER = re.compile(r"\{(\w+)(?::([^}]+))?\}")
+_EXTENSIONS = (".astm", ".hl7")
 
 
 class FixtureNotFound(LookupError):
@@ -27,10 +29,16 @@ def _path(family: str, assay: str, outcome: str) -> str:
     for part in (family, assay, outcome):
         if not _SAFE.match(part):
             raise FixtureNotFound(f"No such fixture: {family}/{assay}/{outcome}")
-    path = os.path.join(FIXTURE_ROOT, family, assay, outcome + ".astm")
-    if not os.path.isfile(path):
-        raise FixtureNotFound(f"No such fixture: {family}/{assay}/{outcome}")
-    return path
+    for extension in _EXTENSIONS:
+        path = os.path.join(FIXTURE_ROOT, family, assay, outcome + extension)
+        if os.path.isfile(path):
+            return path
+    raise FixtureNotFound(f"No such fixture: {family}/{assay}/{outcome}")
+
+
+def is_hl7(family: str, assay: str, outcome: str) -> bool:
+    """Whether the fixture is an HL7 message rather than ASTM records."""
+    return _path(family, assay, outcome).endswith(".hl7")
 
 
 def list_fixtures(family: str) -> Dict[str, List[str]]:
@@ -39,8 +47,8 @@ def list_fixtures(family: str) -> Dict[str, List[str]]:
         raise FixtureNotFound(f"No such fixture family: {family}")
     root = os.path.join(FIXTURE_ROOT, family)
     return {
-        assay: sorted(name[:-len(".astm")] for name in os.listdir(os.path.join(root, assay))
-                      if name.endswith(".astm"))
+        assay: sorted(os.path.splitext(name)[0] for name in os.listdir(os.path.join(root, assay))
+                      if name.endswith(_EXTENSIONS))
         for assay in sorted(os.listdir(root)) if os.path.isdir(os.path.join(root, assay))
     }
 

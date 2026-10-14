@@ -55,6 +55,7 @@ def _normalize_fields(template: Dict[str, Any]) -> List[Dict[str, Any]]:
         out.append({
             "name": f.get("name", "Unknown"),
             "code": f.get("code", f.get("name", "")),
+            "fileCode": f.get("fileCode"),
             "type": f.get("type", "NUMERIC"),
             "unit": f.get("unit") or "",
             "normalRange": f.get("normalRange", ""),
@@ -120,7 +121,7 @@ class FileHandler(BaseHandler):
         for i in range(sample_count):
             sid = validate_accession(sample_id, "FILE sample_id override") if sample_id else _next_file_sample_id()
             for f in fields:
-                w.writerow([sid, f.get("code", f.get("name")), _random_value(f), ts])
+                w.writerow([sid, f.get("fileCode") or f.get("code") or f.get("name"), _random_value(f), ts])
 
         return buf.getvalue()
 

@@ -68,6 +68,20 @@ class TestFixtureMessages(unittest.TestCase):
         self.assertEqual("20261010120000", resent.split("\n")[0].split("|")[13])
         self.assertEqual(message.split("\n")[1:], resent.split("\n")[1:])
 
+    def test_hl7_fixtures_are_listed_and_filled_like_astm_ones(self):
+        self.assertEqual({"cbc": ["analysis-result", "xr-qc"]}, fixture_messages.list_fixtures("mindray-bc5380"))
+
+        message = fixture_messages.render(
+            "mindray-bc5380", "cbc", "analysis-result", sample_id="ACC-5", patient_id="MRN-1",
+            patient_name="Roe^Jane")
+
+        segments = message.strip().split("\n")
+        self.assertEqual("MRN-1^^^^MR", segments[1].split("|")[3])
+        self.assertEqual("Roe^Jane", segments[1].split("|")[5])
+        self.assertEqual(["ACC-5", "ACC-5"],
+                         [s.split("|")[3] for s in segments if s.startswith("OBR|")])
+        self.assertNotIn("{", message)
+
     def test_an_unknown_fixture_is_refused(self):
         with self.assertRaises(fixture_messages.FixtureNotFound):
             fixture_messages.render("genexpert", "hivvl", "no-such-outcome", sample_id="X")
@@ -174,6 +188,25 @@ class TestSimulateFixtureApi(unittest.TestCase):
                                           {"destination": "tcp://bridge:12001", **body})
             self.assertEqual(400, status, field)
             self.assertIn(field, response["error"])
+        self.mock_push.assert_not_called()
+
+    def test_an_hl7_fixture_is_sent_over_mllp_as_the_instrument_names_itself(self):
+        hl7_push = patch.object(api, "push_hl7_to_destination", return_value=(True, None))
+        mock_hl7_push = hl7_push.start()
+        self.addCleanup(hl7_push.stop)
+        with patch.object(api, "_load_template",
+                          return_value={"fixtures": "mindray-bc5380", "protocol": {"type": "HL7"}}):
+            status, body = self._post("/simulate/fixture/mindray_bc5380_hl7/cbc/analysis-result", {
+                "destination": "mllp://bridge:2575", "sample_id": "ACC-8", "sender_id": "BC-5380-2"})
+
+        self.assertEqual(200, status, body)
+        self.assertEqual("ACC-8", body["results"][0]["sample_id"])
+        pushed = mock_hl7_push.call_args[0][1]
+        self.assertNotIn("\n", pushed)
+        segments = pushed.strip("\r").split("\r")
+        self.assertTrue(segments[0].startswith("MSH|^~\\&|BC-5380-2|Mindray|"), segments[0])
+        self.assertIn("OBR|1||ACC-8|00001^Automated Count^99MRC|", pushed)
+        self.assertEqual("PID|1||^^^^MR||||19900804000000|Female", segments[1])
         self.mock_push.assert_not_called()
 
     def test_a_replay_only_template_refuses_to_generate_and_names_the_fixture_route(self):

@@ -72,6 +72,26 @@ def test_exact_bridge_profile_ref_resolves(tmp_path, monkeypatch):
     }
 
 
+
+@pytest.mark.parametrize("fingerprint", [None, "sha256:older-stamp"])
+def test_authored_profile_resolves_without_requiring_a_fingerprint(tmp_path, monkeypatch, fingerprint):
+    path = tmp_path / "profile.json"
+    _write_profile(path)
+    profile = json.loads(path.read_text())
+    profile["catalog"].pop("revisionFingerprint")
+    if fingerprint is not None:
+        profile["catalog"]["revisionFingerprint"] = fingerprint
+    path.write_text(json.dumps(profile))
+    monkeypatch.setenv("ANALYZER_BRIDGE_PROFILES_DIR", str(tmp_path))
+
+    merged = load_profile_backed_template("priority", _template())
+
+    assert merged["fields"][0]["code"] == "TEST-1"
+    assert merged["resolvedProfile"]["profileId"] == "priority-profile"
+    assert merged["resolvedProfile"]["revision"] == 1
+    assert merged["resolvedProfile"].get("revisionFingerprint") == fingerprint
+
+
 def test_unversioned_profile_key_is_not_a_profile_reference():
     assert (
         load_profile_backed_template(

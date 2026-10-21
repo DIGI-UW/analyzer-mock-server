@@ -31,7 +31,7 @@ from protocols.astm_handler import ASTMHandler
 from protocols.hl7_handler import HL7Handler
 from protocols.file_handler import FileHandler
 from protocols.sender_identity import with_astm_sender_id, with_hl7_sender_id
-from push import push_hl7_to_destination, push_astm_to_destination
+from push import push_hl7_to_destination, push_astm_to_destination, query_astm_host
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +186,7 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                     "GET /simulate/astm/{template}": "Generate ASTM message",
                     "POST /simulate/fixture/{analyzer}/{assay}/{outcome}": "Push a message the manufacturer documents (body: destination, sample_id, patient, instrument_codes, source_ip, sender_id)",
                     "POST /simulate/astm/{template}": "Generate + push ASTM (body: destination, count, sample_id, results, source_ip, sender_id, completed_at, qc, qc_deviation)",
+                    "POST /simulate/host-query/{analyzer}": "Send host queries as a GeneXpert on one connection and record the LIS reply (body: destination, specimen_ids, sender_id, source_ip, reply_timeout_seconds)",
                     "GET /simulate/file/{template}": "Generate FILE payload",
                     "POST /simulate/file/{template}": "Generate + write FILE (body: target_dir, filename, sample_ids for XLSX fixtures, qc, qc_deviation)",
                     "GET /analyzers": "List active mock analyzers",
@@ -275,6 +276,13 @@ class MockAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "Missing template name"})
                 return
             self._handle_astm_post(name)
+            return
+        if self.path.startswith("/simulate/host-query/"):
+            name = self._extract_name("/simulate/host-query/")
+            if not name:
+                self._send_json(400, {"error": "Missing analyzer name"})
+                return
+            self._handle_host_query_post(name)
             return
         if self.path.startswith("/simulate/file/"):
             name = self._extract_name("/simulate/file/")
@@ -506,6 +514,49 @@ class MockAPIHandler(BaseHTTPRequestHandler):
             "destination": destination,
             "source_ip": source_ip,
             "sender_id": sender_id,
+            "results": results,
+        })
+
+    def _handle_host_query_post(self, analyzer: str):
+        """Send host queries as a GeneXpert would and return what the LIS answered to each."""
+        _, instance_ip = self._resolve_instance(analyzer)
+        body = self._read_json_body()
+        if body is self._JSON_PARSE_ERROR:
+            self._send_json(400, {"error": "Invalid JSON body"})
+            return
+        params = body or {}
+        destination = params.get("destination") or ""
+        specimen_ids = params.get("specimen_ids")
+        if not destination.startswith("tcp://") or ":" not in destination[len("tcp://"):]:
+            self._send_json(400, {"error": "destination must be tcp://host:port"})
+            return
+        if not isinstance(specimen_ids, list) or not specimen_ids:
+            self._send_json(400, {"error": "specimen_ids must be a non-empty list"})
+            return
+        system_name = params.get("sender_id") or "GeneXpert"
+        # These values are written into ASTM fields, so they may not carry a field, component or record break.
+        for value in [system_name, *specimen_ids]:
+            if not isinstance(value, str) or not value or any(mark in value for mark in ("|", "^", "\r", "\n")):
+                self._send_json(400, {"error": "sender_id and specimen_ids may not contain '|', '^' or a line break"})
+                return
+        try:
+            reply_timeout = float(params.get("reply_timeout_seconds", 60))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "reply_timeout_seconds must be a number"})
+            return
+        host, port = destination[len("tcp://"):].rsplit(":", 1)
+        if not port.isdigit():
+            self._send_json(400, {"error": f"invalid TCP port: {port}"})
+            return
+        source_ip = params.get("source_ip") or instance_ip
+        results, error = query_astm_host(host, int(port), specimen_ids, system_name,
+                                         reply_timeout_s=reply_timeout, source_ip=source_ip)
+        self._send_json(200, {
+            "status": "completed" if error is None else "failed",
+            "destination": destination,
+            "source_ip": source_ip,
+            "sender_id": system_name,
+            "error": error,
             "results": results,
         })
 

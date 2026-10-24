@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Derive analyzer-mock fields from an exact Bridge profile revision.
 
-Profile-backed templates pin an immutable Bridge profile with ``profileRef``.
+Profile-backed templates pin an exact Bridge profile revision with ``profileRef``.
 The adapter resolves the exact ID and catalog revision and fails closed if the
 catalog does not contain exactly one match. Transport mechanics and deterministic
 simulation values remain mock-owned.
@@ -34,7 +34,7 @@ _MOCK_COLUMN_KEYS = {
 
 
 class ProfileResolutionError(RuntimeError):
-    """The requested immutable Bridge profile revision cannot be resolved."""
+    """The requested Bridge profile revision cannot be resolved."""
 
 
 def _bridge_profiles_root() -> Path:
@@ -83,13 +83,7 @@ def _load_exact_bridge_profile(profile_ref: Dict[str, Any]) -> Dict[str, Any]:
             f"Bridge profile {exact_ref} matched multiple documents: {paths}"
         )
 
-    profile = matches[0][1]
-    fingerprint = profile.get("catalog", {}).get("revisionFingerprint")
-    if not isinstance(fingerprint, str) or not fingerprint:
-        raise ProfileResolutionError(
-            f"Bridge profile {exact_ref} has no catalog revision fingerprint"
-        )
-    return profile
+    return matches[0][1]
 
 
 def _default_negative(values: List[str]) -> str:
@@ -249,8 +243,12 @@ def load_profile_backed_template(
     merged["resolvedProfile"] = {
         "profileId": profile["profileMeta"]["id"],
         "revision": profile["catalog"]["revision"],
-        "revisionFingerprint": profile["catalog"]["revisionFingerprint"],
     }
+    # Authored profiles omit this Bridge-derived metadata. Preserve a supplied
+    # stamp for diagnostics without requiring or computing a second fingerprint.
+    fingerprint = profile["catalog"].get("revisionFingerprint")
+    if isinstance(fingerprint, str) and fingerprint:
+        merged["resolvedProfile"]["revisionFingerprint"] = fingerprint
     merged["analyzer"] = {
         "name": _required_profile_text(profile, "analyzer_name", source_label),
         "model": _required_profile_text(profile, "model", source_label),

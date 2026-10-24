@@ -10,6 +10,7 @@ import logging
 import os
 import socket
 import time
+import uuid
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -209,6 +210,95 @@ def send_astm_session(sock, records: list, session_label: str = "") -> bool:
     sock.sendall(EOT)
     logger.info("%s Session complete — %d frames sent", tag, len(records))
     return True
+
+
+def receive_astm_session(sock, timeout_s: float) -> Optional[list]:
+    """Receive one ASTM session the other side sends on an open socket (ENQ, frames, EOT).
+
+    Acknowledges the ENQ and each frame and returns the records, or None when no
+    ENQ arrives within timeout_s or the connection closes.
+    """
+    sock.settimeout(timeout_s)
+    try:
+        first = sock.recv(1)
+    except socket.timeout:
+        return None
+    if first != ENQ:
+        return None
+    sock.sendall(ACK)
+    sock.settimeout(30)  # LIS01-A: a receiver waits 30 seconds for the next frame or EOT
+    text = b""
+    while True:
+        byte = sock.recv(1)
+        if not byte:
+            return None
+        if byte == EOT:
+            break
+        if byte != STX:
+            continue
+        frame = b""
+        while not frame.endswith(LF):
+            more = sock.recv(1)
+            if not more:
+                return None
+            frame += more
+        # Frame number, text, ETX or ETB, two checksum characters, CR LF.
+        text += frame[1:-5]
+        sock.sendall(ACK)
+    return [record for record in text.decode(ASTM_TCP_ENCODING).split("\r") if record]
+
+
+def query_astm_host(host: str, port: int, specimen_ids: list, system_name: str,
+                    reply_timeout_s: float = 60.0, source_ip: Optional[str] = None,
+                    timeout: int = 30):
+    """Play a GeneXpert in Host Query mode (Cepheid 301-2002 Rev. E, 6.3.2).
+
+    One connection carries a query session per specimen, and the LIS's reply is
+    read on it. A query with no reply within reply_timeout_s is cancelled as the
+    instrument does (6.3.1.2). Returns (results, error_reason).
+    """
+    if source_ip and not _wait_source_ip_bindable(source_ip):
+        return [], f"source IP {source_ip} not configured on the mock container"
+
+    def header() -> str:
+        return (f"H|@^\\|{uuid.uuid4().hex}||{system_name}^GeneXpert^6.2|||||LIS||P|1394-97|"
+                f"{time.strftime('%Y%m%d%H%M%S')}")
+
+    results = []
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(timeout)
+        if source_ip:
+            sock.bind((source_ip, 0))
+        sock.connect((host, port))
+        for specimen_id in specimen_ids:
+            query = [header(), f"Q|1|^{specimen_id}||||||||||O@N", "L|1|N"]
+            if not send_astm_session(sock, query, f"query {specimen_id}"):
+                return results, f"host query for {specimen_id} not accepted by {host}:{port}"
+            reply = receive_astm_session(sock, reply_timeout_s)
+            if reply is None:
+                logger.info("[HOST-QUERY] No reply for %s within %.1fs; cancelling", specimen_id, reply_timeout_s)
+                cancel = [header(), "Q|1|||||||||||A", "C|1|I|timeout^last request has been cancelled|I", "L|1|N"]
+                send_astm_session(sock, cancel, f"cancel {specimen_id}")
+            terminator = next((r.split("|") for r in reply or [] if r.startswith("L|")), [])
+            results.append({
+                "specimen_id": specimen_id,
+                "reply": reply,
+                "orders": [r for r in reply or [] if r.startswith("O|")],
+                "no_orders": terminator[2:3] == ["I"],
+            })
+    except (socket.timeout, OSError) as e:
+        logger.error("[HOST-QUERY] Host query to %s:%s failed: %s", host, port, e)
+        return results, f"host query to {host}:{port} failed: {e}"
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    return results, None
 
 
 def push_astm_tcp(host: str, port: int, astm_message: str, timeout: int = 30,

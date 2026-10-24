@@ -174,6 +174,27 @@ curl -X POST http://localhost:8081/simulate/fixture/genexpert_astm/hivvl/quantif
   }'
 ```
 
+## Send Host Queries As A GeneXpert
+
+A GeneXpert in Host Query mode keeps one connection to the LIS, sends a query
+session per specimen (`Q|1|^<specimen>||||||||||O@N`) and waits on that
+connection for the LIS's reply: its orders, or `L|1|I` for none (Cepheid
+301-2002 Rev. E, 6.3.2). `/simulate/host-query/{analyzer}` does the same and
+returns each reply. A query with no reply within `reply_timeout_seconds`
+(default 60, as on the instrument) is cancelled as the instrument does
+(`Q|1|||||||||||A`) and its `reply` is `null`. `sender_id` is the System Name
+in H.5 (default `GeneXpert`); `source_ip` works as for the other routes.
+
+```bash
+curl -X POST http://localhost:8081/simulate/host-query/genexpert_astm \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "destination": "tcp://127.0.0.1:12001",
+    "specimen_ids": ["LAB-2026-00001"],
+    "sender_id": "GX-LAB-A"
+  }'
+```
+
 ## Fix The Instrument's Test Times
 
 A real instrument reports when it ran a test, often long before the result

@@ -212,60 +212,6 @@ def check_typical_communication_pathway(host, port):
         return False
 
 
-def check_qc_segment(host, port):
-    """Test 3: QC (Quality Control) Segment Communication."""
-    print_step(3, "QC Segment Communication")
-    print("\n  This test demonstrates QC result transmission using Q-segments")
-    
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(CONNECTION_TIMEOUT)
-        sock.connect((host, port))
-        print(f"\n  ✓ Connected to {host}:{port}")
-        
-        # Handshake (contention-aware)
-        if not enq_handshake(sock):
-            print(f"  ✗ Handshake failed")
-            sock.close()
-            return False
-        
-        # Send Header
-        frame_num = 1
-        header = "H|\\^&|||Beckman^AU5800^V2.1|||||||LIS2-A2|20250115060000"
-        if not send_frame(sock, frame_num, header):
-            sock.close()
-            return False
-        
-        # Send QC Records
-        print(f"\n  Sending QC Records (Q):")
-        qc_records = [
-            "Q|1|GLUCOSE^QC-CHEM-2025A^NORMAL|102.5|mg/dL|20250115060100|N",
-            "Q|2|GLUCOSE^QC-CHEM-2025A^HIGH|285.5|mg/dL|20250115060200|N",
-            "Q|3|GLUCOSE^QC-CHEM-2025A^LOW|58.2|mg/dL|20250115060300|N",
-        ]
-        
-        for qc in qc_records:
-            frame_num = (frame_num % 7) + 1  # Frame numbers wrap: 1-7, then 1
-            if not send_frame(sock, frame_num, qc):
-                sock.close()
-                return False
-        
-        # Terminator
-        frame_num = (frame_num % 7) + 1  # Frame numbers wrap: 1-7, then 1
-        if not send_frame(sock, frame_num, "L|1|N"):
-            sock.close()
-            return False
-        
-        sock.send(EOT)
-        sock.close()
-        print(f"\n  ✓ QC segments sent successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"  ✗ QC test failed: {e}")
-        return False
-
-
 def check_multiple_connections(host, port):
     """Test 4: Multiple simultaneous connections."""
     print_step(4, "Multiple Simultaneous Connections")
@@ -353,7 +299,6 @@ def main():
     results.append(("Typical Pathway", check_typical_communication_pathway(args.host, args.port)))
     time.sleep(0.5)
     
-    results.append(("QC Segments", check_qc_segment(args.host, args.port)))
     time.sleep(0.5)
     
     results.append(("Multiple Connections", check_multiple_connections(args.host, args.port)))

@@ -67,6 +67,27 @@ def _records_of(message):
         yield test_id[3], sub, data[0].strip(), data[1].strip()
 
 
+def _order_fields(message):
+    """The O record's fields, keyed the way the profile names them (O.12 is index 11)."""
+    order = next(line for line in message.split("\n") if line.startswith("O|")).split("|")
+    return {f"O.{index + 1}": value for index, value in enumerate(order)}
+
+
+def _matches_a_control_rule(profile, message, specimen_id):
+    fields = _order_fields(message)
+    for rule in profile["controlResultRecognition"]["rules"].values():
+        kind, operand = rule["ruleType"], rule["operand"].lower()
+        if kind == "FIELD_EQUALS" and fields.get(rule["targetField"], "").lower() == operand:
+            return True
+        if kind == "FIELD_CONTAINS" and operand in fields.get(rule["targetField"], "").lower():
+            return True
+        if kind == "SPECIMEN_ID_PREFIX" and specimen_id.lower().startswith(operand):
+            return True
+        if kind not in ("FIELD_EQUALS", "FIELD_CONTAINS", "SPECIMEN_ID_PREFIX"):
+            raise AssertionError(f"rule type {kind} is not evaluated by this test")
+    return False
+
+
 FILE_TEMPLATES = ("quantstudio7", "quantstudio5", "hain_fluorocycler")
 
 
@@ -103,6 +124,18 @@ def _is_control(rules, sample_name, qc_task):
         if kind not in ("FIELD_EQUALS", "SPECIMEN_ID_PATTERN", "SPECIMEN_ID_PREFIX"):
             raise AssertionError(f"rule type {kind} is not evaluated by this test")
     return False
+
+
+def test_control_outcomes_match_the_profiles_control_rules_and_patient_outcomes_do_not():
+    profile = _profile()
+    controls = 0
+    for assay, outcomes in fixture_messages.list_fixtures(FAMILY).items():
+        for outcome in outcomes:
+            message = fixture_messages.render(FAMILY, assay, outcome, sample_id="S-1")
+            matched = _matches_a_control_rule(profile, message, "S-1")
+            assert matched == outcome.startswith("control-"), f"{assay}/{outcome}"
+            controls += matched
+    assert controls > 0
 
 
 @pytest.mark.parametrize("template_name", FILE_TEMPLATES)

@@ -124,6 +124,30 @@ code to the code this instrument sends for it (`{instrument_code:HIVVL}` in a fi
 record and value in a fixture is declared by the profile, and every declared one is in a fixture.
 Assays today: `hivvl`, `cov-flu-rsv-plus`, `cov-flu-plus`, `cov-plus`.
 
+### Control runs
+
+Cepheid marks a QC specimen only by action code `Q` in O record field 12 (LIS Interface Protocol
+Specification 301-2002 Rev E, section 6.3.4.1.4). Nothing in the message carries a control lot or
+level, so the control's `sample_id` is what identifies it to OpenELIS. No Cepheid document prints a
+control run, so each `control-*` outcome is one of the documented patient fixtures with only two
+changes: O.12 is `Q` and the P record is empty.
+
+| Outcome                                   | Built from       | Use                                                     |
+| ----------------------------------------- | ---------------- | ------------------------------------------------------- |
+| `hivvl/control-quantified`                | `quantified`     | a passing quantitative control (1009.64 copies/mL)      |
+| `hivvl/control-above-1e7`                 | `above-1e7`      | a failing control: above 10^7 copies/mL, far off that target |
+| `hivvl/control-invalid`, `control-error`  | same names       | the instrument's own INVALID and ERROR on a control run |
+| `cov-flu-rsv-plus/control-all-positive`   | `all-positive`   | a passing positive control                              |
+| `cov-flu-rsv-plus/control-negative-all`   | `negative-all`   | a passing negative control                              |
+| `cov-flu-rsv-plus/control-flu-a-positive` | `flu-a-positive` | a failing positive control: every target but one negative |
+| `cov-flu-rsv-plus/control-invalid`, `control-error` | same names | INVALID and ERROR on a control run                   |
+
+A lab reruns the same control under the same specimen ID. A replayed fixture keeps Cepheid's header
+time (H.14), and the Bridge takes an identical message for a retransmission, so pass
+`"message_time": "YYYYMMDDHHMMSS"` to send a rerun as a new message.
+`test_fixtures_match_profile.py` also checks that every control outcome matches the profile's
+`controlResultRecognition` rules and that no patient outcome does.
+
 For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds messages built on the two Mindray
 prints in the BC-5380 Operator's Manual, appendix C.3.3. `analysis-result` is that CBC as a routine
 run sends it: the automated count with its alarms, histograms and scattergram. `manual-count` is the

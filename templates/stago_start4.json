@@ -75,42 +75,5 @@
     "testSample": {
         "id": "62",
         "type": "COAG^Coagulation Panel"
-    },
-    "qc_controls": [
-        {
-            "field_code": "PT",
-            "lot_number": "LOT-PT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 12.5
-        },
-        {
-            "field_code": "INR",
-            "lot_number": "LOT-INR-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 1.05
-        },
-        {
-            "field_code": "APTT",
-            "lot_number": "LOT-APTT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 28.5
-        },
-        {
-            "field_code": "FIB",
-            "lot_number": "LOT-FIB-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 3.2
-        },
-        {
-            "field_code": "TT",
-            "lot_number": "LOT-TT-N",
-            "level": "N",
-            "level_name": "Normal",
-            "target": 15.2
-        }
-    ]
+    }
 }

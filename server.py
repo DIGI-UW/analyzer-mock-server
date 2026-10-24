@@ -1109,20 +1109,6 @@ def main():
         help='Template name for ASTM push or single-listener mode.'
     )
     parser.add_argument(
-        '--qc',
-        action='store_true',
-        help='QC push mode: generate ASTM QC message (H+O+R+Q+L) from template qc_controls. Requires --template.'
-    )
-    parser.add_argument(
-        '--qc-deviation',
-        type=float,
-        default=None,
-        metavar='SD',
-        help='Shift QC results by exactly N standard deviations from target. '
-             'Omit for realistic random scatter. '
-             'Examples: 0=exact target, 2.5=warning (1₂ₛ), 3.5=rejection (1₃ₛ), -3.5=below target'
-    )
-    parser.add_argument(
         '--source-ip',
         default=None,
         metavar='IP',
@@ -1134,7 +1120,7 @@ def main():
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Print the generated ASTM message without sending it. Works with --push, --qc, --template.'
+        help='Print the generated ASTM message without sending it. Works with --push and --template.'
     )
     parser.add_argument(
         '--push-count', '-c',
@@ -1310,10 +1296,8 @@ def main():
         print("=" * 60)
         print("  ASTM Mock Server - Push Mode")
         print("=" * 60)
-        mode_label = "QC" if args.qc else "Patient"
         print(f"  Bridge destination: {args.push}")
         print(f"  Template:     {args.template or '(missing)'}")
-        print(f"  Mode:         {mode_label}")
         print(f"  Message Count: {args.push_count}")
         print(f"  Interval: {args.push_interval}s")
         print("=" * 60)
@@ -1330,12 +1314,10 @@ def main():
         if push_template.get('protocol', {}).get('type') != 'ASTM':
             logger.error(f"Template '{args.template}' is not an ASTM template")
             return 1
-        logger.info(f"Using template: {push_template['analyzer']['name']} [{mode_label}]")
+        logger.info(f"Using template: {push_template['analyzer']['name']}")
 
         def generate_push_message() -> Optional[str]:
             handler = ASTMHandler()
-            if args.qc:
-                return handler.generate_qc(push_template, deviation=args.qc_deviation)
             return handler.generate(push_template)
 
         # Dry run: print message and exit

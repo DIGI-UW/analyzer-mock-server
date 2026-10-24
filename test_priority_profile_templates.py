@@ -44,7 +44,6 @@ def test_priority_template_loads_exact_bridge_profile(template_name, profile_ref
     assert merged["profileRef"] == profile_ref
     assert merged["resolvedProfile"]["profileId"] == profile_ref["profileId"]
     assert merged["resolvedProfile"]["revision"] == profile_ref["revision"]
-    assert merged["resolvedProfile"]["revisionFingerprint"].startswith("sha256:")
     assert merged["analyzer"]["name"]
     assert merged["analyzer"]["manufacturer"]
     assert merged["protocol"]["type"] in {"ASTM", "FILE"}

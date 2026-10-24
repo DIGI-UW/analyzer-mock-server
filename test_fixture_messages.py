@@ -69,7 +69,8 @@ class TestFixtureMessages(unittest.TestCase):
         self.assertEqual(message.split("\n")[1:], resent.split("\n")[1:])
 
     def test_hl7_fixtures_are_listed_and_filled_like_astm_ones(self):
-        self.assertEqual({"cbc": ["analysis-result", "xr-qc"]}, fixture_messages.list_fixtures("mindray-bc5380"))
+        self.assertEqual({"cbc": ["analysis-result", "manual-count", "xr-qc"]},
+                         fixture_messages.list_fixtures("mindray-bc5380"))
 
         message = fixture_messages.render(
             "mindray-bc5380", "cbc", "analysis-result", sample_id="ACC-5", patient_id="MRN-1",
@@ -78,9 +79,24 @@ class TestFixtureMessages(unittest.TestCase):
         segments = message.strip().split("\n")
         self.assertEqual("MRN-1^^^^MR", segments[1].split("|")[3])
         self.assertEqual("Roe^Jane", segments[1].split("|")[5])
-        self.assertEqual(["ACC-5", "ACC-5"],
-                         [s.split("|")[3] for s in segments if s.startswith("OBR|")])
+        self.assertEqual(["ACC-5"], [s.split("|")[3] for s in segments if s.startswith("OBR|")])
         self.assertNotIn("{", message)
+
+    def test_the_routine_cbc_is_the_automated_count_and_the_manual_count_adds_a_microscope_exam(self):
+        routine = fixture_messages.render("mindray-bc5380", "cbc", "analysis-result", sample_id="ACC-6")
+        manual = fixture_messages.render("mindray-bc5380", "cbc", "manual-count", sample_id="ACC-6")
+
+        def requests(message):
+            return [s.split("|")[4].split("^")[1] for s in message.split("\n") if s.startswith("OBR|")]
+
+        self.assertEqual(["Automated Count"], requests(routine))
+        self.assertEqual(["Automated Count", "Manual Count"], requests(manual))
+        self.assertTrue(manual.startswith(routine))
+        white_cells = {"764-1", "769-0", "714-6", "707-0", "737-7", "744-3", "747-6", "783-1", "749-2", "740-1",
+                       "33831-9", "6746-2", "29261-5", "33840-0", "13599-6", "11000", "11001"}
+        counted = sum(float(s.split("|")[5]) for s in manual[len(routine):].split("\n")
+                      if s.startswith("OBX|") and s.split("|")[3].split("^")[0] in white_cells)
+        self.assertEqual(100.0, counted)
 
     def test_an_unknown_fixture_is_refused(self):
         with self.assertRaises(fixture_messages.FixtureNotFound):

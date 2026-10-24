@@ -240,10 +240,12 @@ def test_every_record_is_declared_and_every_declared_value_is_shown():
     assert sorted(values - shown_values) == []
 
 
-def test_every_test_the_bc5380_profile_declares_is_in_mindrays_result_message():
+def test_every_test_the_bc5380_profile_declares_is_in_one_of_mindrays_result_messages():
     with open(os.path.join(os.environ["ANALYZER_BRIDGE_PROFILES_DIR"], "mindray-bc5380.json"),
               encoding="utf-8") as handle:
         declared = {test["test_code"] for test in json.load(handle)["default_test_mappings"]}
-    message = fixture_messages.render("mindray-bc5380", "cbc", "analysis-result", sample_id="S")
-    sent = {line.split("|")[3].split("^")[0] for line in message.splitlines() if line.startswith("OBX|")}
+    sent = set()
+    for outcome in ("analysis-result", "manual-count"):
+        message = fixture_messages.render("mindray-bc5380", "cbc", outcome, sample_id="S")
+        sent |= {line.split("|")[3].split("^")[0] for line in message.splitlines() if line.startswith("OBX|")}
     assert sorted(declared - sent) == []

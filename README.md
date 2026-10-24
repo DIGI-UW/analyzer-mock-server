@@ -148,9 +148,12 @@ time (H.14), and the Bridge takes an identical message for a retransmission, so 
 `test_fixtures_match_profile.py` also checks that every control outcome matches the profile's
 `controlResultRecognition` rules and that no patient outcome does.
 
-For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds the two HL7 messages Mindray prints
-in the BC-5380 Operator's Manual, appendix C.3.3: `analysis-result` (a CBC with its histograms and
-a manual count) and `xr-qc` (an X-R QC run). `{sample_id}` fills OBR-3, `{patient_id}` and
+For the Mindray BC-5380, `fixtures/mindray-bc5380/cbc/` holds messages built on the two Mindray
+prints in the BC-5380 Operator's Manual, appendix C.3.3. `analysis-result` is that CBC as a routine
+run sends it: the automated count with its alarms, histograms and scattergram. `manual-count` is the
+same CBC with the microscope exam a technician enters on the analyzer (OBR-4 `00002` Manual Count),
+counted to 100 white cells; Mindray's print sends that exam with every percentage at 0.0.
+`xr-qc` is the X-R QC run as printed. `{sample_id}` fills OBR-3, `{patient_id}` and
 `{patient_name}` PID-3 and PID-5, and `sender_id` replaces MSH-3. The template
 `mindray_bc5380_hl7` replays them over MLLP:
 
@@ -191,6 +194,27 @@ curl -X POST http://localhost:8081/simulate/fixture/genexpert_astm/hivvl/quantif
   -d '{
     "destination": "tcp://127.0.0.1:12001",
     "sample_id": "LAB-2026-00001",
+    "sender_id": "GX-LAB-A"
+  }'
+```
+
+## Send Host Queries As A GeneXpert
+
+A GeneXpert in Host Query mode keeps one connection to the LIS, sends a query
+session per specimen (`Q|1|^<specimen>||||||||||O@N`) and waits on that
+connection for the LIS's reply: its orders, or `L|1|I` for none (Cepheid
+301-2002 Rev. E, 6.3.2). `/simulate/host-query/{analyzer}` does the same and
+returns each reply. A query with no reply within `reply_timeout_seconds`
+(default 60, as on the instrument) is cancelled as the instrument does
+(`Q|1|||||||||||A`) and its `reply` is `null`. `sender_id` is the System Name
+in H.5 (default `GeneXpert`); `source_ip` works as for the other routes.
+
+```bash
+curl -X POST http://localhost:8081/simulate/host-query/genexpert_astm \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "destination": "tcp://127.0.0.1:12001",
+    "specimen_ids": ["LAB-2026-00001"],
     "sender_id": "GX-LAB-A"
   }'
 ```
